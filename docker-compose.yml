@@ -1,0 +1,121 @@
+
+# SCAI Economic Data Assistant — app + database.
+#
+# vLLM and TEI are NOT defined here. They are already running on the VM in their
+# own compose project, on the `runtimes` network; this file joins that network as
+# an external one so `vllm` and `tei` resolve by hostname. Defining them again
+# here would try to start a second copy and fight over the GPU.
+#
+#   docker compose up -d --build      # postgres + api
+#   docker compose run --rm etl       # load the CSVs (one-shot, see below)
+#
+# `etl` is under a profile so it never starts as part of `up` — it TRUNCATEs
+# every table before loading, which is not something you want happening on a
+# routine restart of the stack.
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-scai_indicators}
+      POSTGRES_USER: ${POSTGRES_USER:-scai_rw}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      SCAI_RO_PASSWORD: ${SCAI_RO_PASSWORD:?set SCAI_RO_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # These run ONCE, on first init of an empty pgdata volume, in filename
+      # order. Editing them later changes nothing until the volume is dropped.
+      - ./etl/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./docker/initdb/02-roles.sh:/docker-entrypoint-initdb.d/02-roles.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-scai_rw} -d ${POSTGRES_DB:-scai_indicators}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+    # Not published to the VM host on purpose. Uncomment only if you need to
+    # point a local client at it, and understand you are exposing the data.
+    # ports:
+    #   - "15432:5432"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: scai-chatbot:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # --- Chat model: the VM's vLLM. The served name is "qwen72b" even though
+      # the weights are Qwen2.5-32B-Instruct. vLLM 404s on a name mismatch, so
+      # this string must stay exactly as-is and must not be "corrected".
+      LLM_BASE_URL: http://vllm:8000/v1
+      LLM_MODEL_NAME: qwen72b
+      # Single-model server: there is no separate small router model, so the
+      # router/intent/verifier agents point at the same served name. Leaving the
+      # Qwen2.5-7B-Instruct default here would 404 every intent classification.
+      ROUTER_MODEL_NAME: qwen72b
+      LLM_API_KEY: not-needed-for-vllm
+      # max_model_len is 16384 for prompt + completion combined. 1500 leaves
+      # ~14.8k for the prompt, which the composer and the resolver tie-break
+      # candidate list both have to fit inside.
+      LLM_MAX_TOKENS: "1500"
+
+      # --- Embeddings: TEI on CPU. Port 80 inside the network (17800 is only
+      # the host-side publish). TEI serves an OpenAI-compatible /v1/embeddings,
+      # which is what app/resolvers/embeddings.py's OpenAI client calls.
+      EMBEDDING_BASE_URL: http://tei:80/v1
+      EMBEDDING_MODEL_NAME: BAAI/bge-m3
+
+      # --- Database: read-only role. Never point this at ${POSTGRES_USER}.
+      POSTGRES_DSN: postgresql://scai_ro:${SCAI_RO_PASSWORD:?set SCAI_RO_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-scai_indicators}
+
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${API_PORT:-18000}:8000"
+    networks:
+      - internal   # postgres
+      - runtimes   # vllm + tei
+
+  etl:
+    image: scai-chatbot:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: ["etl"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Write-capable role — the loader creates nothing but it TRUNCATEs and
+      # INSERTs, so scai_ro would fail on the first statement.
+      ETL_DSN: postgresql://${POSTGRES_USER:-scai_rw}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-scai_indicators}
+      CSV_SRC: /srv/data
+    volumes:
+      - ./data:/srv/data:ro
+    command: ["run-etl"]
+    networks:
+      - internal
+
+volumes:
+  pgdata:
+  # Note: no volume for embeddings. app/resolvers/embeddings.py caches vectors
+  # in a process-local dict, so every api restart re-embeds the catalog on the
+  # first request. See the README note on cold start.
+
+networks:
+  internal:
+  # The network the model stack already runs on. Compose namespaces networks by
+  # project, so the real name is usually "<project>_runtimes" (e.g.
+  # "models_runtimes") rather than a bare "runtimes" — the bare name only applies
+  # if it was created by hand with `docker network create`. Find yours with
+  #     docker network ls
+  # and set RUNTIMES_NETWORK in .env to match exactly.
+  runtimes:
+    external: true
+    name: ${RUNTIMES_NETWORK:-runtimes}

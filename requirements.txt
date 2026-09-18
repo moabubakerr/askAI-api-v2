@@ -1,0 +1,29 @@
+# --- API layer ---
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+pydantic-settings==2.5.2
+
+# --- Orchestration ---
+langgraph==0.2.34
+langchain-core==0.3.9
+
+# --- LLM client (works against vLLM's OpenAI-compatible endpoint) ---
+openai==1.51.0
+# Required: openai 1.51.0 passes `proxies=` to httpx.Client, removed in httpx
+# 0.28. Without this pin a fresh install cannot even import the app.
+httpx==0.27.2
+
+# --- Embeddings (semantic indicator-name matching, separate from the chat LLM) ---
+# needs a running embedding-model server; the `openai` client above talks to it too
+sqlalchemy==2.0.35
+psycopg2-binary==2.9.9
+
+# --- ETL (loading the SCAI CSVs into Postgres) ---
+pandas==2.2.3
+
+# --- Vector store (for unstructured docs later, e.g. SCAI reports/PDFs) ---
+chromadb==0.5.5
+
+# --- Serving the LLM itself (run as a separate service) ---
+# vllm==0.6.2   # install on the GPU host, not necessarily this app's venv

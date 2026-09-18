@@ -1,0 +1,14 @@
+# The CSVs are mounted into the etl container at run time, never baked into the
+# image — keeping them out means the image carries no SCAI data and a re-load
+# never needs a rebuild.
+data/
+
+.env
+*.md
+.git/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/

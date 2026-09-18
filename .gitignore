@@ -1,0 +1,26 @@
+# SCAI source data — deliberately NOT in this repository.
+# These are Qatari government economic exports plus the internal QC feedback
+# workbook; this repo is public. The CSVs reach the VM by rsync (README §4a
+# step 0) and are bind-mounted into the etl container at load time, so nothing
+# here depends on them being committed.
+data/
+
+# Real credentials. Only .env.example, which holds placeholders, is tracked.
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
