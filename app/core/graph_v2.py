@@ -18,6 +18,7 @@ Conversation state (for follow-ups, fixing F-030) is a small dict the caller
 persists per session and passes back in as `session_state`; this function
 returns an updated one.
 """
+import re
 from datetime import date
 from typing import TypedDict, Optional
 
@@ -26,7 +27,8 @@ from app.core.conversation import carry_forward
 from app.core.messages import msg, detect_language, is_greeting
 from app.resolvers.indicator_resolver import resolve_indicator, has_usable_definition
 from app.resolvers.country_resolver import resolve_countries
-from app.resolvers.period_resolver import parse_period_expression, parse_explicit_frequency, choose_granularity
+from app.resolvers.period_resolver import (parse_period_expression, parse_explicit_frequency,
+                                            choose_granularity, parse_period_pair)
 from app.db import retriever
 from app.compute import engine as compute
 from app.compute.verifier import verify_numbers, render_template_fallback
@@ -160,14 +162,23 @@ def handle_message(user_message: str, conversation_context: str = "",
         return _finish(payload, language, session_state, [])
 
     if ctype == "count_list":
-        indicator_type_hint = intent.get("indicator_phrase") or ""
-        rows = retriever.count_indicators_by_type(indicator_type_hint)
-        citations = [Citation(indicator=r.get("name_en"), data_source=None, table="indicators",
-                               record_id=r.get("record_id")) for r in rows]
-        if not rows:
-            rows = retriever.get_sector_indicators(indicator_type_hint)
+        indicator_type_hint = intent.get("indicator_phrase") or user_message or ""
+        # The hint is a fragment of a question ("indicators in diversification
+        # target"), and it used to be used as a whole-string ILIKE pattern, so
+        # it matched nothing — the catalog value is "Economic Diversification
+        # Targets". Match on shared words against the real type and sector
+        # names instead.
+        kind, scope = _match_catalog_scope(indicator_type_hint)
+        if kind == "sector":
+            rows = retriever.get_sector_indicators(scope)
             citations = [Citation(indicator=r.get("name_en"), data_source=None, table="sectors",
                                    record_id=r.get("sector_record_id")) for r in rows]
+        elif kind == "type":
+            rows = retriever.count_indicators_by_type(scope)
+            citations = [Citation(indicator=r.get("name_en"), data_source=None, table="indicators",
+                                   record_id=r.get("record_id")) for r in rows]
+        else:
+            rows, citations = [], []
         payload = {"ok": True, "facts": {"count": len(rows), "names": [r.get("name_en") for r in rows]}} \
             if rows else {"ok": False, "message": msg("no_indicators_matching", language,
                                                         query=indicator_type_hint)}
@@ -189,10 +200,27 @@ def handle_message(user_message: str, conversation_context: str = "",
 
     # A definition question is answered from catalog text, so a stub with no
     # data points is still a legitimate match. Every other path needs figures.
+    # Answering the previous turn's "which one did you mean?" by naming a
+    # candidate is not a follow-up that inherits the old phrase — it IS the
+    # indicator. Without this, clicking a chip re-sent the ambiguous phrase,
+    # which carried forward and produced the identical ambiguity prompt again,
+    # leaving the user with no way out of the loop.
+    offered = session_state.get("last_ambiguous_candidates") or []
+    if offered:
+        typed = (user_message or "").strip().lower()
+        chosen = next((c for c in offered if c.strip().lower() == typed), None)
+        if chosen:
+            indicator_phrase = chosen
+        session_state.pop("last_ambiguous_candidates", None)
+
     resolution = resolve_indicator(indicator_phrase or "", require_data=(ctype != "definition"),
                                     language=language)
     if resolution.status != "resolved" and resolution.status != "inactive":
         payload = {"ok": False, "message": resolution.message}
+        if resolution.status == "ambiguous" and resolution.candidates:
+            names = [c.name_en.strip() for c in resolution.candidates]
+            payload["facts"] = {"candidates": names}
+            session_state["last_ambiguous_candidates"] = names
         return _finish(payload, language, session_state, [])
 
     match = resolution.match
@@ -205,6 +233,60 @@ def handle_message(user_message: str, conversation_context: str = "",
     # never by falling through to a latest-value lookup. Only 261 of 644 details
     # carry a real definition, so a missing one is reported honestly rather than
     # filled in.
+    # F19 ("ما هو أخر تحليل للتضخم") and F-028: SCAI's own analyst commentary on
+    # an indicator, returned VERBATIM. Previously this fell through to a value
+    # lookup and answered with a number, which is not what "the latest analysis"
+    # asks for. It also catches "why did X fall" — the user wants the written
+    # explanation, not a definition and not a figure.
+    if ctype == "analysis_lookup":
+        rows = retriever.get_series(match.indicator_detail_id,
+                                     match.published_detail_id if match.is_published else None,
+                                     choose_granularity(parse_explicit_frequency(
+                                         intent.get("explicit_frequency")),
+                                         retriever.get_available_granularities(
+                                             match.published_detail_id if match.is_published else None,
+                                             match.indicator_detail_id)) or "yearly")
+        with_actuals = [r for r in rows if r.get("actual") is not None]
+        recent = list(reversed(with_actuals[-6:]))
+        found = retriever.get_analysis_for_data_points([r["record_id"] for r in recent])
+        entries = []
+        for row in recent:
+            analysis = found.get(row["record_id"])
+            if not analysis:
+                continue
+            entry = {"period_label": row["period_label"], "value": row.get("actual")}
+            for field, key in (("summary_en", "summary"), ("detailed_analysis_en", "detailed"),
+                                ("npc_analysis_en", "npc_analysis"), ("benchmark_en", "benchmark")):
+                value = (analysis.get(field) or "").strip()
+                if value and value != "-":
+                    entry[key] = value
+            if len(entry) > 2:
+                entries.append(entry)
+            if entries:
+                break   # the LATEST analysis, not a history of them
+
+        if not entries:
+            payload = {"ok": False, "message": msg("no_analysis", language,
+                                                    indicator=match.name_en.strip())}
+            return _finish(payload, language, session_state, [])
+
+        citations = [Citation(indicator=match.name_en.strip(), data_source=match.data_source_en,
+                               table="indicator_analysis", record_id=None,
+                               period_label=entries[0]["period_label"], country="Qatar")]
+        payload = {"ok": True, "facts": {"indicator": match.name_en.strip(),
+                                          "unit": match.unit_en, "analysis": entries}}
+        # Verbatim, and skip the Composer entirely: this is the Council's own
+        # wording, and a model asked to "phrase" it would paraphrase it.
+        body = "\n\n".join(
+            f"{match.name_en.strip()} — {e['period_label']}"
+            + (f" ({e['value']} {match.unit_en or ''})".rstrip() if e.get("value") is not None else "")
+            + "\n" + "\n\n".join(e[k] for k in ("summary", "detailed", "npc_analysis", "benchmark")
+                                   if e.get(k))
+            for e in entries
+        )
+        return _finish(payload, language, session_state, citations,
+                        skip_compose=True, canned=body)
+
     if ctype == "definition":
         # The top match may be an empty catalog stub that shadows the real
         # indicator: "GDP" (no data, definition "-") outranks "Real GDP" (70
@@ -468,9 +550,24 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         return _wrap(result, unit, indicator_name=indicator_name), citations_for_rows(used, indicator_name, data_source_en)
 
     if ctype == "period_comparison":
-        if len(rows) < 2:
-            return {"ok": False, "message": "Could not find two distinct periods to compare."}, []
-        result = compute.period_to_period_change(rows, rows[0]["period_label"], rows[-1]["period_label"])
+        # Use the two periods the user actually named. Previously this took the
+        # first and last rows of whatever had been retrieved, but the retrieval
+        # had already been narrowed to ONE period by the single-quarter branch
+        # of the period parser — so "between Q1 2025 and Q4 2025" returned one
+        # row and the answer was "could not find two distinct periods".
+        pair = parse_period_pair(period.raw)
+        if pair:
+            label_a, label_b = pair
+            # Re-fetch unfiltered: both named periods have to be present, and
+            # the earlier query was scoped to just one of them.
+            rows = retriever.get_series(match.indicator_detail_id, published_detail_id,
+                                         granularity, country_en=single_country)
+        elif len(rows) >= 2:
+            label_a, label_b = rows[0]["period_label"], rows[-1]["period_label"]
+        else:
+            return {"ok": False, "message": msg("need_two_periods", language)}, []
+
+        result = compute.period_to_period_change(rows, label_a, label_b)
         used = []
         if result.ok:
             used = [r for r in (_find_row_by_period(rows, result.facts.get("period_a")),
@@ -592,6 +689,44 @@ def _article_answer(user_message: str, intent: dict, language: str, session_stat
     session_state["last_article_topic"] = topic
     return _finish(payload, language, session_state, unique,
                     skip_compose=True, canned=answer)
+
+
+_CATALOG_STOPWORDS = {
+    "how", "many", "much", "list", "give", "me", "all", "the", "a", "an", "in", "of",
+    "for", "show", "what", "are", "there", "is", "please", "and", "names", "name",
+    "indicator", "indicators", "under", "within", "tell", "about", "which",
+}
+
+
+def _match_catalog_scope(phrase: str):
+    """Maps a question fragment onto a real indicator type or sector name.
+
+    Returns ("type"|"sector", exact_name) or (None, None). Scored on the share
+    of the question's own words that the candidate contains, so "education
+    sector" prefers the sector "Education Sector" (both words) over the type
+    "Sector Indicator" (one word), while a bare "sectors" prefers the type,
+    which is the broader grouping.
+    """
+    words = {w.rstrip("s") for w in re.findall(r"[a-z]+", (phrase or "").lower())
+             if w not in _CATALOG_STOPWORDS and len(w) > 2}
+    if not words:
+        return None, None
+
+    def score(candidate: str) -> float:
+        cand = {w.rstrip("s") for w in re.findall(r"[a-z]+", candidate.lower())}
+        return len(words & cand) / len(words)
+
+    best_type = max(((t, score(t)) for t in retriever.list_indicator_types()),
+                    key=lambda x: x[1], default=(None, 0.0))
+    best_sector = max(((s, score(s)) for s in retriever.list_sector_names()),
+                      key=lambda x: x[1], default=(None, 0.0))
+    # Types win ties: a generic word like "sectors" means the grouping, not one
+    # particular sector that happens to contain the word.
+    if best_type[1] >= best_sector[1] and best_type[1] > 0:
+        return "type", best_type[0]
+    if best_sector[1] > 0:
+        return "sector", best_sector[0]
+    return None, None
 
 
 def _latest_common_period(series_by_country: dict[str, list[dict]]) -> Optional[str]:

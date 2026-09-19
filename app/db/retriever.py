@@ -255,6 +255,24 @@ def get_sector_indicators(sector_name_query: str) -> list[dict]:
     return [dict(r._mapping) for r in rows]
 
 
+def list_indicator_types() -> list[str]:
+    """The eight indicator_type_en values, for matching a question against."""
+    with engine.connect() as conn:
+        rows = conn.execute(text(
+            "SELECT DISTINCT indicator_type_en FROM indicators "
+            "WHERE indicator_type_en IS NOT NULL AND indicator_type_en <> '' ORDER BY 1"
+        )).fetchall()
+    return [r[0] for r in rows]
+
+
+def list_sector_names() -> list[str]:
+    with engine.connect() as conn:
+        rows = conn.execute(text(
+            "SELECT DISTINCT name_en FROM sectors WHERE is_active AND name_en IS NOT NULL ORDER BY 1"
+        )).fetchall()
+    return [r[0] for r in rows]
+
+
 def count_indicators_by_type(indicator_type_en: str) -> list[dict]:
     """Deterministic count+list — fixes F-032 ('how many indicators in
     diversification target') where the old system gave a 'random' answer

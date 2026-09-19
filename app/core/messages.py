@@ -269,6 +269,18 @@ _MESSAGES = {
         "ar": ("لا توجد بيانات معتمدة لـ {country} بخصوص \"{indicator}\". "
                 "ولن أعرض رقم قطر بدلاً منه."),
     },
+    "need_two_periods": {
+        "en": ("I need two specific periods to compare — for example \"between Q1 2025 and "
+                "Q4 2025\" or \"2023 versus 2024\". Both have to be the same kind of period."),
+        "ar": ("أحتاج إلى فترتين محددتين للمقارنة — مثل \"بين الربع الأول 2025 والربع الرابع "
+                "2025\" أو \"2023 مقابل 2024\". ويجب أن تكونا من النوع نفسه."),
+    },
+    "no_analysis": {
+        "en": ("SCAI hasn't published written analysis for \"{indicator}\" in the approved "
+                "data. I can give you its values or trend instead."),
+        "ar": ("لم ينشر المجلس تحليلاً مكتوباً لـ \"{indicator}\" ضمن البيانات المعتمدة. "
+                "يمكنني عرض قيمه أو اتجاهه بدلاً من ذلك."),
+    },
     "no_overview": {
         "en": "No headline indicators were available to build an overview.",
         "ar": "لا توجد مؤشرات رئيسية متاحة لإعداد نظرة عامة.",

@@ -50,6 +50,56 @@ def parse_explicit_frequency(explicit_frequency: Optional[str]) -> Optional[str]
     return None
 
 
+# Every way a single period is written in these questions, in canonical
+# period_label form: 'YYYY', 'YYYY-Q#', 'YYYY-MM'.
+_PERIOD_TOKEN = re.compile(
+    r"(?P<q1>\d{4})[\s-]*q(?P<q1n>[1-4])"          # 2025-Q1 / 2025 q1
+    r"|q(?P<q2n>[1-4])[\s-]*(?P<q2>\d{4})"          # Q1 2025 / Q1-2025
+    r"|(?P<m1>\d{4})-(?P<m1n>0[1-9]|1[0-2])"         # 2025-05
+    r"|(?P<mname>january|february|march|april|may|june|july|august|september|"
+    r"october|november|december)\s+(?P<my>\d{4})"    # May 2025
+    r"|(?P<y>\d{4})",                                 # 2025
+    re.IGNORECASE,
+)
+
+
+def parse_period_pair(expr: Optional[str]):
+    """Two period labels from one expression, for an explicit A-vs-B comparison.
+
+    parse_period_expression() only ever describes ONE period, so "between Q1
+    2025 and Q4 2025" fell through its range branch (which needs two bare
+    years) into the single-quarter branch, retrieved Q1 alone, and answered
+    "Could not find two distinct periods to compare" — F-011's exact question.
+
+    Returns (label_a, label_b) in the order written, in period_label form, or
+    None when the expression does not name two distinct periods.
+    """
+    if not expr:
+        return None
+    found = []
+    for m in _PERIOD_TOKEN.finditer(expr.lower()):
+        if m.group("q1"):
+            label = f"{m.group('q1')}-Q{m.group('q1n')}"
+        elif m.group("q2"):
+            label = f"{m.group('q2')}-Q{m.group('q2n')}"
+        elif m.group("m1"):
+            label = f"{m.group('m1')}-{m.group('m1n')}"
+        elif m.group("mname"):
+            label = f"{m.group('my')}-{_MONTH_NAMES[m.group('mname')]:02d}"
+        else:
+            label = m.group("y")
+        if label not in found:
+            found.append(label)
+    if len(found) < 2:
+        return None
+    # Mixed granularities ("2024 and Q1 2025") are not a like-for-like
+    # comparison, so they are declined rather than guessed at.
+    kinds = {("q" if "-Q" in f else "m" if "-" in f else "y") for f in found[:2]}
+    if len(kinds) > 1:
+        return None
+    return found[0], found[1]
+
+
 def _end_of_month(year: int, month: int) -> date:
     """Last day of the given month. Needed because a single month or quarter
     previously set only start_date, and start_date is an inclusive lower bound:

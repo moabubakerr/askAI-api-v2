@@ -24,6 +24,7 @@ COMPUTATION_TYPES = [
     "difference",         # "what is the difference between the highest and lowest X"
     "growth_rate",        # "what is the growth rate of X between A and B" (CAGR or simple)
     "definition",         # "what is inflation?" / "what does non-hydrocarbon GDP mean?"
+    "analysis_lookup",    # "what is the latest analysis of inflation" / "ما هو أخر تحليل للتضخم"
     "article_lookup",     # "what has SCAI written about tariffs?" / "what is SCAI's view on X"
     "count_list",         # "how many indicators are in sector Y" / "list indicators in Z"
     "macro_overview",     # "what's the latest in Qatar's economy" / "how is the economy doing"
@@ -51,6 +52,13 @@ Output ONLY JSON with this exact shape:
 }}
 
 Rules:
+- Use "analysis_lookup" when the user asks for SCAI's ANALYSIS or COMMENTARY on a
+  specific INDICATOR — "what is the latest analysis of inflation", "what did the
+  Council say about the trade balance this quarter", "ما هو أخر تحليل للتضخم",
+  "summary analysis for GDP". Put the indicator in indicator_phrase.
+  Contrast: analysis_lookup is analyst commentary attached to one indicator's data
+  point; article_lookup is a published article about a theme; latest_value is the
+  number itself.
 - Use "article_lookup" when the user asks about SCAI's published WRITING, ANALYSIS,
   VIEWS or COMMENTARY on a topic, rather than for a number: "what has SCAI written
   about the trade war", "what is the Council's view on knowledge transfer", "tell me
@@ -73,6 +81,15 @@ Rules:
   "break it down by quarter", "show each year" — use "trend", NOT "growth_rate".
   growth_rate collapses the whole span into one start-to-end figure and cannot
   answer a request for what happened in between.
+- "min_max" returns ONE value: the single highest or lowest, and when it occurred.
+  "What was the highest quarterly GDP value recorded, and in which quarter?" is
+  min_max with extremum="max" — it asks for one figure, not a table. Use
+  "period_ranking" ONLY when the user explicitly wants several periods listed or
+  ranked ("list them", "rank them", "top 5", "from highest to lowest").
+- A "why" question — "why did inflation fall to 0.2%", "what caused the drop" — is
+  NEVER a definition. Use "analysis_lookup": the user wants the explanation SCAI
+  wrote, not the meaning of the word. Do not restate the premise as fact; the
+  figure quoted in the question may be wrong.
 - Use "period_ranking" when the user wants SEVERAL periods of ONE indicator listed in value
   order: "list the quarterly GDP values for 2024 and 2025 and rank them highest to lowest",
   "order the monthly inflation figures from lowest to highest". Set extremum="max" for
