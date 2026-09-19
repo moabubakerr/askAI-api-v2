@@ -16,7 +16,13 @@
 services:
 
   postgres:
-    image: postgres:16-alpine
+    # pgvector's own image: Postgres 16 with the `vector` extension available.
+    # Plain postgres:16-alpine cannot CREATE EXTENSION vector, and article
+    # search stores embeddings in a vector column.
+    # NOTE: switching image does NOT migrate an existing volume — the extension
+    # is created by schema.sql, which only runs on an empty volume. An existing
+    # deployment needs `docker compose down -v` and a full reload.
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-scai_indicators}
@@ -96,11 +102,17 @@ services:
       # INSERTs, so scai_ro would fail on the first statement.
       ETL_DSN: postgresql://${POSTGRES_USER:-scai_rw}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-scai_indicators}
       CSV_SRC: /srv/data
+      # index-articles needs the embedding server; run-etl does not.
+      EMBEDDING_BASE_URL: http://tei:80/v1
+      EMBEDDING_MODEL_NAME: BAAI/bge-m3
     volumes:
       - ./data:/srv/data:ro
     command: ["run-etl"]
     networks:
       - internal
+      # Joined for `docker compose run --rm etl index-articles`, which reaches
+      # TEI. The data load itself never touches the model network.
+      - runtimes
 
 volumes:
   pgdata:

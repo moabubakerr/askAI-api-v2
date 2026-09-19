@@ -112,6 +112,73 @@ def get_analysis(ref_data_point_id: str) -> Optional[dict]:
     return dict(row._mapping) if row else None
 
 
+def search_article_chunks(query_embedding: list[float], language: str = "en",
+                           limit: int = 6, query_text: Optional[str] = None) -> list[dict]:
+    """Passages from SCAI articles most relevant to a question.
+
+    Hybrid, not purely semantic. Embeddings handle the paraphrase case that is
+    the whole point here ("what does SCAI think about trade wars" finding an
+    article titled "Financial Stability Implications of Tariffs"), but they are
+    weak on rare exact tokens — a programme name like "Tawteen" or an acronym
+    like "ICV" carries little semantic signal, and cosine similarity will
+    happily rank a thematically-similar passage above the one that actually
+    names it. Full-text search covers exactly that case, so both run and the
+    results are merged.
+
+    Distance is returned alongside each passage. The caller needs it: a nearest
+    neighbour is always returned, however irrelevant, so "nearest" has to be
+    checked against a threshold before anything is claimed from it.
+    """
+    vector_literal = "[" + ",".join(f"{v:.6f}" for v in query_embedding) + "]"
+    results: dict[str, dict] = {}
+
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT c.chunk_id, c.article_id, c.chunk_index, c.content, c.language,
+                   a.title_en, a.title_ar, a.published_date, a.article_date,
+                   c.embedding <=> CAST(:qvec AS vector) AS distance
+            FROM article_chunks c
+            JOIN articles a ON a.article_id = c.article_id
+            WHERE c.language = :lang
+            ORDER BY c.embedding <=> CAST(:qvec AS vector)
+            LIMIT :limit
+        """), {"qvec": vector_literal, "lang": language, "limit": limit}).fetchall()
+        for r in rows:
+            d = dict(r._mapping)
+            d["match"] = "semantic"
+            results[d["chunk_id"]] = d
+
+        if query_text and query_text.strip():
+            lexical = conn.execute(text("""
+                SELECT c.chunk_id, c.article_id, c.chunk_index, c.content, c.language,
+                       a.title_en, a.title_ar, a.published_date, a.article_date,
+                       c.embedding <=> CAST(:qvec AS vector) AS distance
+                FROM article_chunks c
+                JOIN articles a ON a.article_id = c.article_id
+                WHERE c.language = :lang
+                  AND to_tsvector('simple', c.content) @@ plainto_tsquery('simple', :q)
+                ORDER BY ts_rank(to_tsvector('simple', c.content),
+                                  plainto_tsquery('simple', :q)) DESC
+                LIMIT :limit
+            """), {"qvec": vector_literal, "lang": language,
+                    "q": query_text, "limit": limit}).fetchall()
+            for r in lexical:
+                d = dict(r._mapping)
+                if d["chunk_id"] in results:
+                    results[d["chunk_id"]]["match"] = "semantic+lexical"
+                else:
+                    d["match"] = "lexical"
+                    results[d["chunk_id"]] = d
+
+    ordered = sorted(results.values(), key=lambda d: float(d["distance"]))
+    return ordered[:limit]
+
+
+def count_article_chunks() -> int:
+    with engine.connect() as conn:
+        return conn.execute(text("SELECT COUNT(*) FROM article_chunks")).scalar() or 0
+
+
 def get_analysis_for_data_points(record_ids: list[str]) -> dict[str, dict]:
     """SCAI's own written commentary for specific data points, keyed by the
     record id of the point it belongs to.

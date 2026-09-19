@@ -284,3 +284,45 @@ CREATE INDEX idx_articles_title_en ON articles USING gin (to_tsvector('english',
 CREATE INDEX idx_indicator_dashboards_entity ON indicator_dashboards(entity_classification_name, entity_id);
 CREATE INDEX idx_indicator_dashboards_indicator ON indicator_dashboards(published_indicator_id);
 CREATE INDEX idx_lookups_type ON lookups(lookup_type);
+
+-- ============ Article text retrieval (semantic search over SCAI articles) ============
+--
+-- Indicators answer "what is the number". Articles answer "what has SCAI
+-- written about X", which is a different retrieval problem: the answer is a
+-- paragraph inside one of 84 documents averaging ~14,000 characters, not a
+-- row. So articles are chunked, each chunk is embedded with the same bge-m3
+-- model already serving indicator matching, and the vectors are stored here
+-- rather than in a second datastore.
+--
+-- In Postgres rather than Chroma because Postgres is already running, already
+-- backed up, and already the source of the articles themselves — a separate
+-- vector store would be a second thing to deploy and a second place for the
+-- corpus to drift out of sync with the CMS export.
+--
+-- Vectors are persisted rather than rebuilt at startup. The indicator catalog
+-- re-embeds on every restart (~583 names, ~10s); doing the same for ~2,600
+-- article chunks would make a restart cost minutes.
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE article_chunks (
+    chunk_id       TEXT PRIMARY KEY,
+    article_id     TEXT NOT NULL REFERENCES articles(article_id) ON DELETE CASCADE,
+    language       TEXT NOT NULL,          -- 'en' | 'ar' — each article is chunked in both
+    chunk_index    INTEGER NOT NULL,       -- position within the article, for ordering
+    content        TEXT NOT NULL,          -- the passage itself, quoted verbatim in answers
+    char_count     INTEGER,
+    embedding      vector(1024),           -- BAAI/bge-m3 dimensionality
+    UNIQUE (article_id, language, chunk_index)
+);
+
+-- Cosine distance, matching how the indicator resolver scores similarity.
+-- HNSW rather than IVFFlat: IVFFlat needs a populated table to build a useful
+-- index, which makes it order-dependent during a reload.
+CREATE INDEX idx_article_chunks_embedding ON article_chunks
+    USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX idx_article_chunks_language ON article_chunks(language);
+
+-- Lexical fallback for exact names and acronyms ("Tawteen", "ICV"), which
+-- embeddings match poorly — a rare token carries little semantic signal.
+CREATE INDEX idx_article_chunks_fts ON article_chunks
+    USING gin (to_tsvector('simple', content));

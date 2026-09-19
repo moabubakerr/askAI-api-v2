@@ -434,8 +434,13 @@ def load_articles(csv_dir, engine):
         "article_id": df["Id"],
         "title_en": df["TitleSimpleEN"].where(df["TitleSimpleEN"].notna(), df["TitleEN"].apply(strip_html)),
         "title_ar": df["TitleSimpleAR"],
-        "content_en": df["ContentEN"].apply(lambda x: strip_html(fix_mojibake(x)) if x else x),
-        "content_ar": df["ContentAR"],
+        # Both languages get the same treatment. content_ar was previously stored
+        # as raw HTML while content_en was stripped, so Arabic article text was
+        # unusable for retrieval or display. html_to_text (not strip_html) keeps
+        # paragraph breaks, which is what makes chunking land on sensible
+        # boundaries rather than mid-sentence.
+        "content_en": df["ContentEN"].apply(lambda x: html_to_text(fix_mojibake(x)) if x else x),
+        "content_ar": df["ContentAR"].apply(lambda x: html_to_text(fix_mojibake(x)) if x else x),
         "published": df["Published"].apply(to_bool),
         "featured": df["Featured"].apply(to_bool),
         "is_active": df["IsActive"].apply(to_bool),

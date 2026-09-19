@@ -34,6 +34,8 @@ from app.compute.citations import Citation, citations_for_rows, render_sources_f
 from app.compute.chart_builder import build_chart_spec
 from app.compute.chart_request import wants_chart
 from app.agents.composer_agent import compose_answer
+from app.agents.article_agent import answer_from_articles
+from app.resolvers.embeddings import get_embedding
 # Definitions in indicator_details are inconsistently wrapped in HTML
 # ("<p>The increase in the general level of prices...</p>") because they come
 # from a rich-text CMS field. Reusing the ETL's stripper rather than writing a
@@ -48,6 +50,19 @@ PERIODS_PER_YEAR = {"monthly": 12, "quarterly": 4, "yearly": 1}
 # still given but the match is disclosed. Provisional: it needs calibrating
 # against real bge-m3 scores over a question set, not guessing.
 CONFIDENT_MATCH = 0.75
+
+# How many article passages to hand the answering model. Six ~900-char excerpts
+# is roughly 5k characters, which fits the 16384-token budget alongside the
+# question and the answer.
+ARTICLE_PASSAGES = 6
+
+# Cosine DISTANCE (0 = identical), so lower is closer. A vector search always
+# returns a nearest neighbour however unrelated the corpus is, so without a
+# ceiling "what has SCAI written about penguins" would confidently answer from
+# whichever article happened to be least distant. Provisional — calibrate it
+# against real questions before trusting it; scripts/calibrate_resolver.py is
+# the same idea for indicator matching.
+ARTICLE_MAX_DISTANCE = 0.62
 
 
 class SessionState(TypedDict, total=False):
@@ -154,6 +169,9 @@ def handle_message(user_message: str, conversation_context: str = "",
             if rows else {"ok": False, "message": msg("no_indicators_matching", language,
                                                         query=indicator_type_hint)}
         return _finish(payload, language, session_state, citations)
+
+    if ctype == "article_lookup":
+        return _article_answer(user_message, intent, language, session_state)
 
     if ctype == "macro_overview":
         payload, citations = _macro_overview(language)
@@ -454,6 +472,98 @@ def _apply_last_n_years(rows: list[dict], period) -> list[dict]:
     anchor = max(r["period_date"] for r in dated)
     cutoff = date(anchor.year - period.n_years, anchor.month, 1)
     return [r for r in dated if r["period_date"] >= cutoff]
+
+
+def _article_answer(user_message: str, intent: dict, language: str, session_state: dict) -> dict:
+    """Answers from SCAI's published articles instead of the indicator tables.
+
+    The retrieval is semantic, so the user's wording need not match the
+    article's — asking about "trade wars" finds a piece titled "Financial
+    Stability Implications of Tariffs". That is the capability; the risk that
+    comes with it is that a vector search ALWAYS returns a nearest neighbour,
+    however unrelated, so relevance has to be checked rather than assumed.
+    Hence the distance threshold: past it, the honest answer is that the
+    articles do not cover this.
+    """
+    topic = (intent.get("indicator_phrase") or user_message or "").strip()
+    if not topic:
+        return _finish({"ok": False, "message": msg("no_article_topic", language)},
+                        language, session_state, [])
+
+    if retriever.count_article_chunks() == 0:
+        return _finish({"ok": False, "message": msg("articles_not_indexed", language)},
+                        language, session_state, [])
+
+    query_embedding = get_embedding(topic)
+    passages = retriever.search_article_chunks(query_embedding, language=language,
+                                                limit=ARTICLE_PASSAGES, query_text=topic)
+    # Articles exist in both languages; if the question's language has no
+    # indexed text, fall back rather than claim nothing was written.
+    if not passages:
+        other = "ar" if language == "en" else "en"
+        passages = retriever.search_article_chunks(query_embedding, language=other,
+                                                    limit=ARTICLE_PASSAGES, query_text=topic)
+
+    relevant = [p for p in passages
+                if float(p["distance"]) <= ARTICLE_MAX_DISTANCE or p["match"] != "semantic"]
+    if not relevant:
+        nearest = f"{float(passages[0]['distance']):.3f}" if passages else "n/a"
+        payload = {"ok": False, "message": msg("no_articles_found", language, topic=topic),
+                   "facts": {"nearest_distance": nearest}}
+        return _finish(payload, language, session_state, [])
+
+    answer = answer_from_articles(user_message, relevant, language)
+
+    # The numeric verifier still applies, against the passages instead of a
+    # facts payload: any figure in the answer must appear in the text it was
+    # drawn from. It cannot check whether a CLAIM is faithful — that is what
+    # the quote-and-cite prompt and the returned passages are for — but a
+    # fabricated statistic is the failure that matters most here, and this
+    # catches it.
+    grounding = {"passages": [p["content"] for p in relevant]}
+    clean, offending = verify_numbers(answer, grounding)
+    if not clean:
+        answer = (answer + "\n\n" + msg("ungrounded_numbers", language,
+                                         numbers=", ".join(offending)))
+
+    citations = [
+        Citation(indicator=(p.get("title_en") or p.get("title_ar") or "").strip() or None,
+                 data_source="SCAI", table="articles", record_id=p["article_id"],
+                 period_label=str(p.get("published_date") or p.get("article_date") or "") or None,
+                 country=None)
+        for p in relevant
+    ]
+    # One citation per article, not per passage — several chunks of the same
+    # piece are one source.
+    seen, unique = set(), []
+    for c in citations:
+        if c.record_id not in seen:
+            seen.add(c.record_id)
+            unique.append(c)
+
+    payload = {
+        "ok": True,
+        "facts": {
+            "topic": topic,
+            "passages": [
+                {"article_title": (p.get("title_en") or p.get("title_ar") or "").strip(),
+                 "article_id": p["article_id"],
+                 "excerpt": p["content"],
+                 "match": p["match"],
+                 "distance": round(float(p["distance"]), 4)}
+                for p in relevant
+            ],
+            "passage_count": len(relevant),
+        },
+        # Same separation as /read: the source text stays distinguishable from
+        # the generated summary of it.
+        "answer_is_generated_from_articles": True,
+    }
+    if not clean:
+        payload["_verifier_rejected_numbers"] = offending
+    session_state["last_article_topic"] = topic
+    return _finish(payload, language, session_state, unique,
+                    skip_compose=True, canned=answer)
 
 
 def _latest_common_period(series_by_country: dict[str, list[dict]]) -> Optional[str]:

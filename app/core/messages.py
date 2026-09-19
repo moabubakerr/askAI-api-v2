@@ -235,6 +235,34 @@ _MESSAGES = {
         "ar": ("كتالوج المؤشرات فارغ — لا توجد بيانات مؤشرات محمّلة في قاعدة البيانات. "
                 "هذه مشكلة في الإعداد وليست حدوداً لما سألت عنه."),
     },
+    "no_articles_found": {
+        "en": ("SCAI's published articles don't appear to cover \"{topic}\". I searched the "
+                "article text and found nothing close enough to answer from — rather than "
+                "stretch a loosely-related piece into an answer. Try a broader topic, or ask "
+                "me for an indicator instead."),
+        "ar": ("لا يبدو أن مقالات المجلس المنشورة تتناول \"{topic}\". بحثت في نصوص المقالات "
+                "ولم أجد ما يكفي قربه للإجابة منه، بدلاً من تحميل مقال غير وثيق الصلة ما لا "
+                "يحتمل. جرّب موضوعاً أوسع، أو اسألني عن مؤشر."),
+    },
+    "no_article_topic": {
+        "en": ("I couldn't tell which topic you'd like me to look up in SCAI's articles. "
+                "Name the subject — for example \"the trade war\", \"In-Country Value\" or "
+                "\"knowledge transfer\"."),
+        "ar": ("لم أتبيّن الموضوع الذي تريد البحث عنه في مقالات المجلس. حدّد الموضوع — "
+                "مثل \"الحرب التجارية\" أو \"القيمة المحلية\" أو \"نقل المعرفة\"."),
+    },
+    "articles_not_indexed": {
+        "en": ("The article text hasn't been indexed yet, so I can't search it. This is a "
+                "setup step (index-articles), not a gap in what SCAI has published."),
+        "ar": ("لم تتم فهرسة نصوص المقالات بعد، لذا لا يمكنني البحث فيها. هذه خطوة إعداد "
+                "(index-articles) وليست نقصاً فيما نشره المجلس."),
+    },
+    "ungrounded_numbers": {
+        "en": ("Note: the figures {numbers} above do not appear in the article excerpts I "
+                "retrieved, so treat them with caution — check the linked articles directly."),
+        "ar": ("ملاحظة: الأرقام {numbers} أعلاه لا ترد في مقتطفات المقالات التي استرجعتها، "
+                "لذا تعامل معها بحذر — راجع المقالات المرتبطة مباشرة."),
+    },
     "no_overview": {
         "en": "No headline indicators were available to build an overview.",
         "ar": "لا توجد مؤشرات رئيسية متاحة لإعداد نظرة عامة.",

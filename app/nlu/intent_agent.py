@@ -24,6 +24,7 @@ COMPUTATION_TYPES = [
     "difference",         # "what is the difference between the highest and lowest X"
     "growth_rate",        # "what is the growth rate of X between A and B" (CAGR or simple)
     "definition",         # "what is inflation?" / "what does non-hydrocarbon GDP mean?"
+    "article_lookup",     # "what has SCAI written about tariffs?" / "what is SCAI's view on X"
     "count_list",         # "how many indicators are in sector Y" / "list indicators in Z"
     "macro_overview",     # "what's the latest in Qatar's economy" / "how is the economy doing"
     "capabilities",       # "what can you do"
@@ -50,6 +51,16 @@ Output ONLY JSON with this exact shape:
 }}
 
 Rules:
+- Use "article_lookup" when the user asks about SCAI's published WRITING, ANALYSIS,
+  VIEWS or COMMENTARY on a topic, rather than for a number: "what has SCAI written
+  about the trade war", "what is the Council's view on knowledge transfer", "tell me
+  about the In-Country Value programme", "ماذا كتب المجلس عن الرسوم الجمركية".
+  Signals: the question asks about a THEME, POLICY or PROGRAMME rather than a measurable
+  indicator; or it asks for an opinion, argument, explanation or discussion; or it uses
+  words like article, paper, publication, wrote, view, opinion, analysis, discuss.
+  Put the topic the user is asking about in indicator_phrase.
+  Contrast: "what is inflation" wants a definition, "what is the inflation rate" wants a
+  number, and "what does SCAI say about inflation's causes" wants an article.
 - Use "definition" when the user asks what an indicator MEANS rather than what it
   currently measures: "what is inflation?", "what does non-hydrocarbon GDP mean?",
   "define trade balance", "ما معنى التضخم". The distinguishing test is that no value,

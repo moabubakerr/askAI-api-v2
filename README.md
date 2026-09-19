@@ -216,8 +216,29 @@ cd /opt/scai-chatbot
 cp .env.example .env
 ${EDITOR:-vi} .env        # set both passwords + RUNTIMES_NETWORK from step 1
 
-docker compose up -d --build     # builds the image on the VM, starts postgres + api
-docker compose run --rm etl      # one-shot data load
+docker compose up -d --build       # builds the image on the VM, starts postgres + api
+docker compose run --rm etl        # one-shot data load
+docker compose run --rm etl index-articles   # chunk + embed the articles (needs TEI up)
+```
+
+`index-articles` is separate from the data load on purpose: the load must work
+with nothing but Postgres, while indexing needs the embedding server. Folding
+them together would mean a TEI outage blocked a data reload. It takes a few
+minutes — ~2,700 chunks across both languages, batched 32 at a time against
+CPU-bound TEI — and only needs re-running when the articles change.
+
+**Upgrading an existing deployment:** the `postgres` service now uses
+`pgvector/pgvector:pg16`, because article search stores embeddings in a
+`vector` column and plain `postgres:16-alpine` cannot `CREATE EXTENSION
+vector`. Changing the image does **not** migrate an existing volume — the
+extension is created by `schema.sql`, which only runs on an empty one. So an
+existing deployment needs:
+
+```bash
+docker compose down -v            # destroys the database
+docker compose up -d --build
+docker compose run --rm etl
+docker compose run --rm etl index-articles
 ```
 
 **Step 3 — verify, in this order.** Each check isolates one dependency, so a
@@ -315,6 +336,54 @@ uvicorn app.api.main:app --host 0.0.0.0 --port 8000
 Note `requirements.txt` is missing an `httpx<0.28` pin that `openai==1.51.0`
 needs — see `docker/requirements.runtime.txt`. Without it the app does not
 import at all.
+
+## 4c. Answering from article text
+
+Indicators answer "what is the number". The 84 published SCAI articles answer
+"what has the Council written about X" — a different retrieval problem, since
+the answer is a paragraph inside a ~14,000-character document rather than a row.
+
+How it works:
+
+1. `index-articles` chunks each article at paragraph boundaries (~900 chars,
+   150 char overlap, both languages -> ~2,700 chunks) and embeds each chunk with
+   the same bge-m3 model already serving indicator matching. The article title
+   is prepended to the embedded text, because a paragraph from deep inside a
+   piece otherwise carries no signal about what the piece is about.
+2. Vectors live in Postgres (`article_chunks.embedding`, pgvector), not Chroma —
+   Postgres is already running, already backed up, and already holds the
+   articles, so a second store would be a second thing to deploy and a second
+   place for the corpus to drift from the CMS export. They are persisted rather
+   than rebuilt at startup: the indicator catalog re-embeds on every restart
+   (~10s), and doing that for 2,700 chunks would cost minutes.
+3. Retrieval is **hybrid**. Embeddings handle the paraphrase case that is the
+   whole point — asking about "trade wars" finds a piece titled "Financial
+   Stability Implications of Tariffs" — but they are weak on rare exact tokens,
+   where a programme name like "Tawteen" carries little semantic signal. A
+   full-text index covers exactly that, and the two result sets are merged.
+4. The answer is written by `app/agents/article_agent.py`, which is given the
+   passages and nothing else, must attribute each claim to a named article, and
+   is told that an honest "the articles don't cover this" is a correct answer.
+
+**The threshold matters more than the search.** A vector search always returns a
+nearest neighbour, so without a distance ceiling "what has SCAI written about
+penguins" would be answered confidently from whichever passage happened to be
+least distant. `ARTICLE_MAX_DISTANCE` in `graph_v2.py` is that ceiling, and it
+is currently a guess — `scripts/calibrate_articles.py` prints the real
+distances for questions the corpus should and should not be able to answer, and
+says whether any threshold separates them.
+
+**What is guaranteed, and what is not.** The numeric verifier still runs, with
+the retrieved passages standing in for the facts payload: any figure in the
+answer must appear in the text it was drawn from, and one that does not gets an
+explicit caution appended. That does not verify that a *claim* is faithful —
+prose has no equivalent check — which is why the passages are returned in
+`facts.passages` for the reader to check, and why the prompt insists on naming
+the source article in the prose.
+
+These are opinion and analysis pieces, not statistics, and the agent is
+instructed to attribute rather than assert ("the article argues" rather than
+stating it as fact).
 
 ## 5. Agent flow
 
