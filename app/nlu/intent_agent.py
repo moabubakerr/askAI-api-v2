@@ -19,6 +19,7 @@ COMPUTATION_TYPES = [
     "period_comparison",  # "compare X in period A and period B" (same entity, two specific periods)
     "country_comparison", # "compare X between Qatar and Singapore" (named countries)
     "country_ranking",    # "which country has the lowest X" (no explicit period comparison)
+    "period_ranking",     # "list X for 2024 and 2025 ranked highest to lowest"
     "min_max",            # "what was the highest/lowest value of X"
     "difference",         # "what is the difference between the highest and lowest X"
     "growth_rate",        # "what is the growth rate of X between A and B" (CAGR or simple)
@@ -57,6 +58,12 @@ Rules:
   of Real GDP", "what is Inflation in 2025", "what is the GDP figure" are all
   latest_value. A bare "what is X?" naming an indicator, with no period and no word
   like value/rate/figure/level, is a definition question.
+- Use "period_ranking" when the user wants SEVERAL periods of ONE indicator listed in value
+  order: "list the quarterly GDP values for 2024 and 2025 and rank them highest to lowest",
+  "order the monthly inflation figures from lowest to highest". Set extremum="max" for
+  highest-first (the default) or "min" for lowest-first.
+  Contrast: "trend"/"show me how X changed" is chronological, "min_max" returns only the
+  single highest or lowest value, and "country_ranking" ranks COUNTRIES, not periods.
 - "compare" only means country_comparison or period_comparison if the user named specific
   countries or specific periods. If they say "compare" with no explicit countries/periods,
   and instead ask something like "which is lowest/highest", use country_ranking or min_max.

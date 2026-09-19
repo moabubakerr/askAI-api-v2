@@ -127,7 +127,9 @@ def handle_message(user_message: str, conversation_context: str = "",
     if not indicator_phrase and intent.get("is_followup") and session_state.get("last_indicator_name"):
         indicator_phrase = session_state["last_indicator_name"]
 
-    resolution = resolve_indicator(indicator_phrase or "")
+    # A definition question is answered from catalog text, so a stub with no
+    # data points is still a legitimate match. Every other path needs figures.
+    resolution = resolve_indicator(indicator_phrase or "", require_data=(ctype != "definition"))
     if resolution.status != "resolved" and resolution.status != "inactive":
         payload = {"ok": False, "message": resolution.message}
         return _finish(payload, language, session_state, [])
@@ -236,6 +238,15 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         result = compute.latest_value(rows)
         used = [rows[-1]] if rows else []
         return _wrap(result, unit), citations_for_rows(used, indicator_name, data_source_en)
+
+    if ctype == "period_ranking":
+        # extremum "min" means lowest-first; anything else (including the usual
+        # "highest to lowest" phrasing, and the null default) means highest-first.
+        descending = intent.get("extremum") != "min"
+        result = compute.period_ranking(rows, descending=descending)
+        # Cite every row that appears in the ranking, not just the winner —
+        # each listed figure is a claim of its own.
+        return _wrap(result, unit), citations_for_rows(rows, indicator_name, data_source_en)
 
     if ctype == "trend":
         result = compute.trend(rows)

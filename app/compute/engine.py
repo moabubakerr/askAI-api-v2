@@ -134,6 +134,26 @@ def trend(rows: list[dict]) -> ComputeResult:
     return ComputeResult(True, facts={"series": series, "n_points": len(series)})
 
 
+def period_ranking(rows: list[dict], descending: bool = True) -> ComputeResult:
+    """Ranks the retrieved periods by value — F-009: "List Qatar's quarterly GDP
+    values for 2024 and 2025 and rank them from highest to lowest."
+
+    Distinct from trend(), which is deliberately chronological, and from
+    min_max(), which returns only the single extreme. This sorts the whole
+    retrieved set, so the ordering is a real sort over real rows rather than
+    the LLM being asked to order numbers itself — the exact operation the QC
+    report found it getting wrong."""
+    valid = [r for r in rows if r.get("actual") is not None]
+    if not valid:
+        return ComputeResult(False, message="No approved data points were found for this indicator/period.")
+    ranked = sorted(valid, key=lambda r: r["actual"], reverse=descending)
+    return ComputeResult(True, facts={
+        "ranked_periods": [{"period_label": r["period_label"], "actual": r["actual"]} for r in ranked],
+        "order": "highest_to_lowest" if descending else "lowest_to_highest",
+        "n_points": len(ranked),
+    })
+
+
 def country_comparison(series_by_country: dict[str, list[dict]], period_label: Optional[str] = None) -> ComputeResult:
     """Builds a comparison across EXACTLY the requested countries.
     Fixes F-001: must never include unrequested benchmark countries.

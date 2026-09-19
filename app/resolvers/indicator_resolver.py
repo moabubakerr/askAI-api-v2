@@ -104,7 +104,11 @@ def _fetch_catalog() -> list[dict]:
                    d.is_published, d.published_detail_id,
                    i.is_active, d.unit_en, d.polarity_en,
                    d.data_source_en, d.format,
-                   d.definition_en, d.definition_ar
+                   d.definition_en, d.definition_ar,
+                   (SELECT COUNT(*) FROM published_data_points p
+                     WHERE p.published_indicator_detail_id = d.published_detail_id)
+                 + (SELECT COUNT(*) FROM indicator_values v
+                     WHERE v.indicator_detail_id = d.indicator_detail_id) AS data_point_count
             FROM indicator_details d
             JOIN indicators i ON i.indicator_id = d.indicator_id
             WHERE d.name_en IS NOT NULL
@@ -112,11 +116,27 @@ def _fetch_catalog() -> list[dict]:
     return [dict(r._mapping) for r in rows]
 
 
-def resolve_indicator(phrase: str) -> ResolutionResult:
+def resolve_indicator(phrase: str, require_data: bool = True) -> ResolutionResult:
+    """require_data=True (the default, for any question that needs figures)
+    ignores catalog entries that carry no data points at all.
+
+    140 of the 644 indicator_details rows have zero data points — empty catalog
+    stubs like "GDP" and "GDP Growth Demo" sitting alongside the real,
+    fully-populated "Real GDP". Because those stubs carry the shorter, more
+    generic name, they beat the real indicator on both embedding and string
+    similarity for a query like "GDP", and the answer became
+    "no data points in the approved dataset" while 70 real GDP points sat one
+    row away. An indicator with no data cannot answer a data question, so it
+    should not be a candidate for one.
+
+    Definition lookups pass require_data=False: a stub can still carry a
+    perfectly good definition, and no figures are being claimed."""
     if not phrase or not phrase.strip():
         return ResolutionResult(None, "not_found", [], "No indicator was mentioned.")
 
     catalog = _fetch_catalog()
+    if require_data:
+        catalog = [r for r in catalog if (r.get("data_point_count") or 0) > 0]
     if not catalog:
         return ResolutionResult(None, "not_found", [], "The indicator catalog is empty.")
 

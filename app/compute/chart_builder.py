@@ -24,6 +24,7 @@ CHART_TYPE_BY_COMPUTATION = {
     "trend": "line",
     "country_comparison": "bar",
     "country_ranking": "bar",
+    "period_ranking": "bar",
     "period_comparison": "bar",
     "macro_overview": "bar",
 }
@@ -59,6 +60,14 @@ def build_chart_spec(computation_type: str, facts: dict, indicator_name: str,
         return {**base,
                 "x_field": "period_label", "y_field": "actual",
                 "data": [{"period_label": p["period_label"], "actual": p["actual"]} for p in series]}
+
+    if computation_type == "period_ranking":
+        # Already sorted by value, not chronological — keep that order on the
+        # x-axis, since the ordering is the point of the question.
+        return {**base,
+                "x_field": "period_label", "y_field": "actual",
+                "data": [{"period_label": p["period_label"], "actual": p["actual"]}
+                         for p in facts.get("ranked_periods", [])]}
 
     if computation_type in ("country_comparison", "country_ranking"):
         rows = facts.get("rows") or facts.get("ranked") or []
