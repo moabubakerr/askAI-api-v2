@@ -108,6 +108,22 @@ _PHRASE_NOISE = re.compile(
     re.IGNORECASE,
 )
 
+# The Arabic equivalents. "نسبة" (rate/percentage) is Arabic's "Qatar": it
+# prefixes a great many indicator names, so it separates none of them, yet it
+# is long enough to dominate character similarity. "نسبة التضخم" came back as a
+# three-way tie between التضخم (Inflation), نسبة السمنة (obesity rate) and
+# نسبة الدين إلى الناتج المحلي (debt-to-GDP) — two of which share only the
+# word the user did not mean.
+_PHRASE_NOISE_AR = re.compile(
+    "|".join([
+        "نسبة", "معدل", "مؤشر", "قيمة",
+        "في قطر", "لقطر", "بقطر", "قطر", "القطرية", "القطري", "دولة قطر",
+        "دول مجلس التعاون", "مجلس التعاون", "الخليجية", "الخليج",
+        "سنوي", "سنوياً", "سنويا", "شهري", "شهرياً", "شهريا",
+        "ربع سنوي", "ربعي", "السنوي", "الشهري",
+    ])
+)
+
 
 def normalize_indicator_phrase(phrase: str) -> str:
     """Strips country and frequency words from the user's phrase before matching.
@@ -129,6 +145,7 @@ def normalize_indicator_phrase(phrase: str) -> str:
     indicators are named "... in Qatar" and must keep it.
     """
     cleaned = _PHRASE_NOISE.sub(" ", phrase or "")
+    cleaned = _PHRASE_NOISE_AR.sub(" ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.-")
     # If stripping leaves nothing to match on, the words were the question.
     return cleaned if len(cleaned) >= 3 else (phrase or "").strip()
@@ -137,7 +154,7 @@ def normalize_indicator_phrase(phrase: str) -> str:
 def _fetch_catalog() -> list[dict]:
     with engine.connect() as conn:
         rows = conn.execute(text("""
-            SELECT d.indicator_detail_id, d.indicator_id, d.name_en,
+            SELECT d.indicator_detail_id, d.indicator_id, d.name_en, d.name_ar,
                    d.is_published, d.published_detail_id,
                    i.is_active, d.unit_en, d.polarity_en,
                    d.data_source_en, d.format,
@@ -204,7 +221,15 @@ def resolve_indicator(phrase: str, require_data: bool = True,
 
     def score(row):
         embed_sim = cosine_similarity(phrase_embedding, name_embeddings[row["name_en"]])
+        # Compare against the Arabic name too. Only name_en was ever fetched or
+        # scored, so for an Arabic question the string half of the score was
+        # dead weight — Arabic script against Latin scores ~0 for every
+        # candidate alike, discriminating between none of them and leaving the
+        # embedding to carry the whole decision. bge-m3 is cross-lingual so it
+        # mostly coped, but "نسبة التضخم" still tied التضخم with نسبة السمنة.
         string_sim = _similarity(match_phrase, row["name_en"])
+        if row.get("name_ar"):
+            string_sim = max(string_sim, _similarity(match_phrase, row["name_ar"]))
         return EMBED_WEIGHT * embed_sim + STRING_WEIGHT * string_sim
 
     scored = sorted(((row, score(row)) for row in catalog), key=lambda x: x[1], reverse=True)

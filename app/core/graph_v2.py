@@ -253,6 +253,15 @@ def handle_message(user_message: str, conversation_context: str = "",
             names = [c.name_en.strip() for c in resolution.candidates]
             payload["facts"] = {"candidates": names}
             session_state["last_ambiguous_candidates"] = names
+            # Returned verbatim, Composer skipped. Asked to phrase an Arabic
+            # refusal, the model TRANSLATED the candidate names — offering
+            # "نسبة السمنة" where the catalogue says "Obesity Rate". The chips
+            # are answer options: the user picks one and it is sent straight
+            # back, so a translated name matches no catalogue row and the
+            # choice leads nowhere. The message is already written in both
+            # languages; the names inside it must stay exactly as stored.
+            return _finish(payload, language, session_state, [],
+                            skip_compose=True, canned=resolution.message)
         return _finish(payload, language, session_state, [])
 
     match = resolution.match
