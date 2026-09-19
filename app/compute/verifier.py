@@ -9,9 +9,18 @@ fall back to a template-rendered answer built directly from the facts
 payload (see render_template_fallback), which has no LLM in the loop at all.
 """
 import re
+from decimal import Decimal
 
 
-NUMBER_PATTERN = re.compile(r"-?\d[\d,]*\.?\d*")
+# The lookbehind stops a hyphen being read as a minus sign when it follows a
+# word character, which made period labels parse asymmetrically: the payload's
+# "2025-Q4" yielded ["2025", "4"], but the same quarter written the way SCAI and
+# the Composer write it, "Q4-2025", yielded ["4", "-2025"]. "-2025" was in
+# neither the allowed set nor the 1900-2100 year exemption, so any answer naming
+# a quarter that way was rejected as containing an invented number.
+# Genuine negatives ("fell by -3.2%") still parse, since the hyphen there
+# follows a space.
+NUMBER_PATTERN = re.compile(r"(?<![\w.])-?\d[\d,]*\.?\d*")
 
 
 def _extract_numbers_from_payload(payload) -> set[str]:
@@ -21,7 +30,16 @@ def _extract_numbers_from_payload(payload) -> set[str]:
     found = set()
 
     def walk(value):
-        if isinstance(value, (int, float)):
+        if isinstance(value, bool):
+            return  # bool is a subclass of int; "True" is not a data point
+        # Decimal matters here: `actual`/`target` are NUMERIC columns, so
+        # psycopg2 hands back decimal.Decimal, not float. Decimal matches none
+        # of the branches below, so every retrieved value used to be skipped —
+        # which meant the verifier saw an EMPTY set of allowed numbers and
+        # rejected the Composer's correct figure as invented. The visible
+        # symptom was every numeric answer arriving as the raw template dump
+        # ("actual: 185.17") with verified=false.
+        if isinstance(value, (int, float, Decimal)):
             found.add(_normalize(value))
         elif isinstance(value, dict):
             for v in value.values():

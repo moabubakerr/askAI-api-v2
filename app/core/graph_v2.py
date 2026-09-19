@@ -31,6 +31,11 @@ from app.compute.citations import Citation, citations_for_rows, render_sources_f
 from app.compute.chart_builder import build_chart_spec
 from app.compute.chart_request import wants_chart
 from app.agents.composer_agent import compose_answer
+# Definitions in indicator_details are inconsistently wrapped in HTML
+# ("<p>The increase in the general level of prices...</p>") because they come
+# from a rich-text CMS field. Reusing the ETL's stripper rather than writing a
+# second one — it is a pure regex helper with no pandas/DB dependency.
+from etl.utils import strip_html
 
 
 PERIODS_PER_YEAR = {"monthly": 12, "quarterly": 4, "yearly": 1}
@@ -131,6 +136,30 @@ def handle_message(user_message: str, conversation_context: str = "",
     session_state["last_indicator_detail_id"] = match.indicator_detail_id
     session_state["last_indicator_name"] = match.name_en
 
+    # Definitional questions ("what is inflation?", F-030's "what does
+    # non-hydrocarbon GDP mean?") are answered from indicator_details.definition_en,
+    # which is SCAI's own wording — never from the model's general knowledge, and
+    # never by falling through to a latest-value lookup. Only 261 of 644 details
+    # carry a real definition, so a missing one is reported honestly rather than
+    # filled in.
+    if ctype == "definition":
+        definition = match.definition_ar if language == "ar" and match.definition_ar else match.definition_en
+        definition = strip_html(definition or "").strip()
+        if not definition or definition == "-":
+            payload = {"ok": False, "message": (
+                f"\"{match.name_en.strip()}\" is in the approved data, but SCAI's catalog "
+                f"carries no definition for it. I won't supply one of my own."
+            )}
+            return _finish(payload, language, session_state, [])
+        payload = {"ok": True, "facts": {
+            "indicator": match.name_en.strip(),
+            "definition": definition,
+            "unit": match.unit_en,
+        }}
+        citations = [Citation(indicator=match.name_en.strip(), data_source=match.data_source_en,
+                              table="indicator_details", record_id=match.indicator_detail_id)]
+        return _finish(payload, language, session_state, citations)
+
     # Must be P02's PublishedIndicatorDetailId, NOT indicator_detail_id — they are
     # different GUIDs, and published_data_points keys on the former
     # (schema.sql:86). Passing the source id here matched zero rows for every
@@ -144,11 +173,17 @@ def handle_message(user_message: str, conversation_context: str = "",
     granularity = choose_granularity(explicit_gran, available_gran)
 
     if granularity is None:
+        # `wanted` is None when the user named no frequency, which rendered as
+        # the literal 'has no None data'. Distinguish the two real cases: the
+        # indicator has data but not at the frequency asked for, versus it has
+        # no data at all.
         wanted = intent.get("explicit_frequency")
-        payload = {"ok": False, "message": (
-            f"\"{match.name_en.strip()}\" has no {wanted} data in the approved dataset "
-            f"(available: {', '.join(sorted(available_gran)) or 'none'})."
-        )}
+        if available_gran:
+            detail = (f"has no {wanted} data in the approved dataset "
+                      f"(available: {', '.join(sorted(available_gran))})")
+        else:
+            detail = "has no data points in the approved dataset"
+        payload = {"ok": False, "message": f"\"{match.name_en.strip()}\" {detail}."}
         return _finish(payload, language, session_state, [])
 
     period = parse_period_expression(intent.get("period_expression"))

@@ -80,6 +80,8 @@ class IndicatorMatch:
     polarity_en: Optional[str]
     data_source_en: Optional[str]
     format: Optional[str]
+    definition_en: Optional[str]
+    definition_ar: Optional[str]
     confidence: float
 
 
@@ -101,7 +103,8 @@ def _fetch_catalog() -> list[dict]:
             SELECT d.indicator_detail_id, d.indicator_id, d.name_en,
                    d.is_published, d.published_detail_id,
                    i.is_active, d.unit_en, d.polarity_en,
-                   d.data_source_en, d.format
+                   d.data_source_en, d.format,
+                   d.definition_en, d.definition_ar
             FROM indicator_details d
             JOIN indicators i ON i.indicator_id = d.indicator_id
             WHERE d.name_en IS NOT NULL
@@ -144,7 +147,8 @@ def resolve_indicator(phrase: str) -> ResolutionResult:
             IndicatorMatch(r["indicator_detail_id"], r["indicator_id"], r["name_en"],
                             r["is_published"], r["published_detail_id"],
                             r["is_active"], r["unit_en"], r["polarity_en"],
-                            r["data_source_en"], r["format"], s)
+                            r["data_source_en"], r["format"],
+                            r["definition_en"], r["definition_ar"], s)
             for r, s in scored[:3]
         ]
         names = ", ".join(f'"{c.name_en.strip()}"' for c in candidates)
@@ -158,6 +162,7 @@ def resolve_indicator(phrase: str) -> ResolutionResult:
         top_row["is_published"], top_row["published_detail_id"],
         top_row["is_active"], top_row["unit_en"], top_row["polarity_en"],
         top_row["data_source_en"], top_row["format"],
+        top_row["definition_en"], top_row["definition_ar"],
         top_score,
     )
 
