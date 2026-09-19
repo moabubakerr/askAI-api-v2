@@ -52,6 +52,13 @@ Output ONLY JSON with this exact shape:
 }}
 
 Rules:
+- Use "count_list" when the user asks HOW MANY indicators there are, or to LIST or
+  NAME them, for a group rather than for one metric: "list the indicators in
+  Sectors", "how many indicators in diversification target", "give me all the
+  indicator names for the education sector", "what are the national indicators".
+  Put the group the user named — the sector or indicator type — in
+  indicator_phrase. These questions are about the CATALOGUE, not about any single
+  indicator's value, so never route them to latest_value or definition.
 - Use "analysis_lookup" when the user asks for SCAI's ANALYSIS or COMMENTARY on a
   specific INDICATOR — "what is the latest analysis of inflation", "what did the
   Council say about the trade balance this quarter", "ما هو أخر تحليل للتضخم",

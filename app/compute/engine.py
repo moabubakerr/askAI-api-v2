@@ -66,7 +66,19 @@ def min_max(rows: list[dict], which: str) -> ComputeResult:
     if not valid:
         return ComputeResult(False, message="No approved data points with a value were found.")
     picked = max(valid, key=lambda r: r["actual"]) if which == "max" else min(valid, key=lambda r: r["actual"])
-    return ComputeResult(True, facts={"period_label": picked["period_label"], "actual": picked["actual"]})
+    # The facts must say that this IS the extreme, and over what. Returning
+    # only {period_label, actual} gave the Composer the exact shape of a
+    # latest-value answer, so "what was the highest quarterly GDP, and in which
+    # quarter?" came back as the flat "Real GDP in 2025-Q3 was 185.99" — the
+    # right number, stripped of the one thing that was asked.
+    return ComputeResult(True, facts={
+        "extremum": "highest" if which == "max" else "lowest",
+        "period_label": picked["period_label"],
+        "actual": picked["actual"],
+        "scanned_points": len(valid),
+        "scanned_from": valid[0]["period_label"],
+        "scanned_to": valid[-1]["period_label"],
+    })
 
 
 def difference(rows: list[dict]) -> ComputeResult:

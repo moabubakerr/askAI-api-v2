@@ -141,6 +141,16 @@ def handle_message(user_message: str, conversation_context: str = "",
     # this way the behaviour is the same every time.
     if is_greeting(user_message):
         ctype = "general_chat"
+
+    # Catalogue questions are pinned here too. "List the indicators in Sectors"
+    # worked, then broke when the intent prompt grew two more types — count_list
+    # was the only type with no explicit rule and lost to the newer ones, so the
+    # question fell through to indicator resolution and was answered "I couldn't
+    # tell which indicator you're asking about". The phrasing is recognisable
+    # (a list/count request naming a real sector or indicator type), so it does
+    # not need to depend on the model getting it right.
+    elif _looks_like_catalog_request(user_message):
+        ctype = "count_list"
     # Arabic script is unambiguous; the model's language field is a guess. An
     # Arabic greeting was being answered in English, which is the product simply
     # not working in one of its two languages.
@@ -773,6 +783,26 @@ _CATALOG_STOPWORDS = {
     "for", "show", "what", "are", "there", "is", "please", "and", "names", "name",
     "indicator", "indicators", "under", "within", "tell", "about", "which",
 }
+
+
+_CATALOG_REQUEST = re.compile(
+    r"\b(list|how many|give me all|show all|show me all|name all|what are the|"
+    r"names? of|all the)\b", re.IGNORECASE)
+
+
+def _looks_like_catalog_request(text: str) -> bool:
+    """A list/count request that names a real sector or indicator type.
+
+    Both halves are required. "List the indicators in Sectors" qualifies;
+    "list Qatar's quarterly GDP values" does not, because "GDP values" matches
+    no sector or type — that one is a period ranking and must stay one.
+    """
+    if not text or not _CATALOG_REQUEST.search(text):
+        return False
+    if not re.search(r"\bindicator", text, re.IGNORECASE):
+        return False
+    kind, _ = _match_catalog_scope(text)
+    return kind is not None
 
 
 def _match_catalog_scope(phrase: str):

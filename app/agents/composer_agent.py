@@ -51,7 +51,12 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    figure you calculate will be rejected even when it is arithmetically right.
    Never list the series point by point: it is shown as a table and a chart
    next to your text.
-11. For a payload with "count" and "names" (a catalogue listing), state the count
+11. For a min/max answer the payload carries "extremum" ("highest" or "lowest"),
+   with scanned_points/scanned_from/scanned_to describing the range searched.
+   SAY which it is — "the highest quarterly reading, across 28 quarters from
+   2019-Q1 to 2025-Q4" — never state the figure as if it were just a value for
+   that period. Identifying it as the extreme is the whole question.
+12. For a payload with "count" and "names" (a catalogue listing), state the count
    and the scope — e.g. "There are 101 published Sector Indicators" — then give at
    most a handful of examples from "names_sample". NEVER enumerate the full list:
    it is rendered separately, and narrating 101 entries runs out of room and gets
@@ -63,7 +68,21 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
 """
 
 
+def _public(facts_payload: dict) -> dict:
+    """Strips internal keys before the payload is shown to the model.
+
+    Keys prefixed with "_" are plumbing the pipeline passes to itself —
+    _low_confidence_match, _verifier_rejected_numbers. The model was reading
+    _low_confidence_match and narrating it: "*Note: The indicator match
+    confidence level is below the usual threshold*", which then appeared
+    alongside the real disclosure that _finish appends deterministically. The
+    model should describe the data, never the machinery that produced it.
+    """
+    return {k: v for k, v in facts_payload.items() if not k.startswith("_")}
+
+
 def compose_answer(facts_payload: dict, language: str = "en") -> str:
+    facts_payload = _public(facts_payload)
     user_prompt = (
         f"Language: {language}\n\n"
         f"Facts payload (the ONLY source of numbers you may use):\n"
