@@ -172,15 +172,18 @@ def handle_message(user_message: str, conversation_context: str = "",
     if ctype == "general_chat":
         payload = {"ok": True, "facts": {"note": "Greeting — no data needed."}}
         return _finish(payload, language, session_state, [], skip_compose=True,
-                        canned=msg("greeting", language))
+                        canned=msg("greeting", language),
+                        question=user_message)
 
     if ctype == "capabilities":
         payload, citations = _capabilities_answer(language)
-        return _finish(payload, language, session_state, citations)
+        return _finish(payload, language, session_state, citations,
+                        question=user_message)
 
     if ctype == "out_of_scope":
         payload = {"ok": False, "message": msg("out_of_scope", language)}
-        return _finish(payload, language, session_state, [])
+        return _finish(payload, language, session_state, [],
+                        question=user_message)
 
     if ctype == "count_list":
         indicator_type_hint = intent.get("indicator_phrase") or user_message or ""
@@ -214,16 +217,38 @@ def handle_message(user_message: str, conversation_context: str = "",
             "names": names,
         }} if rows else {"ok": False, "message": msg("no_indicators_matching", language,
                                                       query=indicator_type_hint)}
-        return _finish(payload, language, session_state, citations)
+        return _finish(payload, language, session_state, citations,
+                        question=user_message)
 
     if ctype == "article_lookup":
-        return _article_answer(user_message, intent, language, session_state)
+        # Articles are the fallback for what the catalogue cannot answer, not a
+        # parallel route to the same subjects. "هل هناك شركات تكنولوجيا مالية
+        # جديدة تم افتتاحها في عام 2025؟" was answered from article prose —
+        # correctly noting the excerpts did not cover it — while "Number of
+        # licensed FinTech & InsurTech players" sat in the catalogue with the
+        # figures that answer it outright.
+        #
+        # Unless the user explicitly asked what SCAI WROTE, a topic that
+        # resolves confidently to an indicator with data is answered from the
+        # data. "What has SCAI written about inflation?" still goes to the
+        # articles, even though Inflation resolves perfectly, because that
+        # question is about the writing.
+        topic = intent.get("indicator_phrase") or user_message
+        if not _explicitly_asks_for_writing(user_message):
+            probe = resolve_indicator(topic, require_data=True, language=language)
+            if (probe.status == "resolved" and probe.match
+                    and probe.match.confidence >= CONFIDENT_MATCH):
+                ctype = "latest_value"
+                intent["indicator_phrase"] = topic
+        if ctype == "article_lookup":
+            return _article_answer(user_message, intent, language, session_state)
 
     if ctype == "macro_overview":
         payload, citations = _macro_overview(language)
         if payload.get("ok") and wants_chart(user_message, ctype):
             payload["chart"] = build_chart_spec(ctype, payload["facts"], "Economic Overview", None, None)
-        return _finish(payload, language, session_state, citations)
+        return _finish(payload, language, session_state, citations,
+                        question=user_message)
 
     # --- everything below needs an indicator resolved first ---
     indicator_phrase = intent.get("indicator_phrase")
@@ -265,7 +290,8 @@ def handle_message(user_message: str, conversation_context: str = "",
                 if wants_chart(user_message, "macro_overview"):
                     payload["chart"] = build_chart_spec("macro_overview", payload["facts"],
                                                          "Economic Snapshot", None, None)
-                return _finish(payload, language, session_state, citations)
+                return _finish(payload, language, session_state, citations,
+                        question=user_message)
 
     if resolution.status != "resolved" and resolution.status != "inactive":
         payload = {"ok": False, "message": resolution.message}
@@ -281,8 +307,10 @@ def handle_message(user_message: str, conversation_context: str = "",
             # choice leads nowhere. The message is already written in both
             # languages; the names inside it must stay exactly as stored.
             return _finish(payload, language, session_state, [],
-                            skip_compose=True, canned=resolution.message)
-        return _finish(payload, language, session_state, [])
+                            skip_compose=True, canned=resolution.message,
+                        question=user_message)
+        return _finish(payload, language, session_state, [],
+                        question=user_message)
 
     match = resolution.match
     session_state["last_indicator_detail_id"] = match.indicator_detail_id
@@ -329,7 +357,8 @@ def handle_message(user_message: str, conversation_context: str = "",
         if not entries:
             payload = {"ok": False, "message": msg("no_analysis", language,
                                                     indicator=match.name_en.strip())}
-            return _finish(payload, language, session_state, [])
+            return _finish(payload, language, session_state, [],
+                        question=user_message)
 
         citations = [Citation(indicator=match.name_en.strip(), data_source=match.data_source_en,
                                table="indicator_analysis", record_id=None,
@@ -346,7 +375,8 @@ def handle_message(user_message: str, conversation_context: str = "",
             for e in entries
         )
         return _finish(payload, language, session_state, citations,
-                        skip_compose=True, canned=body)
+                        skip_compose=True, canned=body,
+                        question=user_message)
 
     if ctype == "definition":
         # The top match may be an empty catalog stub that shadows the real
@@ -377,7 +407,8 @@ def handle_message(user_message: str, conversation_context: str = "",
         if not definition or definition == "-":
             payload = {"ok": False, "message": msg("no_definition", language,
                                                      indicator=match.name_en.strip())}
-            return _finish(payload, language, session_state, [])
+            return _finish(payload, language, session_state, [],
+                        question=user_message)
         payload = {"ok": True, "facts": {
             "indicator": match.name_en.strip(),
             "definition": definition,
@@ -397,7 +428,8 @@ def handle_message(user_message: str, conversation_context: str = "",
         if match.unit_en:
             body += msg("measured_in", language, unit=match.unit_en)
         return _finish(payload, language, session_state, citations,
-                        skip_compose=True, canned=body)
+                        skip_compose=True, canned=body,
+                        question=user_message)
 
     # Must be P02's PublishedIndicatorDetailId, NOT indicator_detail_id — they are
     # different GUIDs, and published_data_points keys on the former
@@ -423,7 +455,8 @@ def handle_message(user_message: str, conversation_context: str = "",
         else:
             message = msg("no_data_at_all", language, indicator=match.name_en.strip())
         payload = {"ok": False, "message": message}
-        return _finish(payload, language, session_state, [])
+        return _finish(payload, language, session_state, [],
+                        question=user_message)
 
     period = parse_period_expression(intent.get("period_expression"))
     countries_res = resolve_countries(intent.get("countries_mentioned", []), intent.get("country_group_mentioned"))
@@ -443,7 +476,8 @@ def handle_message(user_message: str, conversation_context: str = "",
         if chart:
             payload["chart"] = chart
 
-    return _finish(payload, language, session_state, citations)
+    return _finish(payload, language, session_state, citations,
+                        question=user_message)
 
 
 def _dispatch_computation(ctype, intent, match, published_detail_id, granularity, period,
@@ -685,6 +719,26 @@ def _apply_last_n_years(rows: list[dict], period) -> list[dict]:
     return [r for r in dated if r["period_date"] >= cutoff]
 
 
+_ASKS_FOR_WRITING = re.compile(
+    r"\b(wrote|written|writing|article|articles|paper|papers|publication|"
+    r"published\s+(a|an|any)?\s*(article|piece|paper)|view|views|opinion|stance|"
+    r"position|commentary|say\s+about|said\s+about|think\s+about)\b"
+    r"|كتب|مقال|مقالات|رأي|وجهة نظر|موقف|تحليل المجلس",
+    re.IGNORECASE,
+)
+
+
+def _explicitly_asks_for_writing(text: str) -> bool:
+    """True when the question is about SCAI's published WRITING, not a number.
+
+    The distinction decides whether the catalogue gets first refusal. Without
+    it, preferring data would hijack "what has SCAI written about inflation?",
+    which resolves to a real indicator but is plainly a question about an
+    article.
+    """
+    return bool(_ASKS_FOR_WRITING.search(text or ""))
+
+
 def _best_article_passages(passages: list[dict]) -> list[dict]:
     """Keeps the passages from the best-matching ARTICLE, not the best-matching
     chunks across the whole corpus.
@@ -739,11 +793,13 @@ def _article_answer(user_message: str, intent: dict, language: str, session_stat
     topic = (intent.get("indicator_phrase") or user_message or "").strip()
     if not topic:
         return _finish({"ok": False, "message": msg("no_article_topic", language)},
-                        language, session_state, [])
+                        language, session_state, [],
+                        question=user_message)
 
     if retriever.count_article_chunks() == 0:
         return _finish({"ok": False, "message": msg("articles_not_indexed", language)},
-                        language, session_state, [])
+                        language, session_state, [],
+                        question=user_message)
 
     query_embedding = get_embedding(topic)
     passages = retriever.search_article_chunks(query_embedding, language=language,
@@ -760,7 +816,8 @@ def _article_answer(user_message: str, intent: dict, language: str, session_stat
         nearest = f"{float(passages[0]['distance']):.3f}" if passages else "n/a"
         payload = {"ok": False, "message": msg("no_articles_found", language, topic=topic),
                    "facts": {"nearest_distance": nearest}}
-        return _finish(payload, language, session_state, [])
+        return _finish(payload, language, session_state, [],
+                        question=user_message)
 
     answer = answer_from_articles(user_message, relevant, language)
 
@@ -815,7 +872,8 @@ def _article_answer(user_message: str, intent: dict, language: str, session_stat
         payload["_verifier_rejected_numbers"] = offending
     session_state["last_article_topic"] = topic
     return _finish(payload, language, session_state, unique,
-                    skip_compose=True, canned=answer)
+                    skip_compose=True, canned=answer,
+                        question=user_message)
 
 
 _CATALOG_STOPWORDS = {
@@ -1034,11 +1092,12 @@ def is_readable(payload: dict) -> bool:
 
 
 def _finish(payload: dict, language: str, session_state: dict, citations: list[Citation],
-            skip_compose: bool = False, canned: Optional[str] = None) -> dict:
+            skip_compose: bool = False, canned: Optional[str] = None,
+            question: str = "") -> dict:
     if skip_compose:
         answer = canned or ""
     else:
-        draft = compose_answer(payload, language)
+        draft = compose_answer(payload, language, question=question)
         clean, offending = verify_numbers(draft, payload)
         answer = draft if clean else render_template_fallback(payload, language)
         if not clean:
