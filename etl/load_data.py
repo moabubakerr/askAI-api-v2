@@ -23,7 +23,7 @@ from sqlalchemy import create_engine, text
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from etl.utils import (
-    clean_null, fix_mojibake, maybe_b64_decode, parse_period,
+    clean_null, fix_mojibake, maybe_b64_decode, normalize_guid, parse_period,
     strip_html, to_bool, to_float,
 )
 
@@ -31,8 +31,10 @@ from etl.utils import (
 def read_csv(csv_dir: Path, filename: str) -> pd.DataFrame:
     df = pd.read_csv(csv_dir / filename, encoding="utf-8-sig", dtype=str, keep_default_na=False)
     # normalize the literal-string 'NULL' cells that appear across these exports
-    # (DataFrame.applymap was removed in pandas 3.0; .map is the replacement)
-    return df.map(clean_null)
+    # (DataFrame.applymap was removed in pandas 3.0; .map is the replacement),
+    # then case-normalize GUIDs so ids written upper-case in the CMS files join
+    # against the same ids written lower-case in the P0* files.
+    return df.map(clean_null).map(normalize_guid)
 
 
 def load_countries(csv_dir, engine):

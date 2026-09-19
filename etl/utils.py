@@ -94,6 +94,28 @@ def parse_period(period: str):
     return None, None
 
 
+_GUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def normalize_guid(value):
+    """Lower-cases anything that is exactly a GUID.
+
+    The exports disagree on case: the CMS files (Sectors.csv, General
+    Entities.csv) write GUIDs upper-case, while the P0* files write the SAME
+    ids lower-case. Every id is stored as TEXT, and text comparison in Postgres
+    is case-sensitive, so a join across the two families silently matches zero
+    rows. That is not hypothetical — it is why
+        indicator_dashboards JOIN sectors ON s.sector_id = dd.entity_id
+    returned 0 instead of 210, which broke every "which indicators track sector
+    X" question while looking like an empty result rather than a bug.
+
+    Normalizing at load time fixes the whole class of it, rather than sprinkling
+    LOWER() into individual queries and leaving the next join to rediscover it."""
+    if isinstance(value, str) and _GUID_RE.match(value):
+        return value.lower()
+    return value
+
+
 def strip_html(text: str) -> str:
     """Rough HTML stripper for feeding article/entity content to the LLM as
     plain text context. Not meant for display — only for grounding prompts."""

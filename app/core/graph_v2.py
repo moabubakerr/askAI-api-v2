@@ -18,6 +18,7 @@ Conversation state (for follow-ups, fixing F-030) is a small dict the caller
 persists per session and passes back in as `session_state`; this function
 returns an updated one.
 """
+from datetime import date
 from typing import TypedDict, Optional
 
 from app.nlu.intent_agent import extract_intent
@@ -39,6 +40,12 @@ from etl.utils import strip_html
 
 
 PERIODS_PER_YEAR = {"monthly": 12, "quarterly": 4, "yearly": 1}
+
+# Above this, a match is treated as certain enough to answer without comment.
+# Between MIN_CONFIDENCE (0.55, in indicator_resolver) and this, the answer is
+# still given but the match is disclosed. Provisional: it needs calibrating
+# against real bge-m3 scores over a question set, not guessing.
+CONFIDENT_MATCH = 0.75
 
 
 class SessionState(TypedDict, total=False):
@@ -216,6 +223,13 @@ def handle_message(user_message: str, conversation_context: str = "",
 
     payload, citations = _dispatch_computation(ctype, intent, match, published_detail_id, granularity, period, countries_res)
 
+    # Flag a shaky resolution so _finish can disclose it. The threshold sits
+    # above MIN_CONFIDENCE (0.55) deliberately: clearing the bar to answer at
+    # all is not the same as being sure enough to answer silently.
+    if payload.get("ok") and match.confidence < CONFIDENT_MATCH:
+        payload["_low_confidence_match"] = {"indicator": match.name_en.strip(),
+                                            "confidence": round(match.confidence, 3)}
+
     if payload.get("ok") and wants_chart(user_message, ctype):
         chart = build_chart_spec(ctype, payload["facts"], match.name_en, match.unit_en, match.format)
         if chart:
@@ -252,15 +266,16 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
                 if row:
                     citations.append(Citation(indicator_name, data_source_en, row.get("source_table", "unknown"),
                                                row.get("record_id"), row.get("period_label"), entry["country"]))
-        return _wrap(result, unit, extra_note=note), citations
+        return _wrap(result, unit, extra_note=note, indicator_name=indicator_name), citations
 
     rows = retriever.get_series(match.indicator_detail_id, published_detail_id, granularity,
                                  start_date=period.start_date, end_date=period.end_date)
+    rows = _apply_last_n_years(rows, period)
 
     if ctype == "latest_value":
         result = compute.latest_value(rows)
         used = [rows[-1]] if rows else []
-        return _wrap(result, unit), citations_for_rows(used, indicator_name, data_source_en)
+        return _wrap(result, unit, indicator_name=indicator_name), citations_for_rows(used, indicator_name, data_source_en)
 
     if ctype == "period_ranking":
         # extremum "min" means lowest-first; anything else (including the usual
@@ -269,18 +284,18 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         result = compute.period_ranking(rows, descending=descending)
         # Cite every row that appears in the ranking, not just the winner —
         # each listed figure is a claim of its own.
-        return _wrap(result, unit), citations_for_rows(rows, indicator_name, data_source_en)
+        return _wrap(result, unit, indicator_name=indicator_name), citations_for_rows(rows, indicator_name, data_source_en)
 
     if ctype == "trend":
         result = compute.trend(rows)
-        return _wrap(result, unit), citations_for_rows(rows, indicator_name, data_source_en)
+        return _wrap(result, unit, indicator_name=indicator_name), citations_for_rows(rows, indicator_name, data_source_en)
 
     if ctype == "min_max":
         which = intent.get("extremum") or "max"
         result = compute.min_max(rows, which)
         used = [_find_row_by_period(rows, result.facts.get("period_label"))] if result.ok else []
         used = [r for r in used if r]
-        return _wrap(result, unit), citations_for_rows(used, indicator_name, data_source_en)
+        return _wrap(result, unit, indicator_name=indicator_name), citations_for_rows(used, indicator_name, data_source_en)
 
     if ctype == "difference":
         result = compute.difference(rows)
@@ -288,7 +303,7 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         if result.ok:
             used = [r for r in (_find_row_by_period(rows, result.facts.get("high_period")),
                                  _find_row_by_period(rows, result.facts.get("low_period"))) if r]
-        return _wrap(result, unit), citations_for_rows(used, indicator_name, data_source_en)
+        return _wrap(result, unit, indicator_name=indicator_name), citations_for_rows(used, indicator_name, data_source_en)
 
     if ctype == "growth_rate":
         if len(rows) < 2:
@@ -300,7 +315,7 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         if result.ok:
             used = [r for r in (_find_row_by_period(rows, result.facts.get("period_start")),
                                  _find_row_by_period(rows, result.facts.get("period_end"))) if r]
-        return _wrap(result, unit), citations_for_rows(used, indicator_name, data_source_en)
+        return _wrap(result, unit, indicator_name=indicator_name), citations_for_rows(used, indicator_name, data_source_en)
 
     if ctype == "period_comparison":
         if len(rows) < 2:
@@ -310,14 +325,44 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         if result.ok:
             used = [r for r in (_find_row_by_period(rows, result.facts.get("period_a")),
                                  _find_row_by_period(rows, result.facts.get("period_b"))) if r]
-        return _wrap(result, unit), citations_for_rows(used, indicator_name, data_source_en)
+        return _wrap(result, unit, indicator_name=indicator_name), citations_for_rows(used, indicator_name, data_source_en)
 
     return {"ok": False, "message": "I couldn't determine what computation this question needs."}, []
 
 
-def _wrap(result: compute.ComputeResult, unit: str, extra_note: Optional[str] = None) -> dict:
+def _apply_last_n_years(rows: list[dict], period) -> list[dict]:
+    """Applies a "last N years" window, which nothing previously did.
+
+    parse_period_expression() recognises the phrase and records n_years, but it
+    never sets start_date, and start_date is the only thing get_series filters
+    on — so "the last 5 years" and "the last 3 years" both returned the entire
+    history, identically. That is QC findings F-022/F-023 exactly: the tester
+    asked both and got the same answer.
+
+    The window is anchored on the newest retrieved period rather than on
+    today's date. Anchoring on wall-clock time would silently empty the window
+    whenever a series lags the calendar, which several of these do."""
+    if period.kind != "last_n_years" or not period.n_years:
+        return rows
+    dated = [r for r in rows if r.get("period_date")]
+    if not dated:
+        return rows
+    anchor = max(r["period_date"] for r in dated)
+    cutoff = date(anchor.year - period.n_years, anchor.month, 1)
+    return [r for r in dated if r["period_date"] >= cutoff]
+
+
+def _wrap(result: compute.ComputeResult, unit: str, extra_note: Optional[str] = None,
+          indicator_name: Optional[str] = None) -> dict:
     payload = {"ok": result.ok, "facts": {**result.facts, "unit": unit}} if result.ok else \
               {"ok": False, "message": result.message}
+    # Name the indicator in every successful payload. Without it the Composer
+    # has nothing to name and writes "the specified economic indicator", which
+    # hides a mis-resolution: a question about solar energy was answered with a
+    # "Share of Qatari Teachers" target and read as plausible, because the
+    # answer text never said which indicator it used.
+    if payload.get("ok") and indicator_name:
+        payload["facts"]["indicator"] = indicator_name.strip()
     if extra_note and payload.get("ok"):
         payload["facts"]["note"] = extra_note
     return payload
@@ -367,6 +412,23 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
     # Sources footer: always appended deterministically, never left to the
     # LLM's discretion. Only skipped when there's genuinely nothing to cite
     # (greetings, or a refusal where no data was retrieved at all).
+    # Low-confidence match disclosure. Appended structurally, for the same
+    # reason as the Sources footer: an instruction the Composer might drop on
+    # some phrasing is not a guarantee.
+    #
+    # The case this exists for: "What percentage of Qatar's energy is generated
+    # by solar?" resolved to "Share of Qatari Teachers" — the lexical overlap
+    # between "percentage of Qatar's..." and "Share of Qatari..." was enough to
+    # clear MIN_CONFIDENCE — and answered with its 2030 target of 50%. Nothing
+    # in the reply signalled that the indicator was not what was asked about.
+    # This does not stop a wrong match; it stops a wrong match reading as a
+    # confident one.
+    weak = payload.pop("_low_confidence_match", None)
+    if weak:
+        answer = (f"{answer}\n\nI matched your question to \"{weak['indicator']}\" "
+                  f"(approximate match). If that isn't the indicator you meant, "
+                  f"please name it exactly.")
+
     footer = render_sources_footer(citations)
     if footer:
         answer = f"{answer}\n\n{footer}"
