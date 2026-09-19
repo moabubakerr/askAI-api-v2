@@ -346,7 +346,19 @@ def handle_message(user_message: str, conversation_context: str = "",
         }}
         citations = [Citation(indicator=match.name_en.strip(), data_source=match.data_source_en,
                               table="indicator_details", record_id=match.indicator_detail_id)]
-        return _finish(payload, language, session_state, citations)
+        # Returned verbatim, skipping the Composer, for the same reason as the
+        # analyst commentary: this is SCAI's own authored wording, and a model
+        # asked to "phrase" it can only paraphrase it. Sending it through the
+        # Composer also produced the definition twice — once reworded in the
+        # prose and once as the raw fact — and made the model apologise for the
+        # absence of figures a definition never has, in one case narrating its
+        # own input: "(Note: The payload does not contain specific numerical
+        # data points...)".
+        body = definition
+        if match.unit_en:
+            body += msg("measured_in", language, unit=match.unit_en)
+        return _finish(payload, language, session_state, citations,
+                        skip_compose=True, canned=body)
 
     # Must be P02's PublishedIndicatorDetailId, NOT indicator_detail_id — they are
     # different GUIDs, and published_data_points keys on the former

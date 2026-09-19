@@ -281,6 +281,10 @@ _MESSAGES = {
         "ar": ("لم ينشر المجلس تحليلاً مكتوباً لـ \"{indicator}\" ضمن البيانات المعتمدة. "
                 "يمكنني عرض قيمه أو اتجاهه بدلاً من ذلك."),
     },
+    "measured_in": {
+        "en": "\n\nMeasured in {unit}.",
+        "ar": "\n\nوحدة القياس: {unit}.",
+    },
     "no_overview": {
         "en": "No headline indicators were available to build an overview.",
         "ar": "لا توجد مؤشرات رئيسية متاحة لإعداد نظرة عامة.",
