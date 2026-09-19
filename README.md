@@ -178,25 +178,19 @@ of what SQL the LLM generates. Point `POSTGRES_DSN` in `app/core/config.py`
 The image is built on the VM, from the repo, next to the models — there is no
 registry push and no `docker save`/`load` step.
 
-**Step 0 — get the repo onto the VM, and the CSVs with it.**
+**Step 0 — clone. The CSVs come with it.**
 
-`data/` is **not** in this repository — it is gitignored, because this repo is
-public and the exports are Qatari government economic data plus an internal QC
-workbook. A `git clone` therefore gives you the code but no CSVs, and
-`docker compose run --rm etl` will exit with "no CSV directory at /srv/data"
-until you copy them across separately. The image never contains them either
-(`data/` is in `.dockerignore`); they are bind-mounted read-only at load time.
+`data/` is committed to this repository, so a clone is self-contained and no
+separate file transfer is needed before the ETL can run:
 
 ```bash
-git clone https://github.com/moabubakerr/askAI-api-v2.git /opt/scai-chatbot   # code
-rsync -av ./data/ user@vm:/opt/scai-chatbot/data/                            # data, separately
+git clone https://github.com/moabubakerr/askAI-api-v2.git ~/scai-chatbot
+cd ~/scai-chatbot
 ```
 
-Or push the whole working tree, CSVs included, straight from your workstation:
-
-```bash
-rsync -av --exclude '.venv' --exclude '.git' ./scai-chatbot/ user@vm:/opt/scai-chatbot/
-```
+The CSVs are still kept out of the Docker *image* (`data/` is in
+`.dockerignore`) and bind-mounted read-only into the `etl` container at load
+time — so the image carries no data, and reloading never needs a rebuild.
 
 **Step 1 — find the model stack's network name.** This is the one value that
 cannot be guessed: Compose namespaces networks by project, so the network your

@@ -1,9 +1,9 @@
-# SCAI source data — deliberately NOT in this repository.
-# These are Qatari government economic exports plus the internal QC feedback
-# workbook; this repo is public. The CSVs reach the VM by rsync (README §4a
-# step 0) and are bind-mounted into the etl container at load time, so nothing
-# here depends on them being committed.
-data/
+# data/ IS tracked here, by explicit decision — it makes `git clone` on the VM
+# self-contained, with no separate file transfer before the ETL can run.
+# Note what that means: this repository is public, so the SCAI exports and
+# AskAI-test (4).xlsx (the QC feedback log) are public with it.
+# The CSVs are still excluded from the Docker image (see .dockerignore) and
+# bind-mounted at load time, so the image itself carries no data.
 
 # Real credentials. Only .env.example, which holds placeholders, is tracked.
 .env

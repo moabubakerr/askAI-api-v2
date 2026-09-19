@@ -1,0 +1,4 @@
+"Id","NameEN","NameAR","UniqueId","ColorClass","Ranking"
+"1","Non-Priority","مشروع ليس ذو أولوية","non-priority","gray-tag","3"
+"2","Priority","مشروع ذو أولوية","priority","blue-tag","2"
+"3","Confidential","مشروع ذو سرية","confidential","red-tag","1"
