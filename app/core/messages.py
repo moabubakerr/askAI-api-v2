@@ -20,6 +20,8 @@ question is in Arabic. The model's answer is used only when the script is
 inconclusive.
 """
 import re
+import unicodedata
+from difflib import SequenceMatcher
 from typing import Optional
 
 # Arabic block plus the Arabic Supplement/Extended-A ranges.
@@ -37,6 +39,87 @@ def detect_language(user_message: str, model_language: Optional[str] = None) -> 
 
 def is_arabic(language: Optional[str]) -> bool:
     return (language or "en").lower().startswith("ar")
+
+
+# --- greeting detection -----------------------------------------------------
+#
+# Classifying greetings is left to the intent agent, and it is inconsistent at
+# it: "اهلا" and "كيف حالك" were routed to general_chat, while "سلام" and
+# "سلام علبكم" were routed to a data lookup, fell through to indicator
+# resolution and came back "No indicator was mentioned." Greeting someone and
+# being told you failed to name an indicator is a bad first impression, and it
+# is avoidable — this is a closed set of short phrases, not a judgement call,
+# so it is decided deterministically before the model is consulted.
+
+_ARABIC_DIACRITICS = re.compile(r"[ً-ْٰـ]")
+
+_GREETING_PHRASES = {
+    # Arabic (normalized forms)
+    "السلام عليكم", "السلام عليكم ورحمه الله", "السلام عليكم ورحمه الله وبركاته",
+    "وعليكم السلام", "كيف حالك", "كيف الحال", "شلونك", "صباح الخير", "مساء الخير",
+    "اهلا وسهلا", "حياك الله", "تحياتي", "شكرا", "شكرا لك", "مع السلامه",
+    # English
+    "hi", "hello", "hey", "hiya", "yo", "greetings", "good morning",
+    "good afternoon", "good evening", "how are you", "how are you doing",
+    "whats up", "thanks", "thank you", "thank you very much", "bye", "goodbye",
+    "salam", "salaam", "assalamu alaikum", "as salamu alaykum",
+}
+
+# A message may START with one of these and still be only a greeting.
+_GREETING_STARTERS = {
+    "سلام", "السلام", "اهلا", "هلا", "مرحبا", "مرحبتين", "صباح", "مساء",
+    "تحيه", "شكرا", "وعليكم",
+    "hi", "hello", "hey", "salam", "salaam", "greetings", "thanks", "thank",
+}
+
+# Tokens that may legitimately follow a greeting without making it a question.
+_GREETING_CONTINUATIONS = {
+    "عليكم", "ورحمه", "الله", "وبركاته", "وسهلا", "الخير", "بك", "بكم", "لك",
+    "you", "there", "everyone", "all", "morning", "afternoon", "evening", "again",
+}
+
+
+def _normalize(text: str) -> str:
+    text = unicodedata.normalize("NFKC", text or "")
+    text = _ARABIC_DIACRITICS.sub("", text)
+    # Unify the alef/ya/ta-marbuta variants that Arabic typing varies freely.
+    for src, dst in (("أإآٱ", "ا"), ("ى", "ي"), ("ة", "ه"), ("ؤ", "و"), ("ئ", "ي")):
+        for ch in src:
+            text = text.replace(ch, dst)
+    text = re.sub(r"[^\w\s؀-ۿ]", " ", text)
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def _close(a: str, b: str, cutoff: float = 0.8) -> bool:
+    return a == b or SequenceMatcher(None, a, b).ratio() >= cutoff
+
+
+def is_greeting(text: str) -> bool:
+    """True when the message is ONLY a greeting.
+
+    Fuzzy on each token, because "سلام علبكم" is a transposition of
+    "سلام عليكم" and a user who mistypes a greeting should still be greeted.
+
+    Deliberately conservative about length: every token after the opening
+    greeting must itself be a greeting word, so "مرحبا ما هو التضخم" is a
+    question that opens politely, not a greeting, and is answered as a
+    question.
+    """
+    normalized = _normalize(text)
+    if not normalized or len(normalized) > 60:
+        return False
+    if normalized in _GREETING_PHRASES:
+        return True
+    if any(_close(normalized, phrase, 0.9) for phrase in _GREETING_PHRASES):
+        return True
+
+    tokens = normalized.split()
+    if not tokens or len(tokens) > 6:
+        return False
+    if not any(_close(tokens[0], starter) for starter in _GREETING_STARTERS):
+        return False
+    allowed = _GREETING_STARTERS | _GREETING_CONTINUATIONS
+    return all(any(_close(token, word) for word in allowed) for token in tokens[1:])
 
 
 _MESSAGES = {
@@ -135,6 +218,22 @@ _MESSAGES = {
                 "Manufacturing or Education, or ask \"what can you do?\" for the full list."),
         "ar": ("لم أجد مؤشرات تطابق \"{query}\". جرّب اسم قطاع مثل السياحة أو الصناعة "
                 "التحويلية أو التعليم، أو اسأل \"ماذا يمكنك أن تفعل؟\" للقائمة الكاملة."),
+    },
+    # Replaces a bare "No indicator was mentioned." — technically true, useless
+    # in practice, and what an unrecognised greeting used to be answered with.
+    "no_indicator_in_question": {
+        "en": ("I couldn't tell which indicator you're asking about. Name the metric — "
+                "for example \"Real GDP\", \"Inflation\" or \"Number of International "
+                "Visitors\" — or ask \"what can you do?\" to see what's covered."),
+        "ar": ("لم أتبيّن المؤشر الذي تسأل عنه. اذكر اسم المؤشر — مثل \"الناتج المحلي "
+                "الإجمالي الحقيقي\" أو \"التضخم\" أو \"عدد الزوار الدوليين\" — أو اسأل "
+                "\"ماذا يمكنك أن تفعل؟\" لمعرفة ما هو مشمول."),
+    },
+    "empty_catalog": {
+        "en": ("The indicator catalog is empty — the database has no indicator data loaded. "
+                "This is a setup problem, not a limit of what you asked."),
+        "ar": ("كتالوج المؤشرات فارغ — لا توجد بيانات مؤشرات محمّلة في قاعدة البيانات. "
+                "هذه مشكلة في الإعداد وليست حدوداً لما سألت عنه."),
     },
     "no_overview": {
         "en": "No headline indicators were available to build an overview.",

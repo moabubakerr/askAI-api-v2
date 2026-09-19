@@ -23,7 +23,7 @@ from typing import TypedDict, Optional
 
 from app.nlu.intent_agent import extract_intent
 from app.core.conversation import carry_forward
-from app.core.messages import msg, detect_language
+from app.core.messages import msg, detect_language, is_greeting
 from app.resolvers.indicator_resolver import resolve_indicator, has_usable_definition
 from app.resolvers.country_resolver import resolve_countries
 from app.resolvers.period_resolver import parse_period_expression, parse_explicit_frequency, choose_granularity
@@ -102,6 +102,14 @@ def handle_message(user_message: str, conversation_context: str = "",
     # earlier indicator AND period instead of only the indicator.
     intent = carry_forward(intent, session_state, user_message)
     ctype = intent.get("computation_type", "out_of_scope")
+
+    # Greetings are decided here, not by the model. It routed "اهلا" and
+    # "كيف حالك" to general_chat but sent "سلام" and "سلام علبكم" down the data
+    # path, where they hit indicator resolution and were answered "No indicator
+    # was mentioned." A closed set of short phrases does not need a model, and
+    # this way the behaviour is the same every time.
+    if is_greeting(user_message):
+        ctype = "general_chat"
     # Arabic script is unambiguous; the model's language field is a guess. An
     # Arabic greeting was being answered in English, which is the product simply
     # not working in one of its two languages.

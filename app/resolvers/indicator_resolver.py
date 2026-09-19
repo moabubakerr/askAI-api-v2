@@ -147,7 +147,8 @@ def resolve_indicator(phrase: str, require_data: bool = True,
     Definition lookups pass require_data=False: a stub can still carry a
     perfectly good definition, and no figures are being claimed."""
     if not phrase or not phrase.strip():
-        return ResolutionResult(None, "not_found", [], "No indicator was mentioned.")
+        return ResolutionResult(None, "not_found", [],
+                                 msg("no_indicator_in_question", language))
 
     catalog = _fetch_catalog()
     if require_data:
@@ -155,7 +156,7 @@ def resolve_indicator(phrase: str, require_data: bool = True,
     if require_definition:
         catalog = [r for r in catalog if has_usable_definition(r)]
     if not catalog:
-        return ResolutionResult(None, "not_found", [], "The indicator catalog is empty.")
+        return ResolutionResult(None, "not_found", [], msg("empty_catalog", language))
 
     names = [row["name_en"] for row in catalog]
     name_embeddings = embed_catalog(names)
