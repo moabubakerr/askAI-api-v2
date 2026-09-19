@@ -24,6 +24,7 @@ from typing import Optional
 
 from sqlalchemy import text
 from app.db.executor import engine
+from app.core.messages import _ARABIC_CHARS, _normalize
 
 # GCC membership as used in SCAI's own country strings. Qatar itself is
 # "domestic" (blank country_en in the data) and is handled separately by
@@ -34,6 +35,12 @@ COUNTRY_GROUPS = {
     "gcc": GCC_COUNTRIES,
     "gulf": GCC_COUNTRIES,
     "gulf cooperation council": GCC_COUNTRIES,
+    # Arabic. Without these, "قارن التضخم بين قطر ودول مجلس التعاون" resolved no
+    # group at all and compared Qatar against nothing.
+    "دول مجلس التعاون": GCC_COUNTRIES,
+    "مجلس التعاون الخليجي": GCC_COUNTRIES,
+    "دول الخليج": GCC_COUNTRIES,
+    "الخليج": GCC_COUNTRIES,
 }
 
 # Common user phrasings that don't exact-match the data's own strings.
@@ -41,6 +48,15 @@ ALIASES = {
     "saudi": "KSA", "saudi arabia": "KSA", "ksa": "KSA",
     "uae": "UAE", "emirates": "UAE", "united arab emirates": "UAE",
     "qatar": None,  # None = domestic, handled specially by the retriever
+    # Arabic forms of the two that need an alias rather than a lookup, plus
+    # Qatar's domestic sentinel. Everything else is translated from the
+    # countries table (see _arabic_to_english), which already holds name_ar for
+    # all 235 countries — it was simply never consulted, so an Arabic question
+    # naming a country resolved nothing and the comparison silently became a
+    # one-country answer.
+    "قطر": None, "دولة قطر": None,
+    "السعودية": "KSA", "المملكة العربية السعودية": "KSA",
+    "الامارات": "UAE", "الإمارات": "UAE", "الامارات العربية المتحدة": "UAE",
 }
 
 
@@ -59,8 +75,36 @@ def _fetch_country_names() -> list[str]:
     return [r[0] for r in rows]
 
 
+def _arabic_to_english(name: str) -> Optional[str]:
+    """Maps an Arabic country name onto its English name via the countries
+    table, which carries name_ar for every country and was never used."""
+    key = _normalize(name)
+    if not key:
+        return None
+    with engine.connect() as conn:
+        rows = conn.execute(text(
+            "SELECT name_en, name_ar FROM countries WHERE name_ar IS NOT NULL AND name_ar <> ''"
+        )).fetchall()
+    best, best_score = None, 0.0
+    for name_en, name_ar in rows:
+        score = SequenceMatcher(None, key, _normalize(name_ar)).ratio()
+        if score > best_score:
+            best, best_score = name_en, score
+    return best if best_score >= 0.85 else None
+
+
 def _match_one(name: str, known: list[str]) -> Optional[str]:
     key = name.strip().lower()
+    # Arabic first: translate to the English name, then fall through to the
+    # usual alias/fuzzy pipeline so "السعودية" -> "Saudi Arabia" -> "KSA".
+    if _ARABIC_CHARS.search(key):
+        if _normalize(key) in {_normalize(k) for k in ALIASES if _ARABIC_CHARS.search(k)}:
+            for alias, value in ALIASES.items():
+                if _ARABIC_CHARS.search(alias) and _normalize(alias) == _normalize(key):
+                    return value
+        english = _arabic_to_english(key)
+        if english:
+            key = english.strip().lower()
     if key in ALIASES:
         return ALIASES[key]  # may be None for Qatar
     if key in ("qatar",):
@@ -88,7 +132,12 @@ def resolve_countries(countries_mentioned: list[str], group_mentioned: Optional[
     includes_qatar = False
     for name in countries_mentioned:
         key = name.strip().lower()
-        if key == "qatar":
+        # Qatar is domestic — stored as a blank country and added by the
+        # retriever, never queried by name. The check was `key == "qatar"`,
+        # so the Arabic "قطر" fell past it, failed to match any country_en, and
+        # was reported as a country with no approved data. The user was told
+        # there is no data for Qatar, in an answer built from Qatar's data.
+        if key in ALIASES and ALIASES[key] is None:
             includes_qatar = True
             continue
         if key in ALIASES and ALIASES[key] is not None:

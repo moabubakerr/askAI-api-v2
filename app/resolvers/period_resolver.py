@@ -36,7 +36,8 @@ _MONTH_NAMES = {
 @dataclass
 class PeriodResolution:
     kind: str                      # "single_year" | "single_quarter" | "single_month" |
-                                    # "range" | "last_n_years" | "unspecified"
+                                    # "range" | "last_n_years" | "previous_year" |
+                                    # "unspecified"
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     explicit_granularity: Optional[str] = None   # only set if user stated it explicitly
@@ -142,6 +143,14 @@ def parse_period_expression(expr: Optional[str]) -> PeriodResolution:
         if start > end:
             start, end = label_bounds(pair[1])[0], label_bounds(pair[0])[1]
         return PeriodResolution(kind="range", start_date=start, end_date=end, raw=expr)
+
+    # "last year" / "the year before" — no digit, so the "last N years" pattern
+    # below never matched them and the expression fell through to
+    # "unspecified", which means NO window at all. The F-030 follow-up "WHAT
+    # about the last year?" therefore returned the same latest reading it had
+    # just given, which reads as the system ignoring the question.
+    if re.search(r"\b(last|previous|prior)\s+year\b", text_l) or        re.search(r"\b(the\s+)?year\s+(before|earlier|ago)\b", text_l) or        re.search(r"السنة الماضية|العام الماضي|السنة السابقة|العام السابق", expr):
+        return PeriodResolution(kind="previous_year", n_years=1, raw=expr)
 
     # "last N years" / "last N months"
     m = re.search(r"last\s+(\d+)\s+year", text_l)

@@ -644,12 +644,23 @@ def _apply_last_n_years(rows: list[dict], period) -> list[dict]:
     The window is anchored on the newest retrieved period rather than on
     today's date. Anchoring on wall-clock time would silently empty the window
     whenever a series lags the calendar, which several of these do."""
-    if period.kind != "last_n_years" or not period.n_years:
+    if period.kind not in ("last_n_years", "previous_year") or not period.n_years:
         return rows
     dated = [r for r in rows if r.get("period_date")]
     if not dated:
         return rows
     anchor = max(r["period_date"] for r in dated)
+
+    if period.kind == "previous_year":
+        # "the last year" means the year BEFORE the most recent data, not a
+        # window ending at it. Treated as a window, the answer would be the
+        # same latest reading the user had just been given.
+        target = anchor.year - period.n_years
+        in_year = [r for r in dated if r["period_date"].year == target]
+        # If that year has no readings, keep everything rather than answer with
+        # nothing — the caller reports an empty result honestly either way.
+        return in_year or dated
+
     cutoff = date(anchor.year - period.n_years, anchor.month, 1)
     return [r for r in dated if r["period_date"] >= cutoff]
 
