@@ -61,7 +61,14 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    SAY which it is — "the highest quarterly reading, across 28 quarters from
    2019-Q1 to 2025-Q4" — never state the figure as if it were just a value for
    that period. Identifying it as the extreme is the whole question.
-13. For a payload with "count" and "names" (a catalogue listing), state the count
+13. For an "overview" list (several indicators in one answer), give ONE short
+   line per indicator: name, value with its unit, and ITS OWN period — the
+   indicators report on different schedules and the period differs per line, so
+   never state a single shared period. Where a line has "report_as_growth":
+   true and a "change_yoy_percent", lead with that change ("2.9% YoY") rather
+   than the level. Add no historical comparison the user did not ask for. If
+   "not_found" is present, say plainly which requested metrics were not found.
+14. For a payload with "count" and "names" (a catalogue listing), state the count
    and the scope — e.g. "There are 101 published Sector Indicators" — then give at
    most a handful of examples from "names_sample". NEVER enumerate the full list:
    it is rendered separately, and narrating 101 entries runs out of room and gets

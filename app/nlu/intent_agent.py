@@ -27,6 +27,7 @@ COMPUTATION_TYPES = [
     "analysis_lookup",    # "what is the latest analysis of inflation" / "ما هو أخر تحليل للتضخم"
     "article_lookup",     # "what has SCAI written about tariffs?" / "what is SCAI's view on X"
     "count_list",         # "how many indicators are in sector Y" / "list indicators in Z"
+    "multi_indicator",    # "show GDP growth, inflation, and government revenues"
     "macro_overview",     # "what's the latest in Qatar's economy" / "how is the economy doing"
     "capabilities",       # "what can you do"
     "general_chat",       # greetings, small talk
@@ -52,6 +53,13 @@ Output ONLY JSON with this exact shape:
 }}
 
 Rules:
+- Use "multi_indicator" when the user names SEVERAL metrics in one question:
+  "Show GDP growth, inflation, and government revenues", "give me inflation and
+  the trade balance". Put ALL of them in indicator_phrase exactly as the user
+  wrote them, separated as they wrote them — do not pick one and drop the rest.
+  Each gets its own latest reading and its own period.
+  Contrast: "macro_overview" is for "how is the economy doing" where the user
+  names nothing specific.
 - Use "count_list" when the user asks HOW MANY indicators there are, or to LIST or
   NAME them, for a group rather than for one metric: "list the indicators in
   Sectors", "how many indicators in diversification target", "give me all the

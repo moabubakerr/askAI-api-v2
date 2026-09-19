@@ -247,6 +247,26 @@ def handle_message(user_message: str, conversation_context: str = "",
 
     resolution = resolve_indicator(indicator_phrase or "", require_data=(ctype != "definition"),
                                     language=language)
+
+    # Several metrics in one question get one reading each. Attempted only when
+    # the whole phrase did NOT resolve confidently as a single indicator, which
+    # is what keeps "Crop Yield - Vegetables, Greenhouses" — a real indicator
+    # whose own name contains a comma — from being torn in half. "GDP growth,
+    # inflation, and government revenues" does not resolve as one name; it was
+    # reported as ambiguous and offered a choice between three indicators, none
+    # of which was the question.
+    confident_single = (resolution.status in ("resolved", "inactive") and resolution.match
+                        and resolution.match.confidence >= CONFIDENT_MATCH)
+    if ctype != "definition" and not confident_single:
+        parts = split_indicator_phrases(indicator_phrase or "")
+        if len(parts) > 1:
+            payload, citations = _indicator_snapshot(parts, language)
+            if payload.get("ok") and len(payload["facts"]["overview"]) > 1:
+                if wants_chart(user_message, "macro_overview"):
+                    payload["chart"] = build_chart_spec("macro_overview", payload["facts"],
+                                                         "Economic Snapshot", None, None)
+                return _finish(payload, language, session_state, citations)
+
     if resolution.status != "resolved" and resolution.status != "inactive":
         payload = {"ok": False, "message": resolution.message}
         if resolution.status == "ambiguous" and resolution.candidates:
@@ -892,6 +912,81 @@ def _wrap(result: compute.ComputeResult, unit: str, extra_note: Optional[str] = 
     if extra_note and payload.get("ok"):
         payload["facts"]["note"] = extra_note
     return payload
+
+
+_SPLIT_METRICS = re.compile(r"\s*(?:,|;|\band\b|\bو\s)\s*", re.IGNORECASE)
+
+
+def split_indicator_phrases(phrase: str) -> list[str]:
+    """Splits "GDP growth, inflation, and government revenues" into its parts.
+
+    One question naming three metrics was sent to the resolver as a single
+    string, which then reported — correctly, for what it was given — that
+    "GDP growth, inflation, and government revenues" could match more than one
+    indicator, and offered a choice of three unrelated ones. Nothing in the
+    pipeline had noticed it was three questions.
+    """
+    parts = [p.strip(" .?!") for p in _SPLIT_METRICS.split(phrase or "")]
+    return [p for p in parts if len(p) > 2]
+
+
+def _asks_for_growth(phrase: str) -> bool:
+    return bool(re.search(r"\b(growth|change|rate of change)\b|نمو|تغير", phrase or "",
+                          re.IGNORECASE))
+
+
+def _indicator_snapshot(phrases: list[str], language: str = "en"):
+    """One latest reading per named indicator, each with its OWN period.
+
+    Different indicators report on different schedules, so a snapshot that
+    forces them onto one period would either drop the fresher ones or imply a
+    currency the data does not have. Each line carries the period it came from,
+    and nothing historical is added — a comparison the user did not ask for is
+    a comparison the user did not ask for.
+    """
+    facts, citations, missing = [], [], []
+    for phrase in phrases:
+        res = resolve_indicator(phrase, language=language)
+        if res.status not in ("resolved", "inactive") or not res.match:
+            missing.append(phrase)
+            continue
+        match = res.match
+        published_id = match.published_detail_id if match.is_published else None
+        gran = choose_granularity(None, retriever.get_available_granularities(
+            published_id, match.indicator_detail_id))
+        if not gran:
+            missing.append(phrase)
+            continue
+        rows = retriever.get_series(match.indicator_detail_id, published_id, gran)
+        latest = compute.latest_value(rows)
+        if not latest.ok:
+            missing.append(phrase)
+            continue
+        row = _find_row_by_period(rows, latest.facts.get("period_label"))
+        entry = {"indicator": match.name_en.strip(), "unit": match.unit_en,
+                 "granularity": gran, "asked_as": phrase, **latest.facts}
+        # SCAI's own vetted period-on-period change, never a fresh derivation
+        # (F-022..F-026). Carried on every line so "GDP growth" can be answered
+        # as a growth rate rather than a level.
+        if row:
+            change = compute.preferred_change_field(row, gran)
+            if change is not None:
+                # SCAI's stored figure carries full float noise
+                # (2.0276599261667307). Rounded to the same 4 places every other
+                # computed value uses, so the number shown is the number checked.
+                entry["change_yoy_percent"] = round(float(change), 4)
+            entry["report_as_growth"] = _asks_for_growth(phrase)
+            citations += citations_for_rows([row], match.name_en, match.data_source_en)
+        facts.append(entry)
+
+    if not facts:
+        return {"ok": False, "message": msg("no_overview", language)}, []
+    payload = {"ok": True, "facts": {"overview": facts}}
+    if missing:
+        # Named but not found — said out loud rather than quietly dropped from
+        # a list the user can see is short.
+        payload["facts"]["not_found"] = missing
+    return payload, citations
 
 
 def _macro_overview(language="en"):
