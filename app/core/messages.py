@@ -285,6 +285,14 @@ _MESSAGES = {
         "en": "\n\nMeasured in {unit}.",
         "ar": "\n\nوحدة القياس: {unit}.",
     },
+    "no_country_breakdown": {
+        "en": ("\"{indicator}\" is reported for Qatar as a whole — the approved data has no "
+                "breakdown by country, so there is no {countries} figure to give. Ask me for "
+                "the overall total and I can answer that."),
+        "ar": ("\"{indicator}\" يُنشر لدولة قطر ككل — ولا تتضمن البيانات المعتمدة تفصيلاً "
+                "حسب الدولة، لذا لا يوجد رقم خاص بـ {countries}. يمكنك أن تسألني عن الإجمالي "
+                "وسأجيبك."),
+    },
     "no_overview": {
         "en": "No headline indicators were available to build an overview.",
         "ar": "لا توجد مؤشرات رئيسية متاحة لإعداد نظرة عامة.",

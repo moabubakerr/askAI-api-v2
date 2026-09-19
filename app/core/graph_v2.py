@@ -522,6 +522,21 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
                 return {"ok": False, "message": msg("no_benchmarks", language,
                                                      indicator=indicator_name.strip())}, []
 
+        # An indicator with no per-country rows at all cannot answer a
+        # per-country question in ANY period. Saying "no approved data found
+        # for the requested countries" reads as "those countries are missing",
+        # when the truth is that this series is only ever reported for Qatar as
+        # a whole: "How many GCC tourists arrived into Qatar in 2025?" against
+        # "Number of International Visitors", whose 125 points are every one a
+        # national total.
+        if countries and not retriever.has_country_breakdown(published_detail_id,
+                                                              match.indicator_detail_id):
+            asked_for = (countries_res.group_name if countries_res.is_group
+                         else ", ".join(countries))
+            return {"ok": False, "message": msg("no_country_breakdown", language,
+                                                 indicator=indicator_name.strip(),
+                                                 countries=asked_for)}, []
+
         series_by_country = retriever.get_series_multi_country(
             match.indicator_detail_id, published_detail_id, granularity,
             countries,

@@ -254,6 +254,45 @@ def get_analysis_for_data_points(record_ids: list[str]) -> dict[str, dict]:
     return out
 
 
+def has_country_breakdown(published_indicator_detail_id: Optional[str],
+                           indicator_detail_id: str) -> bool:
+    """Whether this indicator is reported per country at all.
+
+    Most are not: "Number of International Visitors" has 125 points, every one
+    of them a Qatar-level total. Asking it for a per-country figure is not a
+    gap in coverage, it is a question the series cannot answer in any period —
+    a distinction the answer has to make, because "no approved data found for
+    the requested countries" reads as "those countries are missing".
+    """
+    # A non-empty country_en is not proof of a breakdown. The raw layer uses the
+    # literal "National / Overall" to mean "no breakdown" — it is the only such
+    # placeholder in the whole dataset, and it is exactly what "Number of
+    # International Visitors" carries on all 125 of its rows. Checking for a
+    # non-empty string would report that series as broken down by country and
+    # then find nothing for any country named.
+    with engine.connect() as conn:
+        if published_indicator_detail_id:
+            found = conn.execute(text("""
+                SELECT 1 FROM published_data_points p
+                WHERE p.published_indicator_detail_id = :pdid
+                  AND p.country_en IS NOT NULL AND p.country_en <> ''
+                  AND EXISTS (SELECT 1 FROM countries c
+                               WHERE LOWER(c.name_en) = LOWER(p.country_en))
+                LIMIT 1
+            """), {"pdid": published_indicator_detail_id}).fetchone()
+            if found:
+                return True
+        found = conn.execute(text("""
+            SELECT 1 FROM indicator_values v
+            WHERE v.indicator_detail_id = :did
+              AND v.country_en IS NOT NULL AND v.country_en <> ''
+              AND EXISTS (SELECT 1 FROM countries c
+                           WHERE LOWER(c.name_en) = LOWER(v.country_en))
+            LIMIT 1
+        """), {"did": indicator_detail_id}).fetchone()
+    return bool(found)
+
+
 def get_benchmark_countries(published_indicator_detail_id: Optional[str]) -> list[str]:
     """SCAI's own chosen comparison set for one indicator, from P05.
 

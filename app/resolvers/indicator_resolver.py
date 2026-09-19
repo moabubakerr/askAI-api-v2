@@ -38,6 +38,24 @@ from app.core.messages import msg
 EMBED_WEIGHT = 0.8
 STRING_WEIGHT = 0.2
 
+# ...and below this, difflib contributes NOTHING. The comment above has always
+# described a bonus for near-exact phrasing, but the code applied a flat 0.2
+# weight to every score including meaningless ones, so character noise decided
+# between candidates the embedding had not separated.
+#
+# F-014 is exactly that failure. "tourists arrived" against the catalogue
+# scores 0.34 for "Number of Visitors on the Visit Qatar website (M)", 0.34 for
+# "Number of Medical Tourists" and 0.25 for "Number of International Visitors"
+# — differences that mean nothing, since tourist/visitor is a synonym problem
+# no character comparison can see. Weighted at 0.2 they were enough to put a
+# website metric above the right answer.
+#
+# Gated, a near-exact name still gets its boost and noise cannot outvote the
+# embedding. Answers become slightly more likely to be refused than before,
+# since scores no longer get a free 0.05-0.08 from noise — the safer direction
+# for a system whose first rule is not to answer with the wrong indicator.
+STRING_MIN_TO_COUNT = 0.6
+
 MIN_CONFIDENCE = 0.55
 MIN_GAP_TO_RUNNER_UP = 0.05
 
@@ -133,6 +151,25 @@ _PHRASE_NOISE_AR = re.compile(
 )
 
 
+# Period expressions are extracted into period_expression and then left in the
+# indicator phrase as well, where they are pure noise. "tourists arrived into
+# Qatar in May 2025" was matched as a whole string and lost to "Number of
+# Visitors on the Visit Qatar website (M)" — F-014, the paraphrase case this
+# resolver exists for. Stripped, the phrase is "tourists arrived", which is
+# what has to reach the embedding.
+_PHRASE_PERIOD = re.compile(
+    r"\b(in|for|during|of|as of|at)?\s*("
+    r"q[1-4][\s-]*\d{4}|\d{4}[\s-]*q[1-4]|"
+    r"\d{4}-\d{2}|"
+    r"(january|february|march|april|may|june|july|august|september|october|"
+    r"november|december)\s+\d{4}|"
+    r"last\s+\d+\s+(years?|months?|quarters?)|"
+    r"last\s+year|this\s+year|\d{4}"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
 def normalize_indicator_phrase(phrase: str) -> str:
     """Strips country and frequency words from the user's phrase before matching.
 
@@ -152,7 +189,8 @@ def normalize_indicator_phrase(phrase: str) -> str:
     Applied only to the query, never to catalogue names — plenty of real
     indicators are named "... in Qatar" and must keep it.
     """
-    cleaned = _PHRASE_NOISE.sub(" ", phrase or "")
+    cleaned = _PHRASE_PERIOD.sub(" ", phrase or "")
+    cleaned = _PHRASE_NOISE.sub(" ", cleaned)
     cleaned = _PHRASE_NOISE_AR.sub(" ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.-")
     # If stripping leaves nothing to match on, the words were the question.
@@ -250,6 +288,8 @@ def resolve_indicator(phrase: str, require_data: bool = True,
         # mostly coped, but "نسبة التضخم" still tied التضخم with نسبة السمنة.
         targets = [row["name_en"]] + ([row["name_ar"]] if row.get("name_ar") else [])
         string_sim = max(_similarity(p, t) for p in phrases for t in targets)
+        if string_sim < STRING_MIN_TO_COUNT:
+            string_sim = 0.0
         return EMBED_WEIGHT * embed_sim + STRING_WEIGHT * string_sim
 
     scored = sorted(((row, score(row)) for row in catalog), key=lambda x: x[1], reverse=True)
