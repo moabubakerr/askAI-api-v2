@@ -116,7 +116,20 @@ def _fetch_catalog() -> list[dict]:
     return [dict(r._mapping) for r in rows]
 
 
-def resolve_indicator(phrase: str, require_data: bool = True) -> ResolutionResult:
+def has_usable_definition(row) -> bool:
+    """A definition of "-" or "" is a placeholder, not a definition — 383 of the
+    644 detail rows carry one of those. Accepts either a catalog dict or an
+    IndicatorMatch."""
+    get = row.get if isinstance(row, dict) else lambda k: getattr(row, k, None)
+    for key in ("definition_en", "definition_ar"):
+        value = (get(key) or "").strip()
+        if value and value != "-":
+            return True
+    return False
+
+
+def resolve_indicator(phrase: str, require_data: bool = True,
+                      require_definition: bool = False) -> ResolutionResult:
     """require_data=True (the default, for any question that needs figures)
     ignores catalog entries that carry no data points at all.
 
@@ -137,6 +150,8 @@ def resolve_indicator(phrase: str, require_data: bool = True) -> ResolutionResul
     catalog = _fetch_catalog()
     if require_data:
         catalog = [r for r in catalog if (r.get("data_point_count") or 0) > 0]
+    if require_definition:
+        catalog = [r for r in catalog if has_usable_definition(r)]
     if not catalog:
         return ResolutionResult(None, "not_found", [], "The indicator catalog is empty.")
 

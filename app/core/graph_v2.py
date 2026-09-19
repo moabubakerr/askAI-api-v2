@@ -21,7 +21,7 @@ returns an updated one.
 from typing import TypedDict, Optional
 
 from app.nlu.intent_agent import extract_intent
-from app.resolvers.indicator_resolver import resolve_indicator
+from app.resolvers.indicator_resolver import resolve_indicator, has_usable_definition
 from app.resolvers.country_resolver import resolve_countries
 from app.resolvers.period_resolver import parse_period_expression, parse_explicit_frequency, choose_granularity
 from app.db import retriever
@@ -145,6 +145,29 @@ def handle_message(user_message: str, conversation_context: str = "",
     # carry a real definition, so a missing one is reported honestly rather than
     # filled in.
     if ctype == "definition":
+        # The top match may be an empty catalog stub that shadows the real
+        # indicator: "GDP" (no data, definition "-") outranks "Real GDP" (70
+        # points, a full definition) on name similarity alone. If so, retry
+        # over only those entries that HAVE a definition.
+        #
+        # That retry is deliberately fenced: its result is accepted only when
+        # the alternative's name actually contains the phrase the user asked
+        # about. Without that guard, asking about an indicator that genuinely
+        # has no definition would return a confident definition of some
+        # unrelated indicator instead — a silent substitution, and a worse
+        # failure than admitting the gap, because a plausible definition of the
+        # wrong thing reads as correct. "GDP" -> "Real GDP" passes the guard;
+        # "Tanker" -> some unrelated indicator does not.
+        if not has_usable_definition(match):
+            phrase_key = (indicator_phrase or "").strip().lower()
+            retry = resolve_indicator(indicator_phrase or "", require_data=False,
+                                       require_definition=True)
+            if (retry.status == "resolved" and phrase_key
+                    and phrase_key in retry.match.name_en.strip().lower()):
+                match = retry.match
+                session_state["last_indicator_detail_id"] = match.indicator_detail_id
+                session_state["last_indicator_name"] = match.name_en
+
         definition = match.definition_ar if language == "ar" and match.definition_ar else match.definition_en
         definition = strip_html(definition or "").strip()
         if not definition or definition == "-":
