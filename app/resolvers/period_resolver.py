@@ -100,6 +100,18 @@ def parse_period_pair(expr: Optional[str]):
     return found[0], found[1]
 
 
+def label_bounds(label: str):
+    """First and last day covered by a period label ('2025-Q1', '2025-05', '2025')."""
+    if "-Q" in label:
+        year, q = label.split("-Q", 1)
+        month = {"1": 1, "2": 4, "3": 7, "4": 10}[q]
+        return date(int(year), month, 1), _end_of_month(int(year), month + 2)
+    if "-" in label:
+        year, month = label.split("-", 1)
+        return date(int(year), int(month), 1), _end_of_month(int(year), int(month))
+    return date(int(label), 1, 1), date(int(label), 12, 31)
+
+
 def _end_of_month(year: int, month: int) -> date:
     """Last day of the given month. Needed because a single month or quarter
     previously set only start_date, and start_date is an inclusive lower bound:
@@ -117,6 +129,19 @@ def parse_period_expression(expr: Optional[str]) -> PeriodResolution:
         return PeriodResolution(kind="unspecified", raw="")
 
     text_l = expr.lower().strip()
+
+    # TWO named periods first. Without this, "between Q1 2025 and Q4 2025" fell
+    # into the single-quarter branch below, retrieval was scoped to Q1 alone,
+    # and the answer described one quarter as though it were the whole span —
+    # Q4 2025 never appeared in it at all. Checked before the single-period
+    # branches precisely because those match the FIRST period they see.
+    pair = parse_period_pair(expr)
+    if pair:
+        start, _ = label_bounds(pair[0])
+        _, end = label_bounds(pair[1])
+        if start > end:
+            start, end = label_bounds(pair[1])[0], label_bounds(pair[0])[1]
+        return PeriodResolution(kind="range", start_date=start, end_date=end, raw=expr)
 
     # "last N years" / "last N months"
     m = re.search(r"last\s+(\d+)\s+year", text_l)

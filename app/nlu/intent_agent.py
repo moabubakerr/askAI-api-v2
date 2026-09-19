@@ -84,6 +84,13 @@ Rules:
   of Real GDP", "what is Inflation in 2025", "what is the GDP figure" are all
   latest_value. A bare "what is X?" naming an indicator, with no period and no word
   like value/rate/figure/level, is a definition question.
+- "How did X change between A and B?" / "compare X in A and B" / "X in A versus B",
+  where A and B are two NAMED periods, is "period_comparison" — NOT trend and NOT
+  growth_rate. It answers with both values and the change between exactly those
+  two periods. Put BOTH periods in period_expression, e.g. "between Q1 2025 and
+  Q4 2025", so the resolver can find them.
+  Use "growth_rate" only when the user asks for a RATE (CAGR, "% per year",
+  "growth rate"), and "trend" only when no two specific periods are named.
 - If the user asks for per-period detail — "detail what happened in every year",
   "break it down by quarter", "show each year" — use "trend", NOT "growth_rate".
   growth_rate collapses the whole span into one start-to-end figure and cannot
