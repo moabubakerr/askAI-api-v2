@@ -29,7 +29,7 @@ from typing import Optional
 
 from sqlalchemy import text
 from app.db.executor import engine
-from app.resolvers.embeddings import get_embedding, cosine_similarity, embed_catalog
+from app.resolvers.embeddings import get_embedding, cosine_similarity, embed_keyed
 from app.core.messages import msg
 
 # Embedding cosine similarity is the primary score; difflib contributes a
@@ -197,6 +197,24 @@ def normalize_indicator_phrase(phrase: str) -> str:
     return cleaned if len(cleaned) >= 3 else (phrase or "").strip()
 
 
+DEFINITION_CHARS_FOR_EMBEDDING = 240
+
+
+def _embedding_text(row: dict) -> str:
+    """What an indicator is embedded AS: its name, plus the start of its
+    definition when there is a real one."""
+    name = (row.get("name_en") or "").strip()
+    definition = (row.get("definition_en") or "").strip()
+    # Strip the markup BEFORE testing for a placeholder: the CMS stores an
+    # empty definition as "<p>-</p>", which is not equal to "-" and slipped
+    # through, embedding "Number of Medical Tourists. -".
+    definition = re.sub(r"<[^>]+>", " ", definition)
+    definition = re.sub(r"\s+", " ", definition).strip(" .-")
+    if not definition:
+        return name
+    return f"{name}. {definition[:DEFINITION_CHARS_FOR_EMBEDDING]}"
+
+
 def _fetch_catalog() -> list[dict]:
     with engine.connect() as conn:
         rows = conn.execute(text("""
@@ -273,8 +291,18 @@ def resolve_indicator(phrase: str, require_data: bool = True,
     original_phrase = (phrase or "").strip()
     phrases = [match_phrase] if match_phrase == original_phrase else [match_phrase, original_phrase]
 
-    names = [row["name_en"] for row in catalog]
-    name_embeddings = embed_catalog(names)
+    # Each entry is embedded as its NAME plus the opening of its definition.
+    # The name alone carries no synonym: nothing in "Number of International
+    # Visitors" says "tourist", so "tourists arrived into Qatar" lost to
+    # "Number of Medical Tourists", which contains the word literally and has
+    # no definition at all. The definition — "non-resident travelers entering
+    # Qatar for leisure, business or other activities" — is the match the
+    # question needs.
+    # Truncated because only the opening sentence describes WHAT is measured;
+    # the rest is methodology, and a longer text dilutes the vector.
+    name_embeddings = embed_keyed({
+        row["name_en"]: _embedding_text(row) for row in catalog
+    })
     phrase_embeddings = [get_embedding(p) for p in phrases]
 
     def score(row):
@@ -304,20 +332,41 @@ def resolve_indicator(phrase: str, require_data: bool = True,
         )
 
     if (top_score - second_score) < MIN_GAP_TO_RUNNER_UP and second_score >= MIN_CONFIDENCE:
-        # Genuinely ambiguous — surface the real candidates rather than picking one.
-        candidates = [
-            IndicatorMatch(r["indicator_detail_id"], r["indicator_id"], r["name_en"],
-                            r["is_published"], r["published_detail_id"],
-                            r["is_active"], r["unit_en"], r["polarity_en"],
-                            r["data_source_en"], r["format"],
-                            r["definition_en"], r["definition_ar"], s)
-            for r, s in scored[:3]
-        ]
-        names = ", ".join(f'"{c.name_en.strip()}"' for c in candidates)
-        return ResolutionResult(
-            None, "ambiguous", candidates,
-            msg("indicator_ambiguous", language, phrase=phrase, names=names),
-        )
+        # Before calling it ambiguous: if exactly one of the tied candidates is
+        # PUBLISHED, that is the answer.
+        #
+        # "What is the GDP forecast 2026" offered a choice between "Real GDP",
+        # "Expected GDP Impact in 2021-6" and "Expected GDP Impact in 2021-1" —
+        # asking the user to choose between the indicator they meant and two
+        # unpublished working rows they have never heard of, which differ from
+        # each other only by a trailing number. Having to type "real GDP" to
+        # get past that is the system's problem, not the user's.
+        #
+        # This is not the silent substitution F-003/F-012 forbid: it does not
+        # reach past a better match, it breaks a TIE toward SCAI's own curated
+        # layer, exactly as the retriever already prefers published_data_points
+        # over raw indicator_values. The low-confidence disclosure still fires
+        # if the winner is below CONFIDENT_MATCH.
+        tied = [(r, sc) for r, sc in scored
+                if top_score - sc < MIN_GAP_TO_RUNNER_UP and sc >= MIN_CONFIDENCE]
+        published_tied = [(r, sc) for r, sc in tied if r.get("is_published")]
+        if len(published_tied) == 1:
+            top_row, top_score = published_tied[0]
+        else:
+            # Genuinely ambiguous — surface the real candidates rather than picking one.
+            candidates = [
+                IndicatorMatch(r["indicator_detail_id"], r["indicator_id"], r["name_en"],
+                                r["is_published"], r["published_detail_id"],
+                                r["is_active"], r["unit_en"], r["polarity_en"],
+                                r["data_source_en"], r["format"],
+                                r["definition_en"], r["definition_ar"], s)
+                for r, s in scored[:3]
+            ]
+            names = ", ".join(f'"{c.name_en.strip()}"' for c in candidates)
+            return ResolutionResult(
+                None, "ambiguous", candidates,
+                msg("indicator_ambiguous", language, phrase=phrase, names=names),
+            )
 
     match = IndicatorMatch(
         top_row["indicator_detail_id"], top_row["indicator_id"], top_row["name_en"],

@@ -39,7 +39,7 @@ from app.resolvers.indicator_resolver import (
     _fetch_catalog, _similarity, EMBED_WEIGHT, STRING_WEIGHT,
     MIN_CONFIDENCE, MIN_GAP_TO_RUNNER_UP, has_usable_definition,
 )
-from app.resolvers.embeddings import get_embedding, cosine_similarity, embed_catalog
+from app.resolvers.embeddings import get_embedding, cosine_similarity, embed_keyed
 
 # (question phrase, expected indicator name or None if it should NOT match)
 # Drawn from the QC workbook and the live run. Add your own as you find them.
@@ -69,7 +69,7 @@ def main():
     print(f"scoring: {EMBED_WEIGHT}*embedding + {STRING_WEIGHT}*string\n")
 
     print("embedding the catalog (first run is slow)...", flush=True)
-    name_embeddings = embed_catalog(names)
+    name_embeddings = embed_keyed({n: n for n in names})
 
     false_pos, true_pos = [], []
     print(f"\n{'VERDICT':9} {'TOP':6} {'GAP':6}  {'QUESTION':42}  MATCHED")

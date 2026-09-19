@@ -57,3 +57,20 @@ def embed_catalog(names: list[str]) -> dict[str, list[float]]:
     for n in uncached:
         get_embedding(n)
     return {n: _CACHE[n] for n in names}
+
+
+def embed_keyed(texts: dict) -> dict:
+    """Embeds a {key: text} mapping, returning {key: vector}.
+
+    Lets a catalogue entry be embedded as something richer than its name. The
+    name alone loses the synonym that the question actually uses: nothing in
+    "Number of International Visitors" says "tourist", so "tourists arrived
+    into Qatar" ranked below "Number of Medical Tourists", which contains the
+    word literally. That indicator's DEFINITION says "non-resident travelers
+    entering Qatar for leisure, business or other activities" — the match the
+    question needs, and it was being thrown away.
+    """
+    for key, text in texts.items():
+        if text not in _CACHE:
+            get_embedding(text)
+    return {key: _CACHE[text] for key, text in texts.items()}
