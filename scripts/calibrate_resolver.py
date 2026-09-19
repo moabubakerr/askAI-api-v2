@@ -36,10 +36,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.resolvers.indicator_resolver import (
-    _fetch_catalog, _similarity, EMBED_WEIGHT, STRING_WEIGHT,
-    MIN_CONFIDENCE, MIN_GAP_TO_RUNNER_UP, has_usable_definition,
+    _fetch_catalog, _score_catalog, normalize_indicator_phrase,
+    EMBED_WEIGHT, STRING_WEIGHT, STRING_MIN_TO_COUNT,
+    MIN_CONFIDENCE, MIN_GAP_TO_RUNNER_UP,
 )
-from app.resolvers.embeddings import get_embedding, cosine_similarity, embed_keyed
+from app.resolvers.embeddings import get_embedding
 
 # (question phrase, expected indicator name or None if it should NOT match)
 # Drawn from the QC workbook and the live run. Add your own as you find them.
@@ -69,19 +70,19 @@ def main():
     print(f"scoring: {EMBED_WEIGHT}*embedding + {STRING_WEIGHT}*string\n")
 
     print("embedding the catalog (first run is slow)...", flush=True)
-    name_embeddings = embed_keyed({n: n for n in names})
 
     false_pos, true_pos = [], []
     print(f"\n{'VERDICT':9} {'TOP':6} {'GAP':6}  {'QUESTION':42}  MATCHED")
     print("-" * 110)
 
     for phrase, expected in CASES:
-        pe = get_embedding(phrase)
-        scored = sorted(
-            ((r, EMBED_WEIGHT * cosine_similarity(pe, name_embeddings[r["name_en"]])
-                 + STRING_WEIGHT * _similarity(phrase, r["name_en"])) for r in catalog),
-            key=lambda x: x[1], reverse=True,
-        )
+        # Score through the PRODUCTION path. This loop used to reimplement the
+        # formula, so it reported numbers for scoring that was no longer
+        # deployed — it measured neither the phrase normalization, nor the
+        # string gate, nor the definition embeddings.
+        normalized = normalize_indicator_phrase(phrase)
+        forms = [normalized] if normalized == phrase.strip() else [normalized, phrase.strip()]
+        scored = _score_catalog(catalog, forms, [get_embedding(f) for f in forms])
         top, top_score = scored[0]
         second = scored[1][1] if len(scored) > 1 else 0.0
         gap = top_score - second

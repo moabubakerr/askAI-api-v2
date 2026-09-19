@@ -56,7 +56,18 @@ STRING_WEIGHT = 0.2
 # for a system whose first rule is not to answer with the wrong indicator.
 STRING_MIN_TO_COUNT = 0.6
 
-MIN_CONFIDENCE = 0.55
+# Raised from 0.55 on measured evidence, not judgement. A calibration run
+# against the real bge-m3 over known-answer questions gave:
+#
+#   highest FALSE positive   0.602   "number of penguins in Qatar" -> Number of Qatari Jobs
+#   lowest  TRUE  positive   0.754   "the inflation rate"          -> Inflation
+#
+# At 0.55 the penguin question was answered, and so were "solar energy share"
+# (0.568 -> "Energy") and the solar/teachers pair (0.597). Every correct match
+# in that run scored 0.754 or above, so this sits in the gap and costs none of
+# them. Re-run scripts/calibrate_resolver.py after any scoring change and move
+# this number to whatever the new distribution says.
+MIN_CONFIDENCE = 0.68
 MIN_GAP_TO_RUNNER_UP = 0.05
 
 # Known contrastive term pairs in economic indicator naming. If the user's
@@ -200,6 +211,21 @@ def normalize_indicator_phrase(phrase: str) -> str:
 DEFINITION_CHARS_FOR_EMBEDDING = 240
 
 
+def _catalog_embeddings(catalog):
+    """Each indicator gets TWO vectors and keeps whichever matches better.
+
+    Embedding only "name + definition" would have cost the exact-name case: a
+    question that IS the catalogue name scored a perfect 1.000 against the bare
+    name and necessarily less against name-plus-prose. Embedding only the name
+    loses the synonym — nothing in "Number of International Visitors" says
+    "tourist". Keeping both views costs one extra vector per indicator, paid
+    once per process, and neither case has to lose.
+    """
+    plain = embed_keyed({row["name_en"]: row["name_en"] for row in catalog})
+    enriched = embed_keyed({row["name_en"]: _embedding_text(row) for row in catalog})
+    return {name: (plain[name], enriched[name]) for name in plain}
+
+
 def _embedding_text(row: dict) -> str:
     """What an indicator is embedded AS: its name, plus the start of its
     definition when there is a real one."""
@@ -300,14 +326,23 @@ def resolve_indicator(phrase: str, require_data: bool = True,
     # question needs.
     # Truncated because only the opening sentence describes WHAT is measured;
     # the rest is methodology, and a longer text dilutes the vector.
-    name_embeddings = embed_keyed({
-        row["name_en"]: _embedding_text(row) for row in catalog
-    })
+
     phrase_embeddings = [get_embedding(p) for p in phrases]
 
+    scored = _score_catalog(catalog, phrases, phrase_embeddings)
+    return _resolve_scored(scored, phrase, language)
+
+
+def _score_catalog(catalog, phrases, phrase_embeddings):
+    """Scores every catalogue row. Shared so scripts measure the SAME code the
+    resolver runs — calibrate_resolver.py previously reimplemented this loop
+    and therefore reported numbers for scoring that was no longer deployed."""
+    name_embeddings = _catalog_embeddings(catalog)
+
     def score(row):
-        embed_sim = max(cosine_similarity(pe, name_embeddings[row["name_en"]])
-                        for pe in phrase_embeddings)
+        embed_sim = max(cosine_similarity(pe, view)
+                        for pe in phrase_embeddings
+                        for view in name_embeddings[row["name_en"]])
         # Compare against the Arabic name too. Only name_en was ever fetched or
         # scored, so for an Arabic question the string half of the score was
         # dead weight — Arabic script against Latin scores ~0 for every
@@ -320,8 +355,12 @@ def resolve_indicator(phrase: str, require_data: bool = True,
             string_sim = 0.0
         return EMBED_WEIGHT * embed_sim + STRING_WEIGHT * string_sim
 
-    scored = sorted(((row, score(row)) for row in catalog), key=lambda x: x[1], reverse=True)
+    return sorted(((row, score(row)) for row in catalog), key=lambda x: x[1], reverse=True)
 
+
+def _resolve_scored(scored, phrase, language="en"):
+    """Turns a scored catalogue into a ResolutionResult: threshold, ambiguity
+    tie-break, contradiction and inactive checks."""
     top_row, top_score = scored[0]
     second_score = scored[1][1] if len(scored) > 1 else 0.0
 
