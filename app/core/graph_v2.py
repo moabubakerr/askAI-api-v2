@@ -23,6 +23,7 @@ from typing import TypedDict, Optional
 
 from app.nlu.intent_agent import extract_intent
 from app.core.conversation import carry_forward
+from app.core.messages import msg, detect_language
 from app.resolvers.indicator_resolver import resolve_indicator, has_usable_definition
 from app.resolvers.country_resolver import resolve_countries
 from app.resolvers.period_resolver import parse_period_expression, parse_explicit_frequency, choose_granularity
@@ -101,7 +102,10 @@ def handle_message(user_message: str, conversation_context: str = "",
     # earlier indicator AND period instead of only the indicator.
     intent = carry_forward(intent, session_state, user_message)
     ctype = intent.get("computation_type", "out_of_scope")
-    language = intent.get("language", "en")
+    # Arabic script is unambiguous; the model's language field is a guess. An
+    # Arabic greeting was being answered in English, which is the product simply
+    # not working in one of its two languages.
+    language = detect_language(user_message, intent.get("language"))
 
     # Remember what this turn was about, whatever happens below, so the next
     # follow-up has something to refer back to even if this one fails to
@@ -119,16 +123,14 @@ def handle_message(user_message: str, conversation_context: str = "",
     if ctype == "general_chat":
         payload = {"ok": True, "facts": {"note": "Greeting — no data needed."}}
         return _finish(payload, language, session_state, [], skip_compose=True,
-                        canned="Hello! Ask me about Qatar's published economic indicators — "
-                               "latest values, trends, or comparisons.")
+                        canned=msg("greeting", language))
 
     if ctype == "capabilities":
         payload, citations = _capabilities_answer(language)
         return _finish(payload, language, session_state, citations)
 
     if ctype == "out_of_scope":
-        payload = {"ok": False, "message": "That's outside what I can help with — I only cover "
-                                            "Qatar's published SCAI economic indicators."}
+        payload = {"ok": False, "message": msg("out_of_scope", language)}
         return _finish(payload, language, session_state, [])
 
     if ctype == "count_list":
@@ -141,11 +143,12 @@ def handle_message(user_message: str, conversation_context: str = "",
             citations = [Citation(indicator=r.get("name_en"), data_source=None, table="sectors",
                                    record_id=r.get("sector_record_id")) for r in rows]
         payload = {"ok": True, "facts": {"count": len(rows), "names": [r.get("name_en") for r in rows]}} \
-            if rows else {"ok": False, "message": f"No indicators found matching \"{indicator_type_hint}\"."}
+            if rows else {"ok": False, "message": msg("no_indicators_matching", language,
+                                                        query=indicator_type_hint)}
         return _finish(payload, language, session_state, citations)
 
     if ctype == "macro_overview":
-        payload, citations = _macro_overview()
+        payload, citations = _macro_overview(language)
         if payload.get("ok") and wants_chart(user_message, ctype):
             payload["chart"] = build_chart_spec(ctype, payload["facts"], "Economic Overview", None, None)
         return _finish(payload, language, session_state, citations)
@@ -157,7 +160,8 @@ def handle_message(user_message: str, conversation_context: str = "",
 
     # A definition question is answered from catalog text, so a stub with no
     # data points is still a legitimate match. Every other path needs figures.
-    resolution = resolve_indicator(indicator_phrase or "", require_data=(ctype != "definition"))
+    resolution = resolve_indicator(indicator_phrase or "", require_data=(ctype != "definition"),
+                                    language=language)
     if resolution.status != "resolved" and resolution.status != "inactive":
         payload = {"ok": False, "message": resolution.message}
         return _finish(payload, language, session_state, [])
@@ -189,7 +193,7 @@ def handle_message(user_message: str, conversation_context: str = "",
         if not has_usable_definition(match):
             phrase_key = (indicator_phrase or "").strip().lower()
             retry = resolve_indicator(indicator_phrase or "", require_data=False,
-                                       require_definition=True)
+                                       require_definition=True, language=language)
             if (retry.status == "resolved" and phrase_key
                     and phrase_key in retry.match.name_en.strip().lower()):
                 match = retry.match
@@ -199,10 +203,8 @@ def handle_message(user_message: str, conversation_context: str = "",
         definition = match.definition_ar if language == "ar" and match.definition_ar else match.definition_en
         definition = strip_html(definition or "").strip()
         if not definition or definition == "-":
-            payload = {"ok": False, "message": (
-                f"\"{match.name_en.strip()}\" is in the approved data, but SCAI's catalog "
-                f"carries no definition for it. I won't supply one of my own."
-            )}
+            payload = {"ok": False, "message": msg("no_definition", language,
+                                                     indicator=match.name_en.strip())}
             return _finish(payload, language, session_state, [])
         payload = {"ok": True, "facts": {
             "indicator": match.name_en.strip(),
@@ -232,17 +234,18 @@ def handle_message(user_message: str, conversation_context: str = "",
         # no data at all.
         wanted = intent.get("explicit_frequency")
         if available_gran:
-            detail = (f"has no {wanted} data in the approved dataset "
-                      f"(available: {', '.join(sorted(available_gran))})")
+            message = msg("no_data_at_frequency", language, indicator=match.name_en.strip(),
+                           wanted=wanted, available=", ".join(sorted(available_gran)))
         else:
-            detail = "has no data points in the approved dataset"
-        payload = {"ok": False, "message": f"\"{match.name_en.strip()}\" {detail}."}
+            message = msg("no_data_at_all", language, indicator=match.name_en.strip())
+        payload = {"ok": False, "message": message}
         return _finish(payload, language, session_state, [])
 
     period = parse_period_expression(intent.get("period_expression"))
     countries_res = resolve_countries(intent.get("countries_mentioned", []), intent.get("country_group_mentioned"))
 
-    payload, citations = _dispatch_computation(ctype, intent, match, published_detail_id, granularity, period, countries_res)
+    payload, citations = _dispatch_computation(ctype, intent, match, published_detail_id, granularity,
+                                                period, countries_res, language)
 
     # Flag a shaky resolution so _finish can disclose it. The threshold sits
     # above MIN_CONFIDENCE (0.55) deliberately: clearing the bar to answer at
@@ -259,7 +262,8 @@ def handle_message(user_message: str, conversation_context: str = "",
     return _finish(payload, language, session_state, citations)
 
 
-def _dispatch_computation(ctype, intent, match, published_detail_id, granularity, period, countries_res):
+def _dispatch_computation(ctype, intent, match, published_detail_id, granularity, period,
+                           countries_res, language="en"):
     unit = match.unit_en or ""
     indicator_name = match.name_en
     data_source_en = match.data_source_en
@@ -280,11 +284,8 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         if ctype == "country_ranking" and not countries:
             countries = retriever.get_benchmark_countries(published_detail_id)
             if not countries:
-                return {"ok": False, "message": (
-                    f"\"{indicator_name.strip()}\" has no benchmark countries designated in the "
-                    f"approved data, so there is nothing to rank it against. Name the countries "
-                    f"you want compared and I'll use those."
-                )}, []
+                return {"ok": False, "message": msg("no_benchmarks", language,
+                                                     indicator=indicator_name.strip())}, []
 
         series_by_country = retriever.get_series_multi_country(
             match.indicator_detail_id, published_detail_id, granularity,
@@ -353,10 +354,10 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
     if not rows and (period.start_date or period.end_date):
         available = retriever.get_series(match.indicator_detail_id, published_detail_id, granularity)
         if available:
-            return {"ok": False, "message": (
-                f"\"{indicator_name.strip()}\" has no {granularity} data for {period.raw or 'that period'}. "
-                f"Approved data runs from {available[0]['period_label']} to "
-                f"{available[-1]['period_label']}."
+            return {"ok": False, "message": msg(
+                "no_data_for_period", language, indicator=indicator_name.strip(),
+                granularity=granularity, period=period.raw or "that period",
+                first=available[0]["period_label"], last=available[-1]["period_label"],
             )}, []
 
     if ctype == "latest_value":
@@ -485,7 +486,7 @@ def _wrap(result: compute.ComputeResult, unit: str, extra_note: Optional[str] = 
     return payload
 
 
-def _macro_overview():
+def _macro_overview(language="en"):
     """Fixes F-007/F-018: a deterministic curated overview instead of
     silently falling back to a single indicator. HEADLINE_NAMES is an
     editorial list — refine it once you know which indicators SCAI wants
@@ -511,7 +512,7 @@ def _macro_overview():
             if rows:
                 citations += citations_for_rows([rows[-1]], res.match.name_en, res.match.data_source_en)
     if not facts:
-        return {"ok": False, "message": "No headline indicators were available to build an overview."}, []
+        return {"ok": False, "message": msg("no_overview", language)}, []
     return {"ok": True, "facts": {"overview": facts}}, citations
 
 

@@ -29,6 +29,7 @@ from typing import Optional
 from sqlalchemy import text
 from app.db.executor import engine
 from app.resolvers.embeddings import get_embedding, cosine_similarity, embed_catalog
+from app.core.messages import msg
 
 # Embedding cosine similarity is the primary score; difflib contributes a
 # small bonus for exact/near-exact phrasing so "GDP" still resolves fast
@@ -129,7 +130,8 @@ def has_usable_definition(row) -> bool:
 
 
 def resolve_indicator(phrase: str, require_data: bool = True,
-                      require_definition: bool = False) -> ResolutionResult:
+                      require_definition: bool = False,
+                      language: str = "en") -> ResolutionResult:
     """require_data=True (the default, for any question that needs figures)
     ignores catalog entries that carry no data points at all.
 
@@ -172,8 +174,7 @@ def resolve_indicator(phrase: str, require_data: bool = True,
     if top_score < MIN_CONFIDENCE:
         return ResolutionResult(
             None, "not_found", [],
-            f"I couldn't find an indicator in the approved SCAI data matching \"{phrase}\". "
-            f"I won't guess at a similar-sounding one — could you confirm the exact metric name?",
+            msg("indicator_not_found", language, phrase=phrase),
         )
 
     if (top_score - second_score) < MIN_GAP_TO_RUNNER_UP and second_score >= MIN_CONFIDENCE:
@@ -189,7 +190,7 @@ def resolve_indicator(phrase: str, require_data: bool = True,
         names = ", ".join(f'"{c.name_en.strip()}"' for c in candidates)
         return ResolutionResult(
             None, "ambiguous", candidates,
-            f"\"{phrase}\" could match more than one indicator: {names}. Which one did you mean?",
+            msg("indicator_ambiguous", language, phrase=phrase, names=names),
         )
 
     match = IndicatorMatch(
@@ -204,9 +205,7 @@ def resolve_indicator(phrase: str, require_data: bool = True,
     if _has_contradiction(phrase, match.name_en):
         return ResolutionResult(
             None, "not_found", [],
-            f"You asked about \"{phrase}\", but the approved data only has "
-            f"\"{match.name_en.strip()}\" — that's a different measure, so I won't "
-            f"substitute it. There's no matching indicator for what you asked.",
+            msg("indicator_contradiction", language, phrase=phrase, matched=match.name_en.strip()),
         )
 
     if match.is_active is False:
