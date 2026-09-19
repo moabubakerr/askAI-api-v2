@@ -244,22 +244,58 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
     data_source_en = match.data_source_en
 
     if ctype in ("country_comparison", "country_ranking"):
+        countries = list(countries_res.resolved_countries)
+        note = (f"No approved data source recognized for: {', '.join(countries_res.unresolved_names)}."
+                if countries_res.unresolved_names else None)
+
+        # "Which country has the lowest inflation" names no countries, so the
+        # resolved set is empty and the ranking was Qatar against itself — a
+        # one-row league table (F-027). Fall back to SCAI's own benchmark set
+        # for this indicator.
+        #
+        # Only for RANKING. A comparison must return exactly the countries the
+        # user named and never a default benchmark list — that is F-001, where
+        # "compare Qatar and Singapore" came back with six countries.
+        if ctype == "country_ranking" and not countries:
+            countries = retriever.get_benchmark_countries(published_detail_id)
+            if not countries:
+                return {"ok": False, "message": (
+                    f"\"{indicator_name.strip()}\" has no benchmark countries designated in the "
+                    f"approved data, so there is nothing to rank it against. Name the countries "
+                    f"you want compared and I'll use those."
+                )}, []
+
         series_by_country = retriever.get_series_multi_country(
             match.indicator_detail_id, published_detail_id, granularity,
-            countries_res.resolved_countries,
+            countries,
             start_date=period.start_date, end_date=period.end_date,
             include_qatar=True,
         )
         period_label = None
-        note = (f"No approved data source recognized for: {', '.join(countries_res.unresolved_names)}."
-                if countries_res.unresolved_names else None)
-        result = (compute.country_ranking(series_by_country, period_label, ascending=True)
+        # Ranking direction was hardcoded ascending, so "which country has the
+        # HIGHEST x" was answered with the lowest. extremum is exactly the field
+        # the intent agent fills for that distinction.
+        ascending = intent.get("extremum") != "max"
+        result = (compute.country_ranking(series_by_country, period_label, ascending=ascending)
                   if ctype == "country_ranking"
                   else compute.country_comparison(series_by_country, period_label))
 
         citations = []
         if result.ok:
             entries = result.facts.get("ranked") or result.facts.get("rows") or []
+
+            # With no period named, each country contributes its own latest row,
+            # and those latest rows are not always the same period: ranking
+            # Inflation today puts UAE's 2025-12 against everyone else's
+            # 2026-04. That is not like-for-like, and a league table implies it
+            # is. The rows each carry their period, but the ranking as a whole
+            # needs to say so rather than relying on the reader to notice.
+            periods = {e.get("period_label") for e in entries if e.get("period_label")}
+            if len(periods) > 1:
+                mixed = (f"Not all countries report the same latest period — "
+                         f"figures below span {min(periods)} to {max(periods)}, "
+                         f"so this ranking is not a like-for-like comparison.")
+                note = f"{note} {mixed}" if note else mixed
             for entry in entries:
                 country_rows = series_by_country.get(entry["country"], [])
                 row = _find_row_by_period(country_rows, entry.get("period_label"))
@@ -271,6 +307,21 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
     rows = retriever.get_series(match.indicator_detail_id, published_detail_id, granularity,
                                  start_date=period.start_date, end_date=period.end_date)
     rows = _apply_last_n_years(rows, period)
+
+    # "What is the Real GDP forecast for 2026" was answered "No approved data
+    # points were found for this indicator/period" — true, but it leaves the
+    # user unable to tell whether the indicator is missing, the period is, or
+    # they phrased it wrong. If the indicator has data outside the window they
+    # asked for, say what IS there. Costs one extra query, only on the
+    # empty-result path.
+    if not rows and (period.start_date or period.end_date):
+        available = retriever.get_series(match.indicator_detail_id, published_detail_id, granularity)
+        if available:
+            return {"ok": False, "message": (
+                f"\"{indicator_name.strip()}\" has no {granularity} data for {period.raw or 'that period'}. "
+                f"Approved data runs from {available[0]['period_label']} to "
+                f"{available[-1]['period_label']}."
+            )}, []
 
     if ctype == "latest_value":
         result = compute.latest_value(rows)

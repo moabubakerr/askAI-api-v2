@@ -28,6 +28,7 @@ RUN pip install -r requirements.runtime.txt
 
 COPY app ./app
 COPY etl ./etl
+COPY scripts ./scripts
 COPY docker/run_etl.sh /usr/local/bin/run-etl
 
 RUN chmod +x /usr/local/bin/run-etl \

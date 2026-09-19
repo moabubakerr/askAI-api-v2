@@ -58,6 +58,10 @@ Rules:
   of Real GDP", "what is Inflation in 2025", "what is the GDP figure" are all
   latest_value. A bare "what is X?" naming an indicator, with no period and no word
   like value/rate/figure/level, is a definition question.
+- If the user asks for per-period detail — "detail what happened in every year",
+  "break it down by quarter", "show each year" — use "trend", NOT "growth_rate".
+  growth_rate collapses the whole span into one start-to-end figure and cannot
+  answer a request for what happened in between.
 - Use "period_ranking" when the user wants SEVERAL periods of ONE indicator listed in value
   order: "list the quarterly GDP values for 2024 and 2025 and rank them highest to lowest",
   "order the monthly inflation figures from lowest to highest". Set extremum="max" for

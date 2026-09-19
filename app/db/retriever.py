@@ -112,6 +112,32 @@ def get_analysis(ref_data_point_id: str) -> Optional[dict]:
     return dict(row._mapping) if row else None
 
 
+def get_benchmark_countries(published_indicator_detail_id: Optional[str]) -> list[str]:
+    """SCAI's own chosen comparison set for one indicator, from P05.
+
+    Used when a ranking question names no countries at all ("which country has
+    the lowest inflation") — previously that produced a one-row "ranking" of
+    Qatar against itself. The set is SCAI's editorial choice per indicator, not
+    a list this code invents, and not a fixed global default: for Inflation it
+    is the GCC plus Norway, Singapore and Switzerland.
+
+    Qatar is filtered out because it is stored as a blank country on the
+    national series and is added separately by the caller.
+
+    Only 21 of the published indicators define benchmarks, so an empty result
+    is normal and means "SCAI has not designated comparators for this one"."""
+    if not published_indicator_detail_id:
+        return []
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT DISTINCT country_en FROM benchmark_countries
+            WHERE published_indicator_detail_id = :pdid
+              AND country_en IS NOT NULL AND country_en <> ''
+            ORDER BY country_en
+        """), {"pdid": published_indicator_detail_id}).fetchall()
+    return [r[0] for r in rows if r[0].strip().lower() != "qatar"]
+
+
 def get_sector_indicators(sector_name_query: str) -> list[dict]:
     """Cross-domain lookup via the indicator_dashboards bridge table.
     Fixes: 'which indicators track sector X' style questions that previously
