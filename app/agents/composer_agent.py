@@ -99,17 +99,23 @@ def _public(facts_payload: dict) -> dict:
     return {k: v for k, v in facts_payload.items() if not k.startswith("_")}
 
 
-def compose_answer(facts_payload: dict, language: str = "en") -> str:
+def compose_answer(facts_payload: dict, language: str = "en", question: str = "") -> str:
     facts_payload = _public(facts_payload)
     user_prompt = (
         f"Language: {language}\n\n"
-        f"Facts payload (the ONLY source of numbers you may use):\n"
+        # The Composer used to see only the facts, never the question, so it
+        # could not tell what SHAPE of answer was wanted: a yes/no question got
+        # an essay, and "...and in which quarter?" got a bare value. The
+        # question guides phrasing only — every number still comes from the
+        # payload, and the verifier still checks that.
+        + (f"The user asked: {question}\n\n" if question else "")
+        + f"Facts payload (the ONLY source of numbers you may use):\n"
         # ensure_ascii=False is load-bearing here, not cosmetic. With the
         # default, Arabic in the payload is serialised as backslash-u escapes,
         # the model is shown those escapes, and it copies them verbatim — an
         # Arabic ambiguity message reached the user as a run of \u06xx codes
         # instead of readable text.
-        f"{json.dumps(facts_payload, default=str, indent=2, ensure_ascii=False)}"
+        + f"{json.dumps(facts_payload, default=str, indent=2, ensure_ascii=False)}"
     )
     return chat(
         client=llm_client,
