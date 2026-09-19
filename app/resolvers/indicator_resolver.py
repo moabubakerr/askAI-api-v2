@@ -22,6 +22,7 @@ reintroduce the "LLM invents a number" risk; it can still pick the WRONG
 real indicator, which is why the confidence/gap/contradiction checks below
 exist and matter.
 """
+import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Optional
@@ -98,6 +99,41 @@ def _similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio()
 
 
+# Words that appear in the QUESTION but carry no signal about WHICH indicator is
+# meant, because they are already extracted into their own slots and because
+# every indicator here is a Qatari one.
+_PHRASE_NOISE = re.compile(
+    r"\b(in|for|of|the|a|an)?\s*(qatar'?s?|qataris?|gcc|gulf|"
+    r"quarterly|monthly|yearly|annual(ly)?|per\s+(quarter|month|year))\b",
+    re.IGNORECASE,
+)
+
+
+def normalize_indicator_phrase(phrase: str) -> str:
+    """Strips country and frequency words from the user's phrase before matching.
+
+    "Qatar" is the single most damaging word a question can contain. It is in
+    the context of every indicator in this dataset, so it discriminates between
+    none of them — yet character similarity weights it heavily. Measured on the
+    real catalogue, "Qatar quarterly GDP" scored Real GDP 0.444, "FDI value to
+    Qatar" 0.417 and "Qatari Nationals" 0.421: three candidates inside 0.03,
+    which trips the ambiguity check and asks the user to choose between an
+    indicator they meant and two they have never heard of. The same phrase
+    reduced to "GDP" scores 0.545 / 0.062 / 0.000.
+
+    The country and the frequency are already captured in countries_mentioned
+    and explicit_frequency, so leaving them here counts them twice: once as
+    filters, once as evidence about the indicator's NAME.
+
+    Applied only to the query, never to catalogue names — plenty of real
+    indicators are named "... in Qatar" and must keep it.
+    """
+    cleaned = _PHRASE_NOISE.sub(" ", phrase or "")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.-")
+    # If stripping leaves nothing to match on, the words were the question.
+    return cleaned if len(cleaned) >= 3 else (phrase or "").strip()
+
+
 def _fetch_catalog() -> list[dict]:
     with engine.connect() as conn:
         rows = conn.execute(text("""
@@ -158,13 +194,17 @@ def resolve_indicator(phrase: str, require_data: bool = True,
     if not catalog:
         return ResolutionResult(None, "not_found", [], msg("empty_catalog", language))
 
+    # Match on the phrase with country/frequency noise removed; the original is
+    # kept for the messages, so a refusal still quotes what the user typed.
+    match_phrase = normalize_indicator_phrase(phrase)
+
     names = [row["name_en"] for row in catalog]
     name_embeddings = embed_catalog(names)
-    phrase_embedding = get_embedding(phrase)
+    phrase_embedding = get_embedding(match_phrase)
 
     def score(row):
         embed_sim = cosine_similarity(phrase_embedding, name_embeddings[row["name_en"]])
-        string_sim = _similarity(phrase, row["name_en"])
+        string_sim = _similarity(match_phrase, row["name_en"])
         return EMBED_WEIGHT * embed_sim + STRING_WEIGHT * string_sim
 
     scored = sorted(((row, score(row)) for row in catalog), key=lambda x: x[1], reverse=True)
