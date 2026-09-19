@@ -214,22 +214,34 @@ def resolve_indicator(phrase: str, require_data: bool = True,
     # Match on the phrase with country/frequency noise removed; the original is
     # kept for the messages, so a refusal still quotes what the user typed.
     match_phrase = normalize_indicator_phrase(phrase)
+    # Score against BOTH the stripped phrase and what the user actually typed,
+    # taking whichever fits better.
+    #
+    # Stripping helps the natural question ("Qatar quarterly GDP" -> "GDP") and
+    # hurts the literal one: 32 catalogue names contain "Qatar" or "Qatari" and
+    # 52 Arabic names begin with "نسبة", so typing a name exactly — "Number of
+    # Qatari Jobs" — was being stripped into something that also matched
+    # "Number of Non-Qatari Jobs". Measured over all 459 names with data,
+    # stripping alone cost 2 self-matches in each language. Keeping both forms
+    # costs nothing and keeps the gain.
+    original_phrase = (phrase or "").strip()
+    phrases = [match_phrase] if match_phrase == original_phrase else [match_phrase, original_phrase]
 
     names = [row["name_en"] for row in catalog]
     name_embeddings = embed_catalog(names)
-    phrase_embedding = get_embedding(match_phrase)
+    phrase_embeddings = [get_embedding(p) for p in phrases]
 
     def score(row):
-        embed_sim = cosine_similarity(phrase_embedding, name_embeddings[row["name_en"]])
+        embed_sim = max(cosine_similarity(pe, name_embeddings[row["name_en"]])
+                        for pe in phrase_embeddings)
         # Compare against the Arabic name too. Only name_en was ever fetched or
         # scored, so for an Arabic question the string half of the score was
         # dead weight — Arabic script against Latin scores ~0 for every
         # candidate alike, discriminating between none of them and leaving the
         # embedding to carry the whole decision. bge-m3 is cross-lingual so it
         # mostly coped, but "نسبة التضخم" still tied التضخم with نسبة السمنة.
-        string_sim = _similarity(match_phrase, row["name_en"])
-        if row.get("name_ar"):
-            string_sim = max(string_sim, _similarity(match_phrase, row["name_ar"]))
+        targets = [row["name_en"]] + ([row["name_ar"]] if row.get("name_ar") else [])
+        string_sim = max(_similarity(p, t) for p in phrases for t in targets)
         return EMBED_WEIGHT * embed_sim + STRING_WEIGHT * string_sim
 
     scored = sorted(((row, score(row)) for row in catalog), key=lambda x: x[1], reverse=True)
