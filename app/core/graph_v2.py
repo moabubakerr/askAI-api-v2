@@ -465,10 +465,12 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
                          f"that country's own latest ({min(periods)} to {max(periods)}). "
                          f"This is not a like-for-like comparison.")
                 note = f"{note} {mixed}" if note else mixed
-            elif period_label:
-                # Say which period was used and why it may not be the newest
-                # available for every country — the alignment is invisible
-                # otherwise, and a reader could reasonably assume "latest".
+            elif period_label and len(entries) > 1:
+                # Only when there is actually something to align. "Compare Real
+                # GDP across Qatar and Saudi Arabia" has data for Qatar alone,
+                # and telling the reader it was "compared at 2025-Q4, the most
+                # recent period all of these countries report" described a
+                # comparison that did not happen.
                 aligned = (f"Compared at {period_label}, the most recent period all of these "
                            f"countries report.")
                 note = f"{note} {aligned}" if note else aligned

@@ -21,6 +21,7 @@ That is why they are separate fields and not a single rendered string — the
 frontend cannot accidentally blur them, and a reader can always see which is
 which.
 """
+import re
 from typing import Optional
 
 from app.core.graph_v2 import handle_message
@@ -97,7 +98,39 @@ def _evidence_rows(facts: dict, citations: list[dict]) -> list[dict]:
                     for e in facts[key]]
     if "actual" in facts:
         return [row(facts.get("period_label"), facts.get("actual"), facts.get("target"))]
-    return []
+
+    # Two-reading answers — growth rate, period comparison, min/max, difference.
+    # These were missing entirely, so /read showed an empty "Data evidence"
+    # section for exactly the answers where seeing both endpoints matters most:
+    # a CAGR is only checkable if you can see the two values it was computed
+    # from.
+    pairs = [("period_start", "value_start"), ("period_end", "value_end"),
+             ("period_a", "value_a"), ("period_b", "value_b"),
+             ("high_period", "high_value"), ("low_period", "low_value")]
+    endpoints = [row(facts[p], facts[v]) for p, v in pairs if p in facts and v in facts]
+    return endpoints
+
+
+def _period_mismatch(entry: dict) -> bool:
+    """True when the commentary text talks about a different year than the data
+    point it is filed against.
+
+    This is a source-data problem, not ours: the analysis row attached to Real
+    GDP's 2019-Q1 point reads "Real GDP grew by 6.1% YoY in Q4 2024". Labelling
+    it "According to SCAI, Q1 2019" is accurate about WHERE it is filed and
+    misleading about WHAT it says, so the disagreement is surfaced rather than
+    smoothed over. The frontend can then attribute it to the data point instead
+    of to the period, and SCAI can fix the filing.
+    """
+    label = str(entry.get("period_label") or "")
+    year = re.match(r"(\d{4})", label)
+    if not year:
+        return False
+    text = " ".join(str(entry.get(k) or "") for k in
+                    ("summary", "detailed", "npc_analysis", "benchmark"))
+    years_in_text = set(re.findall(r"\b(20\d{2})\b", text))
+    # No year mentioned at all means nothing to disagree with.
+    return bool(years_in_text) and year.group(1) not in years_in_text
 
 
 def _council_analysis(citations: list[dict]) -> list[dict]:
@@ -128,9 +161,14 @@ def _council_analysis(citations: list[dict]) -> list[dict]:
         # Nothing but metadata means the row exists but is empty — drop it
         # rather than render an "analysis" heading over blank space.
         if any(k in entry for k in ("summary", "detailed", "npc_analysis", "benchmark")):
+            entry["period_mismatch"] = _period_mismatch(entry)
             out.append(entry)
-    out.sort(key=lambda e: e.get("period_label") or "")
-    return out
+
+    # Most recent first, and at most two. A growth-rate answer cites both
+    # endpoints, so without this a CAGR from 2019 to 2025 rendered the 2019
+    # commentary alongside the 2025 one as though both described the result.
+    out.sort(key=lambda e: e.get("period_label") or "", reverse=True)
+    return out[:2]
 
 
 def read_message(user_message: str, conversation_context: str = "",
