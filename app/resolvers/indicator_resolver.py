@@ -60,15 +60,25 @@ STRING_MIN_TO_COUNT = 0.6
 # against the real bge-m3 over known-answer questions gave:
 #
 #   highest FALSE positive   0.602   "number of penguins in Qatar" -> Number of Qatari Jobs
-#   lowest  TRUE  positive   0.754   "the inflation rate"          -> Inflation
+#   lowest  TRUE  positive   0.664   "GDP"                          -> Real GDP
+#
+# 0.68 was set from an earlier run whose scores were inflated by ungated string
+# noise; once that was removed every score fell and 0.68 began refusing "GDP"
+# at 0.664. 0.63 sits between the highest false positive and the lowest true
+# one on the CURRENT scoring.
 #
 # At 0.55 the penguin question was answered, and so were "solar energy share"
 # (0.568 -> "Energy") and the solar/teachers pair (0.597). Every correct match
 # in that run scored 0.754 or above, so this sits in the gap and costs none of
 # them. Re-run scripts/calibrate_resolver.py after any scoring change and move
 # this number to whatever the new distribution says.
-MIN_CONFIDENCE = 0.68
+MIN_CONFIDENCE = 0.63
 MIN_GAP_TO_RUNNER_UP = 0.05
+
+# How much better than the threshold an UNPUBLISHED indicator must score before
+# it may answer a data question. Published rows are SCAI's reviewed layer;
+# unpublished ones are working data that happens to be in the same table.
+UNPUBLISHED_MARGIN = 0.10
 
 # Known contrastive term pairs in economic indicator naming. If the user's
 # phrase names one side of a pair and the top-matched indicator's name only
@@ -330,6 +340,10 @@ def resolve_indicator(phrase: str, require_data: bool = True,
     phrase_embeddings = [get_embedding(p) for p in phrases]
 
     scored = _score_catalog(catalog, phrases, phrase_embeddings)
+    # Definition lookups may legitimately land on an unpublished stub; data
+    # questions should not.
+    if require_data:
+        scored = _prefer_published(scored, MIN_CONFIDENCE)
     return _resolve_scored(scored, phrase, language)
 
 
@@ -356,6 +370,37 @@ def _score_catalog(catalog, phrases, phrase_embeddings):
         return EMBED_WEIGHT * embed_sim + STRING_WEIGHT * string_sim
 
     return sorted(((row, score(row)) for row in catalog), key=lambda x: x[1], reverse=True)
+
+
+def _prefer_published(scored, min_confidence):
+    """SCAI's published indicators get first refusal on a data question.
+
+    "tourists arrived" scores 0.715 for "Tourists Number of arrival Tests" —
+    unpublished, 12 data points — against 0.519 for "Number of International
+    Visitors", which is published with 250. The embedding is not wrong about
+    the words: that name literally contains "Tourists" and "arrival". It is
+    wrong about which indicator a person means, and no threshold can separate
+    them, because the bad match outscores the good one.
+
+    Curation is the signal that does separate them. This product answers from
+    SCAI's approved data, so a published indicator that clears the bar wins
+    outright; unpublished working rows are considered only when nothing
+    published does. That is the same preference the retriever already applies
+    when it reads published_data_points before indicator_values.
+    """
+    published = [(row, score) for row, score in scored if row.get("is_published")]
+    if published and published[0][1] >= min_confidence:
+        return published
+
+    # Nothing published clears the bar. Unpublished working data may still
+    # answer, but it has to be a CLEARLY strong match, not merely the best of
+    # a weak field — otherwise it simply inherits the question by default,
+    # which is how "tourists arrived" was answered with a 12-point row called
+    # "Tourists Number of arrival Tests" at 0.715 while the published
+    # 250-point "Number of International Visitors" sat at 0.519.
+    strong = [(row, score) for row, score in scored
+              if row.get("is_published") or score >= min_confidence + UNPUBLISHED_MARGIN]
+    return strong or published or scored
 
 
 def _resolve_scored(scored, phrase, language="en"):
