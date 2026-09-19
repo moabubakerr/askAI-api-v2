@@ -8,6 +8,7 @@ country set, wrong frequency). These functions take already-resolved,
 validated parameters (an indicator_detail_id, explicit dates, an explicit
 country list) and can only return what they're written to return.
 """
+import re
 from datetime import date
 from typing import Optional
 
@@ -112,6 +113,40 @@ def get_analysis(ref_data_point_id: str) -> Optional[dict]:
     return dict(row._mapping) if row else None
 
 
+# Words that carry no retrieval signal and, because the 'simple' text-search
+# config does no stopword removal, would otherwise be required to match.
+_LEXICAL_STOPWORDS = {
+    "the", "and", "for", "what", "has", "have", "about", "written", "wrote",
+    "said", "say", "says", "tell", "all", "any", "with", "from", "that", "this",
+    "does", "did", "council", "scai",
+    "عن", "في", "من", "ما", "هل", "ماذا", "على", "الى", "إلى", "هو", "هي", "المجلس",
+}
+
+
+def _lexical_tsquery(query_text: Optional[str]) -> Optional[str]:
+    """Builds an OR tsquery from the question's meaningful words.
+
+    plainto_tsquery ANDs every token, which made the lexical arm almost
+    useless: "In-Country Value programme" required the literal token
+    'programme' and the article says "Program", so it matched nothing; and
+    "the trade war" required the literal 'the', because the 'simple' config
+    strips no stopwords. Matching ANY term and ranking by how many hit is far
+    more forgiving, and ranking is what decides the order anyway.
+    """
+    if not query_text:
+        return None
+    tokens = [t for t in re.findall(r"[\w؀-ۿ]{3,}", query_text.lower())
+              if t not in _LEXICAL_STOPWORDS]
+    # Deduplicate, keep order, and cap so one long question cannot build a
+    # pathological query.
+    seen, terms = set(), []
+    for t in tokens:
+        if t not in seen:
+            seen.add(t)
+            terms.append(t)
+    return " | ".join(terms[:12]) or None
+
+
 def search_article_chunks(query_embedding: list[float], language: str = "en",
                            limit: int = 6, query_text: Optional[str] = None) -> list[dict]:
     """Passages from SCAI articles most relevant to a question.
@@ -148,7 +183,11 @@ def search_article_chunks(query_embedding: list[float], language: str = "en",
             d["match"] = "semantic"
             results[d["chunk_id"]] = d
 
-        if query_text and query_text.strip():
+        tsquery = _lexical_tsquery(query_text)
+        if tsquery:
+            # Searches the TITLE as well as the body. "In-Country Value Program"
+            # is the article's title, not a phrase in any one chunk, so a
+            # body-only search could not find the article the question named.
             lexical = conn.execute(text("""
                 SELECT c.chunk_id, c.article_id, c.chunk_index, c.content, c.language,
                        a.title_en, a.title_ar, a.published_date, a.article_date,
@@ -156,12 +195,15 @@ def search_article_chunks(query_embedding: list[float], language: str = "en",
                 FROM article_chunks c
                 JOIN articles a ON a.article_id = c.article_id
                 WHERE c.language = :lang
-                  AND to_tsvector('simple', c.content) @@ plainto_tsquery('simple', :q)
-                ORDER BY ts_rank(to_tsvector('simple', c.content),
-                                  plainto_tsquery('simple', :q)) DESC
+                  AND to_tsvector('simple',
+                        coalesce(a.title_en, '') || ' ' || coalesce(a.title_ar, '') ||
+                        ' ' || c.content) @@ to_tsquery('simple', :tsq)
+                ORDER BY ts_rank(to_tsvector('simple',
+                        coalesce(a.title_en, '') || ' ' || coalesce(a.title_ar, '') ||
+                        ' ' || c.content), to_tsquery('simple', :tsq)) DESC
                 LIMIT :limit
             """), {"qvec": vector_literal, "lang": language,
-                    "q": query_text, "limit": limit}).fetchall()
+                    "tsq": tsquery, "limit": limit}).fetchall()
             for r in lexical:
                 d = dict(r._mapping)
                 if d["chunk_id"] in results:

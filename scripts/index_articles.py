@@ -132,7 +132,8 @@ def main():
             title = (article.get(f"title_{lang}") or "").strip()
             if not body.strip():
                 continue
-            for i, chunk in enumerate(chunk_text(body)):
+            kept = [c for c in chunk_text(body) if len(c) >= MIN_CHUNK_CHARS]
+            for i, chunk in enumerate(kept):
                 # The title rides along in the embedded text: a chunk from deep
                 # inside an article otherwise carries no signal about what the
                 # article is about, and "what has SCAI written about tariffs"

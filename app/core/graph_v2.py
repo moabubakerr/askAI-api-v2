@@ -66,6 +66,17 @@ ARTICLE_PASSAGES = 6
 # the same idea for indicator matching.
 ARTICLE_MAX_DISTANCE = 0.62
 
+# A second article joins the answer only if its best chunk is within this much
+# of the winner's. Beyond it, the two are about different things and including
+# both dilutes the context rather than enriching it.
+ARTICLE_SECOND_MARGIN = 0.04
+
+# The chunk pool searched before grouping by article. Larger than the number of
+# passages actually used, because the right article's best chunk can sit below
+# several chunks of a thematically-adjacent one — which is exactly how "the
+# trade war" lost to five passages about Strait of Hormuz tolls.
+ARTICLE_SEARCH_POOL = 30
+
 
 class SessionState(TypedDict, total=False):
     """What a follow-up can inherit. Written every turn, read by
@@ -599,6 +610,46 @@ def _apply_last_n_years(rows: list[dict], period) -> list[dict]:
     return [r for r in dated if r["period_date"] >= cutoff]
 
 
+def _best_article_passages(passages: list[dict]) -> list[dict]:
+    """Keeps the passages from the best-matching ARTICLE, not the best-matching
+    chunks across the whole corpus.
+
+    Chunk-level top-k was the reason English article questions failed. "The
+    trade war" returned six passages that all cleared the distance threshold
+    but came from five different articles, so the answering model was handed
+    one relevant excerpt buried in five unrelated ones and concluded the
+    articles didn't cover the topic. The Arabic answer showed the same effect
+    from the other side: it found the right article and then noted that the
+    others were about Strait of Hormuz tolls.
+
+    A question about a topic is nearly always answered by ONE article, so the
+    corpus is scored by article — an article's score is its best chunk — and
+    the answer is grounded in the best article's passages. A second article is
+    included only if it is genuinely close to the first, since two articles on
+    the same theme is a real case and two on different themes is noise.
+    """
+    if not passages:
+        return []
+
+    by_article: dict[str, list[dict]] = {}
+    for p in passages:
+        by_article.setdefault(p["article_id"], []).append(p)
+
+    def article_score(chunks: list[dict]) -> float:
+        return min(float(c["distance"]) for c in chunks)
+
+    ranked = sorted(by_article.values(), key=article_score)
+    best = ranked[0]
+    if article_score(best) > ARTICLE_MAX_DISTANCE and all(c["match"] == "semantic" for c in best):
+        return []
+
+    chosen = list(best)
+    if len(ranked) > 1 and article_score(ranked[1]) <= article_score(best) + ARTICLE_SECOND_MARGIN:
+        chosen += ranked[1]
+    chosen.sort(key=lambda c: (float(c["distance"]), c["chunk_index"]))
+    return chosen[:ARTICLE_PASSAGES]
+
+
 def _article_answer(user_message: str, intent: dict, language: str, session_state: dict) -> dict:
     """Answers from SCAI's published articles instead of the indicator tables.
 
@@ -621,16 +672,15 @@ def _article_answer(user_message: str, intent: dict, language: str, session_stat
 
     query_embedding = get_embedding(topic)
     passages = retriever.search_article_chunks(query_embedding, language=language,
-                                                limit=ARTICLE_PASSAGES, query_text=topic)
+                                                limit=ARTICLE_SEARCH_POOL, query_text=topic)
     # Articles exist in both languages; if the question's language has no
     # indexed text, fall back rather than claim nothing was written.
     if not passages:
         other = "ar" if language == "en" else "en"
         passages = retriever.search_article_chunks(query_embedding, language=other,
-                                                    limit=ARTICLE_PASSAGES, query_text=topic)
+                                                    limit=ARTICLE_SEARCH_POOL, query_text=topic)
 
-    relevant = [p for p in passages
-                if float(p["distance"]) <= ARTICLE_MAX_DISTANCE or p["match"] != "semantic"]
+    relevant = _best_article_passages(passages)
     if not relevant:
         nearest = f"{float(passages[0]['distance']):.3f}" if passages else "n/a"
         payload = {"ok": False, "message": msg("no_articles_found", language, topic=topic),
@@ -679,6 +729,8 @@ def _article_answer(user_message: str, intent: dict, language: str, session_stat
                 for p in relevant
             ],
             "passage_count": len(relevant),
+            "articles_considered": len({p["article_id"] for p in passages}),
+            "best_distance": round(float(passages[0]["distance"]), 4) if passages else None,
         },
         # Same separation as /read: the source text stays distinguishable from
         # the generated summary of it.
