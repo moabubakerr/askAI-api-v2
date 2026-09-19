@@ -104,7 +104,15 @@ def _similarity(a: str, b: str) -> float:
 # every indicator here is a Qatari one.
 _PHRASE_NOISE = re.compile(
     r"\b(in|for|of|the|a|an)?\s*(qatar'?s?|qataris?|gcc|gulf|"
-    r"quarterly|monthly|yearly|annual(ly)?|per\s+(quarter|month|year))\b",
+    r"quarterly|monthly|yearly|annual(ly)?|per\s+(quarter|month|year)|"
+    # "growth" and "change" describe the COMPUTATION, not the indicator. "GDP
+    # growth" failed to resolve at all — pulled toward "Annual Growth in Labor
+    # Productivity" and "Debt to GDP Ratio" — while plain "GDP" resolves to
+    # Real GDP immediately. The growth itself comes from SCAI's vetted YoY
+    # field, which the same word already triggers downstream.
+    # Safe because the original phrase is scored alongside the stripped one, so
+    # an indicator genuinely named "...Growth..." still matches itself.
+    r"growth|change)\b",
     re.IGNORECASE,
 )
 

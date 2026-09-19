@@ -77,7 +77,24 @@ def verify_numbers(answer_text: str, facts_payload: dict, rounding_tolerance_dec
         except ValueError:
             pass
 
-    allowed = payload_numbers | payload_rounded
+    # A negative value is routinely stated as a magnitude plus a direction
+    # word: the payload holds -23.4946 and the answer says "revenues fell
+    # 23.5%". That is correct, and it was being rejected, which discarded a
+    # good answer in favour of a template. The magnitude does trace to the
+    # data, so it is allowed.
+    #
+    # The limit this accepts: the verifier cannot tell "fell 23.5%" from "rose
+    # 23.5%". It never could — direction lives in the prose, not the number,
+    # and no version of this check has ever verified a direction word. What it
+    # still guarantees is that no figure appears that is not in the data.
+    payload_absolute = set()
+    for n in payload_numbers | payload_rounded:
+        try:
+            payload_absolute.add(_normalize(abs(float(n))))
+        except ValueError:
+            pass
+
+    allowed = payload_numbers | payload_rounded | payload_absolute
     text_numbers = {_normalize(m) for m in NUMBER_PATTERN.findall(answer_text)}
 
     # ignore tiny integers that are almost certainly not data (years handled
@@ -135,6 +152,23 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                 f"{fmt(facts.get('absolute_change'))} ({facts['percent_change']}%).")
     if "definition" in facts:
         return facts["definition"]
+    if "overview" in facts:
+        # One line per indicator, each with its own period — not a repr of the
+        # list, which is what a reader was being shown, Decimal() wrappers and
+        # all.
+        lines = []
+        for e in facts["overview"]:
+            value = e.get("actual")
+            unit = e.get("unit") or ""
+            if e.get("report_as_growth") and e.get("change_yoy_percent") is not None:
+                lines.append(f"{e.get('indicator')}: {e['change_yoy_percent']}% YoY "
+                             f"({e.get('period_label')})")
+            else:
+                shown = f"{value} {unit}".strip() if value is not None else "no reading"
+                lines.append(f"{e.get('indicator')}: {shown} ({e.get('period_label')})")
+        if facts.get("not_found"):
+            lines.append("Not found in the approved data: " + ", ".join(facts["not_found"]) + ".")
+        return "\n".join(lines)
     if "count" in facts and "names" in facts:
         scope = facts.get("scope")
         what = f"published {scope}s" if scope else "indicators"
