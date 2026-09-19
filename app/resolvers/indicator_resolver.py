@@ -70,6 +70,11 @@ class IndicatorMatch:
     indicator_id: str
     name_en: str
     is_published: bool
+    # P02's PublishedIndicatorDetailId — a DIFFERENT GUID from
+    # indicator_detail_id, and the only key published_data_points can be
+    # queried by (schema.sql:86). Carried here because the caller cannot
+    # derive it from indicator_detail_id.
+    published_detail_id: Optional[str]
     is_active: Optional[bool]
     unit_en: Optional[str]
     polarity_en: Optional[str]
@@ -94,7 +99,8 @@ def _fetch_catalog() -> list[dict]:
     with engine.connect() as conn:
         rows = conn.execute(text("""
             SELECT d.indicator_detail_id, d.indicator_id, d.name_en,
-                   d.is_published, i.is_active, d.unit_en, d.polarity_en,
+                   d.is_published, d.published_detail_id,
+                   i.is_active, d.unit_en, d.polarity_en,
                    d.data_source_en, d.format
             FROM indicator_details d
             JOIN indicators i ON i.indicator_id = d.indicator_id
@@ -136,7 +142,8 @@ def resolve_indicator(phrase: str) -> ResolutionResult:
         # Genuinely ambiguous — surface the real candidates rather than picking one.
         candidates = [
             IndicatorMatch(r["indicator_detail_id"], r["indicator_id"], r["name_en"],
-                            r["is_published"], r["is_active"], r["unit_en"], r["polarity_en"],
+                            r["is_published"], r["published_detail_id"],
+                            r["is_active"], r["unit_en"], r["polarity_en"],
                             r["data_source_en"], r["format"], s)
             for r, s in scored[:3]
         ]
@@ -148,7 +155,8 @@ def resolve_indicator(phrase: str) -> ResolutionResult:
 
     match = IndicatorMatch(
         top_row["indicator_detail_id"], top_row["indicator_id"], top_row["name_en"],
-        top_row["is_published"], top_row["is_active"], top_row["unit_en"], top_row["polarity_en"],
+        top_row["is_published"], top_row["published_detail_id"],
+        top_row["is_active"], top_row["unit_en"], top_row["polarity_en"],
         top_row["data_source_en"], top_row["format"],
         top_score,
     )

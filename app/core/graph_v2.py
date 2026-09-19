@@ -131,7 +131,14 @@ def handle_message(user_message: str, conversation_context: str = "",
     session_state["last_indicator_detail_id"] = match.indicator_detail_id
     session_state["last_indicator_name"] = match.name_en
 
-    published_detail_id = match.indicator_detail_id if match.is_published else None
+    # Must be P02's PublishedIndicatorDetailId, NOT indicator_detail_id — they are
+    # different GUIDs, and published_data_points keys on the former
+    # (schema.sql:86). Passing the source id here matched zero rows for every
+    # published indicator, and because the retriever only falls back to
+    # indicator_values when this is None, a non-empty wrong id also suppressed
+    # the fallback: every data question answered "No approved data points were
+    # found", regardless of indicator or period.
+    published_detail_id = match.published_detail_id if match.is_published else None
     available_gran = retriever.get_available_granularities(published_detail_id, match.indicator_detail_id)
     explicit_gran = parse_explicit_frequency(intent.get("explicit_frequency"))
     granularity = choose_granularity(explicit_gran, available_gran)
@@ -258,7 +265,9 @@ def _macro_overview():
         res = resolve_indicator(name)
         if res.status != "resolved":
             continue
-        published_id = res.match.indicator_detail_id if res.match.is_published else None
+        # Same distinction as in handle_message: published_data_points keys on
+        # P02's PublishedIndicatorDetailId, not on indicator_detail_id.
+        published_id = res.match.published_detail_id if res.match.is_published else None
         avail = retriever.get_available_granularities(published_id, res.match.indicator_detail_id)
         gran = choose_granularity(None, avail)
         if not gran:
