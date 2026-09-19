@@ -45,6 +45,15 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    figure you calculate will be rejected even when it is arithmetically right.
    Never list the series point by point: it is shown as a table and a chart
    next to your text.
+10. For a payload with "count" and "names" (a catalogue listing), state the count
+   and the scope — e.g. "There are 101 published Sector Indicators" — then give at
+   most a handful of examples from "names_sample". NEVER enumerate the full list:
+   it is rendered separately, and narrating 101 entries runs out of room and gets
+   cut off mid-sentence.
+   Say NOTHING about the items beyond their names. You are given names only, so
+   you cannot know whether each has data, how recent it is, or what it shows —
+   annotating every entry with something like "Data available" states a fact that
+   was never supplied and may be false.
 """
 
 

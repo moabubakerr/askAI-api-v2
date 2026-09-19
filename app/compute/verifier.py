@@ -135,6 +135,16 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                 f"{fmt(facts.get('absolute_change'))} ({facts['percent_change']}%).")
     if "definition" in facts:
         return facts["definition"]
+    if "count" in facts and "names" in facts:
+        scope = facts.get("scope")
+        what = f"published {scope}s" if scope else "indicators"
+        line = f"There are {facts['count']} {what} in the approved data."
+        sample = facts.get("names_sample") or facts["names"][:8]
+        if sample:
+            line += " For example: " + "; ".join(str(n) for n in sample) + "."
+        if facts["count"] > len(sample):
+            line += f" The full list of {facts['count']} is shown alongside."
+        return line
     if "series" in facts:
         # Summarise; do NOT enumerate. The series is already rendered as a chart
         # and a table beside this text, so listing all 28 points printed the

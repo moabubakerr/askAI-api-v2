@@ -190,9 +190,20 @@ def handle_message(user_message: str, conversation_context: str = "",
                                    record_id=r.get("record_id")) for r in rows]
         else:
             rows, citations = [], []
-        payload = {"ok": True, "facts": {"count": len(rows), "names": [r.get("name_en") for r in rows]}} \
-            if rows else {"ok": False, "message": msg("no_indicators_matching", language,
-                                                        query=indicator_type_hint)}
+        names = [r.get("name_en") for r in rows]
+        payload = {"ok": True, "facts": {
+            "count": len(names),
+            # What the question actually matched, so the answer can say "101
+            # published Sector Indicators" instead of the vaguer "101 indicators
+            # related to various sectors" the model invented for itself.
+            "scope": scope, "scope_kind": kind,
+            # A short sample for the prose. The full list stays in `names` for
+            # the frontend to render; asking the model to narrate 101 entries
+            # produced a wall of text that then ran out of tokens mid-sentence.
+            "names_sample": names[:8],
+            "names": names,
+        }} if rows else {"ok": False, "message": msg("no_indicators_matching", language,
+                                                      query=indicator_type_hint)}
         return _finish(payload, language, session_state, citations)
 
     if ctype == "article_lookup":
