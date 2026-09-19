@@ -112,6 +112,39 @@ def get_analysis(ref_data_point_id: str) -> Optional[dict]:
     return dict(row._mapping) if row else None
 
 
+def get_analysis_for_data_points(record_ids: list[str]) -> dict[str, dict]:
+    """SCAI's own written commentary for specific data points, keyed by the
+    record id of the point it belongs to.
+
+    indicator_analysis.ref_data_point_id holds a published_data_point_id (for
+    source='published') or an indicator value id (for source='item'), which are
+    exactly the record ids already carried on every citation — so the narration
+    layer can attach the Council's text to the precise reading it describes,
+    rather than to the indicator in general.
+
+    This text is written by SCAI analysts. It is returned verbatim and must
+    never be paraphrased or merged into generated prose: the whole point of the
+    /read endpoint is that the reader can tell Council analysis from narration."""
+    if not record_ids:
+        return {}
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT ref_data_point_id, source, summary_en, detailed_analysis_en,
+                   npc_analysis_en, benchmark_en
+            FROM indicator_analysis
+            WHERE ref_data_point_id = ANY(:ids)
+        """), {"ids": list(record_ids)}).fetchall()
+    out = {}
+    for r in rows:
+        d = dict(r._mapping)
+        # Prefer the published row when a point has both; it carries the extra
+        # NPC and benchmark commentary that the working-data row lacks.
+        key = d["ref_data_point_id"]
+        if key not in out or d["source"] == "published":
+            out[key] = d
+    return out
+
+
 def get_benchmark_countries(published_indicator_detail_id: Optional[str]) -> list[str]:
     """SCAI's own chosen comparison set for one indicator, from P05.
 

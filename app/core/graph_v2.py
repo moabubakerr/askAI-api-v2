@@ -271,7 +271,19 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
             start_date=period.start_date, end_date=period.end_date,
             include_qatar=True,
         )
+        # With no period named, align every country on the latest period they
+        # ALL have, instead of letting each contribute its own latest row.
+        #
+        # A ranking asserts comparability. Ranking UAE's 2025-12 against
+        # everyone else's 2026-04 does not support that assertion, and a
+        # caveat only moves the problem to the reader. Aligning costs
+        # freshness — here, four months for six countries — and that is the
+        # right trade: a true ranking slightly out of date beats a current one
+        # that isn't like-for-like.
         period_label = None
+        if not (period.start_date or period.end_date):
+            period_label = _latest_common_period(series_by_country)
+
         # Ranking direction was hardcoded ascending, so "which country has the
         # HIGHEST x" was answered with the lowest. extremum is exactly the field
         # the intent agent fills for that distinction.
@@ -284,18 +296,21 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         if result.ok:
             entries = result.facts.get("ranked") or result.facts.get("rows") or []
 
-            # With no period named, each country contributes its own latest row,
-            # and those latest rows are not always the same period: ranking
-            # Inflation today puts UAE's 2025-12 against everyone else's
-            # 2026-04. That is not like-for-like, and a league table implies it
-            # is. The rows each carry their period, but the ranking as a whole
-            # needs to say so rather than relying on the reader to notice.
             periods = {e.get("period_label") for e in entries if e.get("period_label")}
             if len(periods) > 1:
-                mixed = (f"Not all countries report the same latest period — "
-                         f"figures below span {min(periods)} to {max(periods)}, "
-                         f"so this ranking is not a like-for-like comparison.")
+                # Only reachable when the countries share no period at all, so
+                # alignment was impossible and each contributed its own latest.
+                mixed = (f"These countries report no period in common, so each figure below is "
+                         f"that country's own latest ({min(periods)} to {max(periods)}). "
+                         f"This is not a like-for-like comparison.")
                 note = f"{note} {mixed}" if note else mixed
+            elif period_label:
+                # Say which period was used and why it may not be the newest
+                # available for every country — the alignment is invisible
+                # otherwise, and a reader could reasonably assume "latest".
+                aligned = (f"Compared at {period_label}, the most recent period all of these "
+                           f"countries report.")
+                note = f"{note} {aligned}" if note else aligned
             for entry in entries:
                 country_rows = series_by_country.get(entry["country"], [])
                 row = _find_row_by_period(country_rows, entry.get("period_label"))
@@ -325,7 +340,15 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
 
     if ctype == "latest_value":
         result = compute.latest_value(rows)
-        used = [rows[-1]] if rows else []
+        # Cite the row the computation actually used, not rows[-1]. Those are no
+        # longer the same: latest_value now skips future target-only rows, so
+        # citing the last row would have attributed a 2025-12 reading to a
+        # 2030-12 record — a citation pointing at the wrong number is worse than
+        # none, since it looks like provenance.
+        used = []
+        if result.ok:
+            row = _find_row_by_period(rows, result.facts.get("period_label"))
+            used = [row] if row else []
         return _wrap(result, unit, indicator_name=indicator_name), citations_for_rows(used, indicator_name, data_source_en)
 
     if ctype == "period_ranking":
@@ -401,6 +424,28 @@ def _apply_last_n_years(rows: list[dict], period) -> list[dict]:
     anchor = max(r["period_date"] for r in dated)
     cutoff = date(anchor.year - period.n_years, anchor.month, 1)
     return [r for r in dated if r["period_date"] >= cutoff]
+
+
+def _latest_common_period(series_by_country: dict[str, list[dict]]) -> Optional[str]:
+    """The newest period every country with data actually reports.
+
+    Countries with no data at all are ignored when intersecting — otherwise a
+    single empty series would wipe out the intersection and force the whole
+    ranking back onto mismatched periods. They are still reported separately as
+    having no approved data.
+
+    Returns None when the countries share no period at all, in which case the
+    caller falls back to per-country latest and says so."""
+    period_sets = []
+    for rows in series_by_country.values():
+        periods = {r["period_label"] for r in rows
+                   if r.get("period_label") and r.get("actual") is not None}
+        if periods:
+            period_sets.append(periods)
+    if not period_sets:
+        return None
+    common = set.intersection(*period_sets)
+    return max(common) if common else None
 
 
 def _wrap(result: compute.ComputeResult, unit: str, extra_note: Optional[str] = None,

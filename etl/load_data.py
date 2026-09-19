@@ -23,8 +23,8 @@ from sqlalchemy import create_engine, text
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from etl.utils import (
-    clean_null, fix_mojibake, maybe_b64_decode, normalize_guid, parse_period,
-    strip_html, to_bool, to_float,
+    clean_null, fix_mojibake, html_to_text, maybe_b64_decode, normalize_guid,
+    parse_period, strip_html, to_bool, to_float,
 )
 
 
@@ -230,8 +230,8 @@ def load_indicator_analysis(csv_dir, engine):
             "analysis_id": r["IndicatorDetailDataPointId"],
             "ref_data_point_id": r["IndicatorDetailDataPointId"],
             "source": "item",
-            "summary_en": strip_html(fix_mojibake(r["Summary_EN"])),
-            "detailed_analysis_en": strip_html(fix_mojibake(r["DetailedAnalysis_EN"])),
+            "summary_en": html_to_text(fix_mojibake(r["Summary_EN"])),
+            "detailed_analysis_en": html_to_text(fix_mojibake(r["DetailedAnalysis_EN"])),
             "npc_analysis_en": None,
             "benchmark_en": None,
         })
@@ -240,10 +240,10 @@ def load_indicator_analysis(csv_dir, engine):
             "analysis_id": r["PublishedDataPointAnalysisId"],
             "ref_data_point_id": r["PublishedDataPointId"],
             "source": "published",
-            "summary_en": strip_html(fix_mojibake(r["SummaryEN"])),
-            "detailed_analysis_en": strip_html(fix_mojibake(r["DetailedAnalysisEN"])),
-            "npc_analysis_en": strip_html(fix_mojibake(r["NPCAnalysisEN"])),
-            "benchmark_en": strip_html(fix_mojibake(r["BenchmarkEN"])),
+            "summary_en": html_to_text(fix_mojibake(r["SummaryEN"])),
+            "detailed_analysis_en": html_to_text(fix_mojibake(r["DetailedAnalysisEN"])),
+            "npc_analysis_en": html_to_text(fix_mojibake(r["NPCAnalysisEN"])),
+            "benchmark_en": html_to_text(fix_mojibake(r["BenchmarkEN"])),
         })
     out = pd.DataFrame(rows)
     out.to_sql("indicator_analysis", engine, if_exists="append", index=False)

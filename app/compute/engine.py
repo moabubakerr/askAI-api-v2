@@ -23,9 +23,35 @@ class ComputeResult:
 
 
 def latest_value(rows: list[dict]) -> ComputeResult:
+    """The most recent period that has an ACTUAL reading.
+
+    Not simply rows[-1]. Many series carry target rows years into the future
+    with no actual — Percentage of Floating Shares runs to 2030-12 with only a
+    target — so taking the chronologically last row answered "what is the
+    latest X" with an empty value and a 2030 target. That is how a question
+    about solar energy came back "the target in 2030 is set at 50.0%", and how
+    Annual Growth in Labor Productivity reported its 2030 target as if it were
+    a current reading: a forecast-shaped answer from a system that explicitly
+    does not forecast.
+
+    The target for the same period is still returned alongside, so "actual vs
+    target" remains answerable. When nothing has an actual, that is stated
+    rather than papered over with the target."""
     if not rows:
         return ComputeResult(False, message="No approved data points were found for this indicator/period.")
-    latest = rows[-1]  # rows are ORDER BY period_date ASC from the retriever
+
+    actuals = [r for r in rows if r.get("actual") is not None]
+    if not actuals:
+        targets = [r for r in rows if r.get("target") is not None]
+        if targets:
+            last = targets[-1]
+            return ComputeResult(False, message=(
+                f"No actual readings have been recorded for this indicator in the approved data — "
+                f"only targets (most recently {last['target']} for {last['period_label']})."
+            ))
+        return ComputeResult(False, message="No approved data points were found for this indicator/period.")
+
+    latest = actuals[-1]  # rows are ORDER BY period_date ASC from the retriever
     return ComputeResult(True, facts={
         "period_label": latest["period_label"],
         "actual": latest["actual"],

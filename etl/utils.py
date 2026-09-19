@@ -116,6 +116,26 @@ def normalize_guid(value):
     return value
 
 
+def html_to_text(text: str) -> str:
+    """Like strip_html, but keeps the shape of a list.
+
+    The analyst commentary fields are rich text and are mostly <ul><li> bullets.
+    strip_html() replaces every tag with a space, which welds several distinct
+    analyst points into one run-on sentence — readable enough as LLM grounding,
+    but not something to show a user as "the Council's analysis". Each <li>
+    becomes its own "• " item and block boundaries become line breaks."""
+    if not text or not isinstance(text, str):
+        return text
+    text = re.sub(r"<li[^>]*>", "\n• ", text, flags=re.IGNORECASE)
+    text = re.sub(r"</(p|div|ul|ol|li|h\d)>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = text.replace("&nbsp;", " ").replace("&amp;", "&")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n", text)
+    return "\n".join(line.strip() for line in text.split("\n") if line.strip())
+
+
 def strip_html(text: str) -> str:
     """Rough HTML stripper for feeding article/entity content to the LLM as
     plain text context. Not meant for display — only for grounding prompts."""

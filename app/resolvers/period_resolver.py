@@ -22,7 +22,7 @@ inspectable rule rather than a per-question LLM guess.
 """
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 GRANULARITY_ORDER = ["monthly", "quarterly", "yearly"]
@@ -50,6 +50,18 @@ def parse_explicit_frequency(explicit_frequency: Optional[str]) -> Optional[str]
     return None
 
 
+def _end_of_month(year: int, month: int) -> date:
+    """Last day of the given month. Needed because a single month or quarter
+    previously set only start_date, and start_date is an inclusive lower bound:
+    "inflation in May 2025" therefore returned every period FROM May 2025
+    onwards, and the caller took the newest of them. The user got the latest
+    reading, silently, instead of the month they asked about — the F-014/F-015
+    shape of failure ("How many tourists arrived in May 2025")."""
+    if month == 12:
+        return date(year, 12, 31)
+    return date(year, month + 1, 1) - timedelta(days=1)
+
+
 def parse_period_expression(expr: Optional[str]) -> PeriodResolution:
     if not expr:
         return PeriodResolution(kind="unspecified", raw="")
@@ -65,12 +77,15 @@ def parse_period_expression(expr: Optional[str]) -> PeriodResolution:
     m = re.search(r"(\d{4})-(\d{2})", text_l)
     if m:
         y, mo = int(m.group(1)), int(m.group(2))
-        return PeriodResolution(kind="single_month", start_date=date(y, mo, 1), raw=expr)
+        return PeriodResolution(kind="single_month", start_date=date(y, mo, 1),
+                                 end_date=_end_of_month(y, mo), raw=expr)
 
     for name, num in _MONTH_NAMES.items():
         m = re.search(rf"{name}\s+(\d{{4}})", text_l)
         if m:
-            return PeriodResolution(kind="single_month", start_date=date(int(m.group(1)), num, 1), raw=expr)
+            y = int(m.group(1))
+            return PeriodResolution(kind="single_month", start_date=date(y, num, 1),
+                                     end_date=_end_of_month(y, num), raw=expr)
 
     # "Q1 2025" / "2025-Q1"
     m = re.search(r"q(\d)\s*(\d{4})", text_l) or re.search(r"(\d{4})[\s-]*q(\d)", text_l)
@@ -78,7 +93,8 @@ def parse_period_expression(expr: Optional[str]) -> PeriodResolution:
         groups = m.groups()
         year, q = (int(groups[1]), int(groups[0])) if len(groups[0]) == 1 else (int(groups[0]), int(groups[1]))
         month = {1: 1, 2: 4, 3: 7, 4: 10}[q]
-        return PeriodResolution(kind="single_quarter", start_date=date(year, month, 1), raw=expr)
+        return PeriodResolution(kind="single_quarter", start_date=date(year, month, 1),
+                                 end_date=_end_of_month(year, month + 2), raw=expr)
 
     # "between 2022 and 2025" / "2022 to 2025" / "from 2022 to 2025"
     m = re.search(r"(\d{4}).{0,10}(?:to|and|-)\s*(\d{4})", text_l)
