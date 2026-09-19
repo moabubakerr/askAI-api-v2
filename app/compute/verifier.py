@@ -135,10 +135,26 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                 f"{fmt(facts.get('absolute_change'))} ({facts['percent_change']}%).")
     if "definition" in facts:
         return facts["definition"]
+    if "series" in facts:
+        # Summarise; do NOT enumerate. The series is already rendered as a chart
+        # and a table beside this text, so listing all 28 points printed the
+        # same data three times on one screen.
+        parts = [f"{indicator}: {facts.get('n_points', len(facts['series']))} readings"]
+        if facts.get("first_period"):
+            parts.append(f"from {fmt(facts.get('first_value'))} in {facts['first_period']} "
+                         f"to {fmt(facts.get('last_value'))} in {facts.get('last_period')}")
+        line = ", ".join(parts) + "."
+        if facts.get("change_percent") is not None:
+            line += f" That is a change of {facts['change_percent']}% over the period."
+        if facts.get("highest_period"):
+            line += (f" The highest reading was {fmt(facts.get('highest_value'))} in "
+                     f"{facts['highest_period']}, the lowest {fmt(facts.get('lowest_value'))} "
+                     f"in {facts.get('lowest_period')}.")
+        return line
 
     lines = []
     for key, value in facts.items():
-        if key in ("unit", "indicator"):
+        if key in ("unit", "indicator", "n_points"):
             continue
         if key == "series":
             for point in value:

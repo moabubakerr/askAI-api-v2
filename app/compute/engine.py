@@ -165,7 +165,32 @@ def trend(rows: list[dict]) -> ComputeResult:
     if not rows:
         return ComputeResult(False, message="No approved data points were found for this indicator.")
     series = [{"period_label": r["period_label"], "actual": r["actual"]} for r in rows]
-    return ComputeResult(True, facts={"series": series, "n_points": len(series)})
+    facts = {"series": series, "n_points": len(series)}
+
+    # The shape of the series, computed here rather than left for the Composer
+    # to work out. Narrating 28 points, a model reaches for "rose 11.5% over
+    # the period" — a number that was in no payload, so the numeric verifier
+    # rejected the whole answer and the user got a template dump instead. The
+    # figures it wants are deterministic, so they are supplied: stating them
+    # then becomes reporting, which is all the Composer is allowed to do.
+    valued = [r for r in rows if r.get("actual") is not None]
+    if valued:
+        first, last = valued[0], valued[-1]
+        facts.update({
+            "first_period": first["period_label"], "first_value": first["actual"],
+            "last_period": last["period_label"], "last_value": last["actual"],
+        })
+        high = max(valued, key=lambda r: r["actual"])
+        low = min(valued, key=lambda r: r["actual"])
+        facts.update({
+            "highest_period": high["period_label"], "highest_value": high["actual"],
+            "lowest_period": low["period_label"], "lowest_value": low["actual"],
+        })
+        if first["actual"] not in (None, 0):
+            facts["change_percent"] = round(
+                (last["actual"] - first["actual"]) / first["actual"] * 100, 4)
+            facts["absolute_change"] = round(last["actual"] - first["actual"], 6)
+    return ComputeResult(True, facts=facts)
 
 
 def period_ranking(rows: list[dict], descending: bool = True) -> ComputeResult:

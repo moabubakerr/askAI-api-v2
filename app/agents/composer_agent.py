@@ -38,6 +38,13 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
 8. If the payload contains a "chart" key, a chart is being shown alongside
    your text — give a brief headline and interpretation, don't narrate every
    individual data point in prose since the chart already shows them.
+9. For a "series", the payload also carries first_period/first_value,
+   last_period/last_value, highest_*, lowest_*, change_percent and
+   absolute_change. Use THOSE to describe the shape of the series. Do not work
+   out a change, a peak or a trough yourself — they are already computed, and a
+   figure you calculate will be rejected even when it is arithmetically right.
+   Never list the series point by point: it is shown as a table and a chart
+   next to your text.
 """
 
 
