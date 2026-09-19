@@ -43,7 +43,7 @@ def build_chart_spec(user_message: str, rows: list[dict]) -> dict | None:
         return None
 
     sample = rows[:50]
-    user_prompt = f"Question: {user_message}\n\nData columns and sample rows:\n{json.dumps(sample)}"
+    user_prompt = f"Question: {user_message}\n\nData columns and sample rows:\n{json.dumps(sample, ensure_ascii=False)}"
 
     raw = chat(
         client=llm_client,

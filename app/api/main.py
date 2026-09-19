@@ -33,6 +33,11 @@ class ChatResponse(BaseModel):
     facts_payload: dict
     chart: Optional[dict] = None
     verified: bool = True
+    # True only when the answer actually contains readings — a value measured
+    # at a period. The frontend shows "Read this for me" on this flag alone:
+    # offering it on a greeting, a refusal, a definition or a catalogue listing
+    # gives the user a button that reveals nothing they were not already shown.
+    readable: bool = False
 
 
 @app.get("/health")
@@ -48,6 +53,7 @@ class ReadResponse(BaseModel):
     cannot blur them and a reader can always tell which is which.
     """
     ok: bool
+    readable: bool = False              # same meaning as on /chat
     message: Optional[str] = None       # only when ok is false
     headline: Optional[dict] = None     # single-reading answers only
     one_liner: Optional[str] = None
@@ -99,6 +105,7 @@ def chat_endpoint(req: ChatRequest):
         facts_payload=payload,
         chart=payload.get("chart"),
         verified="_verifier_rejected_numbers" not in payload,
+        readable=result.get("readable", False),
     )
 
 

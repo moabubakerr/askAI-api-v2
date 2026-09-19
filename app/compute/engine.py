@@ -117,15 +117,23 @@ def growth_rate(rows: list[dict], period_label_start: str, period_label_end: str
     if v0 is None or v1 is None or v0 <= 0:
         return ComputeResult(False, message="Missing or non-positive values prevent a valid growth-rate calculation.")
 
+    # `actual` is a NUMERIC column, so psycopg2 returns decimal.Decimal, and
+    # Decimal ** float raises TypeError — which made every CAGR request a 500.
+    # The fractional exponent has no Decimal equivalent, so the arithmetic is
+    # done in float. Only the RATE is computed this way; the reported start and
+    # end values stay exactly as retrieved, so nothing a user sees is affected
+    # by float representation.
+    f0, f1 = float(v0), float(v1)
+
     if method == "simple":
-        rate = round((v1 - v0) / v0 * 100, 4)
+        rate = round((f1 - f0) / f0 * 100, 4)
     else:
         # CAGR needs the number of periods between start and end
         n_periods = rows.index(end) - rows.index(start)
         if n_periods <= 0:
             return ComputeResult(False, message="End period must come after the start period.")
         years = n_periods / periods_per_year
-        rate = round(((v1 / v0) ** (1 / years) - 1) * 100, 4)
+        rate = round(((f1 / f0) ** (1 / years) - 1) * 100, 4)
 
     return ComputeResult(True, facts={
         "period_start": period_label_start, "value_start": v0,

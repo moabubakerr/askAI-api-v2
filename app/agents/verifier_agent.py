@@ -35,7 +35,7 @@ def verify(rows: list[dict], draft_answer: str) -> dict:
         return {"verified": False, "issue": "No source data was retrieved to support this answer."} \
             if any(ch.isdigit() for ch in draft_answer) else {"verified": True, "issue": None}
 
-    user_prompt = f"Source data:\n{json.dumps(rows[:200])}\n\nDraft answer:\n{draft_answer}"
+    user_prompt = f"Source data:\n{json.dumps(rows[:200], ensure_ascii=False)}\n\nDraft answer:\n{draft_answer}"
 
     raw = chat(
         client=router_client,

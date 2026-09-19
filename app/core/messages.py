@@ -263,6 +263,12 @@ _MESSAGES = {
         "ar": ("ملاحظة: الأرقام {numbers} أعلاه لا ترد في مقتطفات المقالات التي استرجعتها، "
                 "لذا تعامل معها بحذر — راجع المقالات المرتبطة مباشرة."),
     },
+    "no_data_for_country": {
+        "en": ("There is no approved data for {country} on \"{indicator}\". I won't show "
+                "Qatar's figure in its place."),
+        "ar": ("لا توجد بيانات معتمدة لـ {country} بخصوص \"{indicator}\". "
+                "ولن أعرض رقم قطر بدلاً منه."),
+    },
     "no_overview": {
         "en": "No headline indicators were available to build an overview.",
         "ar": "لا توجد مؤشرات رئيسية متاحة لإعداد نظرة عامة.",

@@ -45,7 +45,12 @@ def compose_answer(facts_payload: dict, language: str = "en") -> str:
     user_prompt = (
         f"Language: {language}\n\n"
         f"Facts payload (the ONLY source of numbers you may use):\n"
-        f"{json.dumps(facts_payload, default=str, indent=2)}"
+        # ensure_ascii=False is load-bearing here, not cosmetic. With the
+        # default, Arabic in the payload is serialised as backslash-u escapes,
+        # the model is shown those escapes, and it copies them verbatim — an
+        # Arabic ambiguity message reached the user as a run of \u06xx codes
+        # instead of readable text.
+        f"{json.dumps(facts_payload, default=str, indent=2, ensure_ascii=False)}"
     )
     return chat(
         client=llm_client,

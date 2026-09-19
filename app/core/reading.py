@@ -150,6 +150,7 @@ def read_message(user_message: str, conversation_context: str = "",
     if not payload.get("ok"):
         return {
             "ok": False,
+            "readable": False,
             "message": payload.get("message", "No approved data is available for this request."),
             "headline": None,
             "one_liner": None,
@@ -172,6 +173,7 @@ def read_message(user_message: str, conversation_context: str = "",
 
     return {
         "ok": True,
+        "readable": result.get("readable", False),
         "headline": headline,
         "one_liner": one_liner,
         "council_analysis": analysis,

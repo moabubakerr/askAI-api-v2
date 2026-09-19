@@ -90,7 +90,10 @@ def _capabilities_answer(language: str) -> tuple[dict, list[Citation]]:
             "SELECT name_en, sector_id FROM sectors WHERE is_active ORDER BY name_en"
         )).fetchall()
     sectors = [r[0] for r in sector_rows]
-    citations = [Citation(indicator=None, data_source=None, table="indicators", record_id=None)]
+    # Named, because a citation with indicator=None rendered as a literal
+    # "• None — SCAI Indicator Catalog" in the sources footer.
+    citations = [Citation(indicator="Published indicator catalogue", data_source=None,
+                           table="indicators", record_id=None)]
     citations += [Citation(indicator=r[0], data_source=None, table="sectors", record_id=r[1]) for r in sector_rows]
     payload = {
         "ok": True,
@@ -294,6 +297,23 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
     indicator_name = match.name_en
     data_source_en = match.data_source_en
 
+    # Single-series computations queried the Qatar series unconditionally and
+    # ignored any country that had been resolved. So a follow-up of "and for
+    # Saudi Arabia?" after an inflation question returned QATAR's figure,
+    # labelled as the answer — a wrong number presented confidently, which is
+    # the worst failure mode this pipeline has.
+    #
+    # One named country narrows the series to it. More than one is a comparison
+    # however the question was phrased, so it is promoted rather than silently
+    # answering about only the first.
+    named_countries = [c for c in (countries_res.resolved_countries or [])]
+    single_country = None
+    if ctype not in ("country_comparison", "country_ranking") and named_countries:
+        if len(named_countries) > 1 or countries_res.is_group:
+            ctype = "country_comparison"
+        else:
+            single_country = named_countries[0]
+
     if ctype in ("country_comparison", "country_ranking"):
         countries = list(countries_res.resolved_countries)
         note = (f"No approved data source recognized for: {', '.join(countries_res.unresolved_names)}."
@@ -368,8 +388,16 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         return _wrap(result, unit, extra_note=note, indicator_name=indicator_name), citations
 
     rows = retriever.get_series(match.indicator_detail_id, published_detail_id, granularity,
-                                 start_date=period.start_date, end_date=period.end_date)
+                                 start_date=period.start_date, end_date=period.end_date,
+                                 country_en=single_country)
     rows = _apply_last_n_years(rows, period)
+
+    # A named country with no data for this indicator must be said out loud,
+    # not answered with Qatar's series as if it were theirs.
+    if not rows and single_country:
+        return {"ok": False, "message": msg("no_data_for_country", language,
+                                             indicator=indicator_name.strip(),
+                                             country=single_country)}, []
 
     # "What is the Real GDP forecast for 2026" was answered "No approved data
     # points were found for this indicator/period" — true, but it leaves the
@@ -634,6 +662,20 @@ def _macro_overview(language="en"):
     return {"ok": True, "facts": {"overview": facts}}, citations
 
 
+# facts keys that represent an actual READING — a value measured at a period.
+# A "read this for me" view exists to present readings; offering it on a
+# greeting, a refusal, a definition or a catalogue listing gives the user a
+# button that reveals nothing they were not already shown.
+_READABLE_FACT_KEYS = {"actual", "series", "ranked", "rows", "ranked_periods",
+                       "overview", "high_value", "value_a", "value_start"}
+
+
+def is_readable(payload: dict) -> bool:
+    if not payload.get("ok"):
+        return False
+    return bool(_READABLE_FACT_KEYS & set((payload.get("facts") or {}).keys()))
+
+
 def _finish(payload: dict, language: str, session_state: dict, citations: list[Citation],
             skip_compose: bool = False, canned: Optional[str] = None) -> dict:
     if skip_compose:
@@ -674,5 +716,6 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
     return {
         "answer": answer,
         "facts_payload": payload,
+        "readable": is_readable(payload),
         "session_state": session_state,
     }

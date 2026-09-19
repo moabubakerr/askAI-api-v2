@@ -103,8 +103,43 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
         return facts_payload.get("message", "No approved data is available for this request.")
 
     facts = facts_payload.get("facts", {})
+    unit = facts.get("unit") or ""
+    indicator = facts.get("indicator") or "This indicator"
+
+    # Readable sentences for the shapes that actually occur, rather than a dump
+    # of "period_label: 2025-Q4 / actual: 37.972". This text is what the user
+    # sees whenever the Composer's wording fails verification, so it is a normal
+    # answer, not a debug view — the previous version looked like the system had
+    # broken even though the data behind it was correct.
+    def fmt(value):
+        return f"{value} {unit}".strip() if value is not None else "—"
+
+    if "actual" in facts and "period_label" in facts:
+        line = f"{indicator} was {fmt(facts['actual'])} in {facts['period_label']}."
+        if facts.get("target") is not None:
+            line += f" The target for that period was {fmt(facts['target'])}."
+        return line
+    if "growth_rate_percent" in facts:
+        return (f"{indicator} moved from {fmt(facts.get('value_start'))} in "
+                f"{facts.get('period_start')} to {fmt(facts.get('value_end'))} in "
+                f"{facts.get('period_end')} — a {facts['growth_rate_percent']}% "
+                f"{facts.get('method', '')} growth rate.".replace("  ", " "))
+    if "absolute_difference" in facts:
+        return (f"The highest {indicator} was {fmt(facts.get('high_value'))} in "
+                f"{facts.get('high_period')} and the lowest {fmt(facts.get('low_value'))} in "
+                f"{facts.get('low_period')} — a difference of "
+                f"{fmt(facts['absolute_difference'])}.")
+    if "percent_change" in facts:
+        return (f"{indicator} was {fmt(facts.get('value_a'))} in {facts.get('period_a')} and "
+                f"{fmt(facts.get('value_b'))} in {facts.get('period_b')} — a change of "
+                f"{fmt(facts.get('absolute_change'))} ({facts['percent_change']}%).")
+    if "definition" in facts:
+        return facts["definition"]
+
     lines = []
     for key, value in facts.items():
+        if key in ("unit", "indicator"):
+            continue
         if key == "series":
             for point in value:
                 lines.append(f"{point.get('period_label')}: {point.get('actual')}")
