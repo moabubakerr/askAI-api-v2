@@ -22,6 +22,7 @@ from datetime import date
 from typing import TypedDict, Optional
 
 from app.nlu.intent_agent import extract_intent
+from app.core.conversation import carry_forward
 from app.resolvers.indicator_resolver import resolve_indicator, has_usable_definition
 from app.resolvers.country_resolver import resolve_countries
 from app.resolvers.period_resolver import parse_period_expression, parse_explicit_frequency, choose_granularity
@@ -49,10 +50,14 @@ CONFIDENT_MATCH = 0.75
 
 
 class SessionState(TypedDict, total=False):
+    """What a follow-up can inherit. Written every turn, read by
+    conversation.carry_forward() on the next one."""
     last_indicator_detail_id: str
     last_indicator_name: str
     last_countries: list
+    last_country_group: str
     last_period_expression: str
+    last_explicit_frequency: str
 
 
 def _find_row_by_period(rows: list[dict], period_label: Optional[str]) -> Optional[dict]:
@@ -91,8 +96,24 @@ def handle_message(user_message: str, conversation_context: str = "",
                     session_state: Optional[SessionState] = None) -> dict:
     session_state = dict(session_state or {})
     intent = extract_intent(user_message, conversation_context)
+    # A follow-up states only what changed. Inherit the rest from the previous
+    # turn before anything is resolved, so "and for Saudi Arabia?" keeps the
+    # earlier indicator AND period instead of only the indicator.
+    intent = carry_forward(intent, session_state, user_message)
     ctype = intent.get("computation_type", "out_of_scope")
     language = intent.get("language", "en")
+
+    # Remember what this turn was about, whatever happens below, so the next
+    # follow-up has something to refer back to even if this one fails to
+    # resolve an indicator.
+    if intent.get("period_expression"):
+        session_state["last_period_expression"] = intent["period_expression"]
+    if intent.get("explicit_frequency"):
+        session_state["last_explicit_frequency"] = intent["explicit_frequency"]
+    if intent.get("countries_mentioned"):
+        session_state["last_countries"] = list(intent["countries_mentioned"])
+    if intent.get("country_group_mentioned"):
+        session_state["last_country_group"] = intent["country_group_mentioned"]
 
     # --- non-data intents ---
     if ctype == "general_chat":

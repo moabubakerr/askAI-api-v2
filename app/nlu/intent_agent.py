@@ -74,9 +74,15 @@ Rules:
 - extremum should be "max" for "highest"/"largest"/"most" style questions, "min" for
   "lowest"/"smallest"/"least", and null when computation_type isn't min_max/country_ranking.
 - Do not invent countries, periods, or indicators the user did not mention.
-- If the question is a follow-up ("what about last year", "and Q2?"), set is_followup=true
-  and describe only what's being changed relative to the prior turn — do not guess the
-  actual prior indicator/country yourself, that's resolved separately with conversation state.
+- If the question is a follow-up ("what about last year", "and Q2?", "and for Saudi Arabia?",
+  "what is the latest value?"), set is_followup=true and fill ONLY the fields the user
+  actually restated. Leave every other field null — do not copy the indicator, country or
+  period forward from the prior conversation yourself. Slots left null on a follow-up are
+  filled deterministically from the previous turn's resolved values; a value you guess
+  here overrides that and cannot be checked.
+  Judge this from the "Prior conversation" block above: a question that only makes sense
+  as a continuation of it ("and the year before that?") is a follow-up, while a question
+  that names its own indicator is not, even when a conversation exists.
 - indicator_phrase should be the user's own wording, not a guess at the catalog's exact name.
 """
 
