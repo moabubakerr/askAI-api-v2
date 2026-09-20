@@ -30,7 +30,8 @@ from app.resolvers.indicator_resolver import (resolve_indicator, has_usable_defi
 from app.resolvers.country_resolver import resolve_countries
 from app.resolvers.period_resolver import (parse_period_expression, parse_explicit_frequency,
                                             choose_granularity, parse_period_pair,
-                                            parse_relative_pair, year_earlier_label)
+                                            parse_relative_pair, year_earlier_label,
+                                            single_period_label, period_kind)
 from app.db import retriever
 from app.compute import engine as compute
 from app.compute.verifier import verify_numbers, render_template_fallback
@@ -601,7 +602,8 @@ def handle_message(user_message: str, conversation_context: str = "",
     payload, citations = _dispatch_computation(ctype, intent, match, published_detail_id, granularity,
                                                 period, countries_res, language,
                                                 performance_followup=performance_followup,
-                                                user_message=user_message)
+                                                user_message=user_message,
+                                                session_state=session_state)
 
     # Flag a shaky resolution so _finish can disclose it. The threshold sits
     # above MIN_CONFIDENCE (0.55) deliberately: clearing the bar to answer at
@@ -621,7 +623,7 @@ def handle_message(user_message: str, conversation_context: str = "",
 
 def _dispatch_computation(ctype, intent, match, published_detail_id, granularity, period,
                            countries_res, language="en", performance_followup=False,
-                           user_message=""):
+                           user_message="", session_state=None):
     # Unit AND scale, both of which live in the catalogue: unit_en says "QAR",
     # Format says "bn0.0". Reading only the first printed "185.17 QAR" beside
     # prose that said "QAR 185.2 billion".
@@ -860,11 +862,31 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
                     # series' own spacing is.
                     label_b, label_a = actuals[-1]["period_label"], actuals[-2]["period_label"]
                 else:
-                    anchor = actuals[-1]["period_label"]
+                    # Anchored on the period the user named, when they named
+                    # one. "Real GDP in Q4 2025, and what was it one year
+                    # earlier" is a question about Q4 2025 and Q4 2024 — using
+                    # the series' latest reading instead would answer about a
+                    # quarter they did not mention.
+                    anchor = (single_period_label(period.raw or user_message)
+                              or actuals[-1]["period_label"])
                     if relative == "prev_two_years":
                         anchor = year_earlier_label(anchor)
                     label_b, label_a = anchor, year_earlier_label(anchor)
                 pair = (label_a, label_b)
+        # A follow-up that names ONE period — "compare it with Q4 2025" — means
+        # that period against the one the previous turn reported. Both are known;
+        # asking the user to restate a period they have already been shown is
+        # the system losing its place in the conversation, not a real ambiguity.
+        if not pair:
+            named = single_period_label(period.raw or user_message)
+            prior = (session_state or {}).get("last_period_used")
+            if (named and prior and prior != named
+                    and period_kind(named) == period_kind(prior)):
+                rows = retriever.get_series(match.indicator_detail_id, published_detail_id,
+                                             granularity, country_en=single_country)
+                pair = tuple(sorted((prior, named)))
+                relative = "carried_forward"
+
         if pair:
             label_a, label_b = pair
             if not relative:
@@ -872,7 +894,17 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
                 # and the earlier query was scoped to just one of them.
                 rows = retriever.get_series(match.indicator_detail_id, published_detail_id,
                                              granularity, country_en=single_country)
-        elif len(rows) >= 2:
+        elif getattr(period, "kind", None) == "range" and len(rows) >= 2:
+            # Only for an explicit span ("over 2024", "from 2022 to 2025"),
+            # where the ends of the window ARE the two periods meant.
+            #
+            # This used to run for any retrieval holding two or more rows, so a
+            # question whose periods had not been understood was answered from
+            # whatever window happened to be in hand rather than refused. "Real
+            # GDP in Q4 2025, and what was it one year earlier" was narrowed to
+            # 2024 by the phrase "year earlier" and then answered "2024-Q1 vs
+            # 2024-Q4" — a confident comparison between two quarters the user
+            # never named. A refusal is recoverable; that is not.
             label_a, label_b = rows[0]["period_label"], rows[-1]["period_label"]
         else:
             return {"ok": False, "message": msg("need_two_periods", language)}, []
@@ -1461,6 +1493,16 @@ def is_readable(payload: dict) -> bool:
 def _finish(payload: dict, language: str, session_state: dict, citations: list[Citation],
             skip_compose: bool = False, canned: Optional[str] = None,
             question: str = "") -> dict:
+    # The period this answer actually reported, so "compare it with Q4 2025"
+    # has the other half of its comparison. Recorded from the facts rather than
+    # from the question, because the question may have named no period at all
+    # and still been answered at a specific one.
+    facts_out = payload.get("facts") or {}
+    for key in ("period_label", "period_b", "period_end", "last_period", "period_used"):
+        if facts_out.get(key):
+            session_state["last_period_used"] = facts_out[key]
+            break
+
     if skip_compose:
         answer = canned or ""
     else:

@@ -64,19 +64,15 @@ _PERIOD_TOKEN = re.compile(
 )
 
 
-def parse_period_pair(expr: Optional[str]):
-    """Two period labels from one expression, for an explicit A-vs-B comparison.
+def period_kind(label: str) -> str:
+    """'q' | 'm' | 'y' — which kind of period a label denotes."""
+    return "q" if "-Q" in str(label) else "m" if "-" in str(label) else "y"
 
-    parse_period_expression() only ever describes ONE period, so "between Q1
-    2025 and Q4 2025" fell through its range branch (which needs two bare
-    years) into the single-quarter branch, retrieved Q1 alone, and answered
-    "Could not find two distinct periods to compare" — F-011's exact question.
 
-    Returns (label_a, label_b) in the order written, in period_label form, or
-    None when the expression does not name two distinct periods.
-    """
+def scan_period_labels(expr: Optional[str]) -> list[str]:
+    """Every period this expression names, in the order written, deduplicated."""
     if not expr:
-        return None
+        return []
     found = []
     for m in _PERIOD_TOKEN.finditer(expr.lower()):
         if m.group("q1"):
@@ -91,12 +87,37 @@ def parse_period_pair(expr: Optional[str]):
             label = m.group("y")
         if label not in found:
             found.append(label)
+    return found
+
+
+def single_period_label(expr: Optional[str]) -> Optional[str]:
+    """The one period this expression names, or None if it names none or several.
+
+    Used to anchor a relative comparison on the period the user actually said:
+    "real GDP in Q4 2025, and what was it one year earlier" is anchored on
+    Q4 2025, not on the series' latest reading.
+    """
+    found = scan_period_labels(expr)
+    return found[0] if len(found) == 1 else None
+
+
+def parse_period_pair(expr: Optional[str]):
+    """Two period labels from one expression, for an explicit A-vs-B comparison.
+
+    parse_period_expression() only ever describes ONE period, so "between Q1
+    2025 and Q4 2025" fell through its range branch (which needs two bare
+    years) into the single-quarter branch, retrieved Q1 alone, and answered
+    "Could not find two distinct periods to compare" — F-011's exact question.
+
+    Returns (label_a, label_b) in the order written, in period_label form, or
+    None when the expression does not name two distinct periods.
+    """
+    found = scan_period_labels(expr)
     if len(found) < 2:
         return None
     # Mixed granularities ("2024 and Q1 2025") are not a like-for-like
     # comparison, so they are declined rather than guessed at.
-    kinds = {("q" if "-Q" in f else "m" if "-" in f else "y") for f in found[:2]}
-    if len(kinds) > 1:
+    if len({period_kind(f) for f in found[:2]}) > 1:
         return None
     return found[0], found[1]
 
@@ -231,7 +252,14 @@ _REL_PREV_YEAR = re.compile(
     r"|\b(compared|versus|vs\.?|against)\b.{0,20}?\b(the\s+)?(previous|prior|last|preceding)\s+year\b"
     r"|\byear[\s-]on[\s-]year\b|\byear[\s-]over[\s-]year\b|\byoy\b"
     r"|\b(this|current)\s+year\s+(and|vs\.?|versus|against)\s+(the\s+)?(previous|prior|last)\s+year\b"
-    r"|مقارنة\s*ب?العام\s*(الماضي|السابق)|على\s*أساس\s*سنوي",
+    # "…and what was it one year earlier?" — the phrase that produced the wrong
+    # answer. It matched the "previous_year" WINDOW rule instead, which narrowed
+    # retrieval to 2024 and left the comparison to fall back on the first and
+    # last rows of that window: 2024-Q1 vs 2024-Q4, neither one asked for.
+    r"|\b(a|one)\s+year\s+(earlier|ago|before|prior)\b"
+    r"|\b(the\s+)?(same)\s+(quarter|month|period)\s+(a\s+year|last\s+year|of\s+last\s+year)\b"
+    r"|\b12\s+months\s+(earlier|ago|before)\b"
+    r"|قبل\s*(عام|سنة)|مقارنة\s*ب?العام\s*(الماضي|السابق)|على\s*أساس\s*سنوي",
     re.IGNORECASE)
 
 _REL_PREV_TWO = re.compile(
