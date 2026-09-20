@@ -258,6 +258,12 @@ _CONTENTLESS = {
     "year", "years", "period", "time", "data", "value", "values", "figure",
     "figures", "number", "is", "was", "were", "are", "be", "it", "this", "that",
     "please", "me", "my", "we", "you",
+    # Words a follow-up leans on while naming nothing: "what about in 2024",
+    # "same for 2025", "and those again".
+    "about", "regarding", "concerning", "same", "those", "these", "them",
+    "again", "instead", "also", "too", "now", "then", "show", "tell", "give",
+    "what", "how", "which", "when",
+    "نفس", "أيضا", "ايضا", "كذلك", "عنها", "عنه", "بخصوص",
     "سنة", "عام", "الفترة", "بيانات", "قيمة", "رقم", "في", "من", "عن", "على",
 }
 

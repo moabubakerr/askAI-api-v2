@@ -26,7 +26,7 @@ from app.nlu.intent_agent import extract_intent
 from app.core.conversation import carry_forward
 from app.core.messages import msg, detect_language, is_greeting
 from app.resolvers.indicator_resolver import (resolve_indicator, has_usable_definition,
-                                               resembles_catalogue_name)
+                                               resembles_catalogue_name, has_identifying_content)
 from app.resolvers.country_resolver import resolve_countries
 from app.resolvers.period_resolver import (parse_period_expression, parse_explicit_frequency,
                                             choose_granularity, parse_period_pair)
@@ -255,6 +255,12 @@ def handle_message(user_message: str, conversation_context: str = "",
     indicator_phrase = intent.get("indicator_phrase")
     if not indicator_phrase and intent.get("is_followup") and session_state.get("last_indicator_name"):
         indicator_phrase = session_state["last_indicator_name"]
+    if not indicator_phrase and session_state.get("last_metrics")             and not has_identifying_content(user_message):
+        # The previous answer covered several metrics and this message names
+        # none of its own — so it is asking about the same set, with something
+        # changed. Rejoined as a list so the normal split path picks it up and
+        # re-runs the snapshot against the new period.
+        indicator_phrase = ", ".join(session_state["last_metrics"])
     if not indicator_phrase:
         # The intent agent dropped the field. It happens — that prompt now
         # carries seventeen computation types and fifteen rules — and when it
@@ -328,6 +334,14 @@ def handle_message(user_message: str, conversation_context: str = "",
                 if wants_chart(user_message, "macro_overview"):
                     payload["chart"] = build_chart_spec("macro_overview", payload["facts"],
                                                          "Economic Snapshot", None, None)
+                # Remember WHAT was answered about. The single-indicator path
+                # records last_indicator_name and this one recorded nothing, so
+                # "what about in 2024" after a three-metric answer had no
+                # subject to inherit and was refused for naming no indicator —
+                # after the system had just listed three.
+                session_state["last_metrics"] = [e["indicator"]
+                                                  for e in payload["facts"]["overview"]]
+                session_state.pop("last_indicator_name", None)
                 return _finish(payload, language, session_state, citations,
                         question=user_message)
 
@@ -364,6 +378,7 @@ def handle_message(user_message: str, conversation_context: str = "",
     match = resolution.match
     session_state["last_indicator_detail_id"] = match.indicator_detail_id
     session_state["last_indicator_name"] = match.name_en
+    session_state.pop("last_metrics", None)
 
     # Definitional questions ("what is inflation?", F-030's "what does
     # non-hydrocarbon GDP mean?") are answered from indicator_details.definition_en,

@@ -34,6 +34,8 @@ import time
 from collections import OrderedDict, deque
 from typing import Optional
 
+from app.resolvers.period_resolver import parse_period_expression
+
 # Roughly six exchanges of context. Enough for "and the year before that?"
 # chains, short enough to leave the prompt budget to the actual question.
 MAX_TURNS = 12
@@ -160,13 +162,24 @@ def carry_forward(intent: dict, state: dict, user_message: str = "") -> dict:
     carried = dict(intent)
     if not carried.get("indicator_phrase") and state.get("last_indicator_name"):
         carried["indicator_phrase"] = state["last_indicator_name"]
+    # last_metrics (a multi-metric answer) is deliberately NOT restored here.
+    # It is handled in handle_message, which rejoins the list so the normal
+    # split path re-runs the snapshot; flattening it into indicator_phrase at
+    # this point would make it look like one indicator name.
     if not carried.get("countries_mentioned") and not carried.get("country_group_mentioned"):
         if state.get("last_countries"):
             carried["countries_mentioned"] = list(state["last_countries"])
         if state.get("last_country_group"):
             carried["country_group_mentioned"] = state["last_country_group"]
     asks_latest = bool(_ASKS_FOR_LATEST.search(user_message or ""))
-    if not carried.get("period_expression") and state.get("last_period_expression") and not asks_latest:
+    # A follow-up that states its own period must not inherit the old one. The
+    # model often leaves period_expression empty even when the message says
+    # "what about in 2024", and inheriting then pinned the answer to the
+    # previous turn's year: the metrics changed correctly and the period never
+    # did, so three indicators came back for 2023 again.
+    states_own_period = parse_period_expression(user_message or "").kind != "unspecified"
+    if (not carried.get("period_expression") and state.get("last_period_expression")
+            and not asks_latest and not states_own_period):
         carried["period_expression"] = state["last_period_expression"]
     if not carried.get("explicit_frequency") and state.get("last_explicit_frequency"):
         carried["explicit_frequency"] = state["last_explicit_frequency"]
