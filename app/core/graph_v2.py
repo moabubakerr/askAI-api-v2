@@ -607,6 +607,14 @@ def handle_message(user_message: str, conversation_context: str = "",
         return _finish(payload, language, session_state, [],
                         question=user_message)
 
+    # Decided here rather than by the model, and only once an indicator has
+    # resolved: "is X improving or deteriorating?" is about direction of
+    # travel, which is neither a level nor a trend shape. It was being routed
+    # to whichever of those the model picked, and answered with a number that
+    # did not address the question asked.
+    if _asks_if_improving(user_message) and ctype not in ("definition", "count_list"):
+        ctype = "direction_check"
+
     countries_res = resolve_countries(intent.get("countries_mentioned", []), intent.get("country_group_mentioned"))
 
     payload, citations = _dispatch_computation(ctype, intent, match, published_detail_id, granularity,
@@ -795,6 +803,28 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
             if (latest_dated and asked_start and asked_start > latest_dated) or                _asks_for_forecast(user_message):
                 message += msg("future_period_suffix", language)
             return {"ok": False, "message": message}, []
+
+    if ctype == "direction_check":
+        # Whichever granularity actually PUBLISHES a change, finest first.
+        # The default is the finest available, and for Public Debt as a
+        # Percentage of GDP that is quarterly — which carries no year-on-year
+        # figure at all, while the yearly series carries yearly_yoy_pp. Taking
+        # the default would have answered "its direction cannot be stated" on
+        # an indicator whose direction is recorded, one granularity over.
+        available = retriever.get_available_granularities(published_detail_id,
+                                                           match.indicator_detail_id)
+        result = None
+        for gran in [g for g in ("monthly", "quarterly", "yearly") if g in available]:
+            candidate_rows = retriever.get_series(match.indicator_detail_id, published_detail_id,
+                                                   gran, country_en=single_country)
+            candidate = compute.direction_assessment(candidate_rows, gran, match.polarity_en)
+            result = result or candidate
+            if candidate.ok:
+                result, rows, granularity = candidate, candidate_rows, gran
+                break
+        used = [_find_row_by_period(rows, result.facts.get("period_label"))] if result.ok else []
+        return (_wrap(result, unit, indicator_name=indicator_name, decimals=decimals),
+                citations_for_rows([r for r in used if r], indicator_name, data_source_en))
 
     if ctype == "latest_value":
         result = compute.latest_value(rows)
@@ -1410,6 +1440,23 @@ def split_indicator_phrases(phrase: str) -> list[str]:
     """
     parts = [p.strip(" .?!") for p in _SPLIT_METRICS.split(phrase or "")]
     return [p for p in parts if len(p) > 2]
+
+
+_IMPROVING = re.compile(
+    r"\b(improv\w*|deteriorat\w*|worsen\w*|getting\s+(better|worse)|"
+    r"better\s+or\s+worse|on\s+the\s+right\s+track|healthier)\b"
+    r"|يتحسن|تتحسن|يتدهور|تتدهور|يسوء|نحو\s+الأفضل",
+    re.IGNORECASE)
+
+
+def _asks_if_improving(text: str) -> bool:
+    """"Is X improving or deteriorating?" — a question about direction of travel.
+
+    Distinct from a trend, which describes a shape over a span, and from a
+    latest value, which describes a level. This one asks whether the movement
+    is the WELCOME one, which only polarity_en can answer.
+    """
+    return bool(text and _IMPROVING.search(text))
 
 
 def _asks_for_growth(phrase: str) -> bool:

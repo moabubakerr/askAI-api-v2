@@ -136,6 +136,14 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
         # has two. Padding only; the digits themselves are untouched.
         return f"{trim_zeros(value)} {unit}".strip() if value is not None else "—"
 
+    if "assessment" in facts:
+        word = {"improving": "an improvement", "deteriorating": "a deterioration",
+                "unchanged": "no change"}[facts["assessment"]]
+        moved = "percentage points" if facts.get("change_kind") == "percentage_points" else "%"
+        return (f"{indicator} was {fmt(facts.get('actual'))} in {facts.get('period_label')}, "
+                f"{'up' if facts.get('direction') == 'up' else 'down' if facts.get('direction') == 'down' else 'unchanged'} "
+                f"{abs(facts.get('change', 0))} {moved} year on year — {word}. "
+                f"{facts.get('assessment_basis', '')}".strip())
     if "actual" in facts and "period_label" in facts:
         line = f"{indicator} was {fmt(facts['actual'])} in {facts['period_label']}."
         if facts.get("target") is not None:

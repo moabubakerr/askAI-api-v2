@@ -51,6 +51,17 @@ CASES = [
     ("GDP", "Real GDP"),
     ("Real GDP", "Real GDP"),
     ("economic output adjusted for prices", "Real GDP"),
+    # Indirect namings that were REFUSED in production, then patched with
+    # aliases. Run these to find out whether the aliases are covering a
+    # vocabulary gap the embeddings genuinely cannot bridge, or merely a
+    # threshold set too high — the answers call for opposite fixes, and only
+    # the real model can tell them apart.
+    ("non-oil exports", "Non-Hydrocarbon Exports (share of total exports)"),
+    ("How much of Qatar's exports are non-oil",
+     "Non-Hydrocarbon Exports (share of total exports)"),
+    ("public debt", "Public Debt as a Percentage of GDP (%)"),
+    ("Qatar's public-debt position", "Public Debt as a Percentage of GDP (%)"),
+    ("debt to GDP", "Public Debt as a Percentage of GDP (%)"),
     ("tourists arrived", "Number of International Visitors"),
     ("How many tourists arrived into Qatar", "Number of International Visitors"),
     ("international visitors", "Number of International Visitors"),

@@ -234,6 +234,29 @@ INDICATOR_ALIASES = {
     "non-oil economy": "Non-Hydrocarbon Real GDP",
     "non-hydrocarbon economy": "Non-Hydrocarbon Real GDP",
 
+    # "non-oil" is how everyone outside the catalogue says "non-hydrocarbon".
+    # Nothing bridged the two, so "How much of Qatar's exports are non-oil?"
+    # was refused as an indicator that does not exist — while the indicator
+    # sat there, published, with the answer in it.
+    "non-oil exports": "Non-Hydrocarbon Exports (share of total exports)",
+    "non oil exports": "Non-Hydrocarbon Exports (share of total exports)",
+    "nonoil exports": "Non-Hydrocarbon Exports (share of total exports)",
+    "non-hydrocarbon exports": "Non-Hydrocarbon Exports (share of total exports)",
+    "exports that are not oil": "Non-Hydrocarbon Exports (share of total exports)",
+    "الصادرات غير النفطية": "Non-Hydrocarbon Exports (share of total exports)",
+
+    # The catalogue name carries a "(%)" and the words "as a Percentage of
+    # GDP"; nobody types that. "public debt", "debt position", "how indebted"
+    # all mean this one.
+    "public debt": "Public Debt as a Percentage of GDP (%)",
+    "public-debt": "Public Debt as a Percentage of GDP (%)",
+    "government debt": "Public Debt as a Percentage of GDP (%)",
+    "national debt": "Public Debt as a Percentage of GDP (%)",
+    "debt position": "Public Debt as a Percentage of GDP (%)",
+    "debt to gdp": "Public Debt as a Percentage of GDP (%)",
+    "debt-to-gdp": "Public Debt as a Percentage of GDP (%)",
+    "الدين العام": "Public Debt as a Percentage of GDP (%)",
+
     "tourists": "Number of International Visitors",
     "tourist arrivals": "Number of International Visitors",
     "visitors": "Number of International Visitors",

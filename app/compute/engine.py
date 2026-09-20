@@ -411,3 +411,58 @@ def scope_direction(entries: list[dict]) -> ComputeResult:
         "n_total": len(entries),
         "comparison": "year-on-year, at each indicator's most recent reading",
     })
+
+
+def direction_assessment(rows: list[dict], granularity: str,
+                          polarity: Optional[str]) -> ComputeResult:
+    """Is this indicator getting better or worse? Decided from polarity, not opinion.
+
+    "Improving" is a judgement everywhere else in this system and forbidden to
+    the Composer for good reason. Here it is not: SCAI states the desired
+    direction in polarity_en, so a fall in Public Debt as a Percentage of GDP
+    (polarity Decrease) IS an improvement by the Council's own definition, and
+    saying so asserts nothing the data does not.
+
+    Both change forms are tried. A percentage-point move is the right one for a
+    ratio — debt/GDP going 40.5 -> 40.6 is +0.1pp, and expressing that as a
+    percentage change of itself would be both odd and, for this indicator,
+    absent: SCAI publishes yearly_yoy_pp and leaves yearly_yoy_percent empty.
+    """
+    actuals = [r for r in rows if r.get("actual") is not None]
+    if not actuals:
+        return ComputeResult(False, message="No approved data points were found for this indicator.")
+    latest = actuals[-1]
+
+    change = preferred_change_field(latest, granularity, as_points=True)
+    change_kind = "percentage_points"
+    if change is None:
+        change = preferred_change_field(latest, granularity)
+        change_kind = "percent"
+    if change is None:
+        return ComputeResult(False, message=(
+            "No published period-on-period change is available for this indicator, "
+            "so its direction of travel cannot be stated from the approved data."))
+
+    change = round(float(change), 4)
+    wants_lower = (polarity or "").strip().lower().startswith("decrease")
+    if change == 0:
+        verdict = "unchanged"
+    elif (change < 0) == wants_lower:
+        verdict = "improving"
+    else:
+        verdict = "deteriorating"
+
+    return ComputeResult(True, facts={
+        "actual": latest["actual"],
+        "period_label": latest["period_label"],
+        "change": change,
+        "change_kind": change_kind,
+        "direction": "down" if change < 0 else "up" if change > 0 else "flat",
+        "polarity": polarity,
+        # Spelled out so the Composer states it rather than deciding it.
+        "assessment": verdict,
+        "assessment_basis": (
+            f"SCAI records the desired direction for this indicator as "
+            f"{'a decrease' if wants_lower else 'an increase'}."),
+        "granularity": granularity,
+    })

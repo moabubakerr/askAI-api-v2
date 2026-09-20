@@ -152,6 +152,16 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    first sentence — "comparing Q1 2026 with Q1 2025". A figure for the wrong
    period reads exactly like a figure for the right one, so naming them is the
    only way a reader can tell. Never omit it as redundant.
+
+20. For a payload with "assessment" ("improving" | "deteriorating" | "unchanged"),
+   the question asked whether the indicator is getting better or worse. STATE
+   the assessment as given — it is not your judgement to form or to soften. It
+   was derived from the direction SCAI itself records for this indicator, which
+   "assessment_basis" spells out, and for some indicators a FALL is the
+   improvement. Give the level, the change with "change_kind" ("percentage
+   points" is not the same as "%"), and the verdict. Do not add caution the
+   payload does not contain, and do not reverse it because the number moved in
+   a direction that sounds bad.
 """
 
 
