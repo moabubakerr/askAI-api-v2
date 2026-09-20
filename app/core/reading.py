@@ -25,6 +25,8 @@ import re
 from typing import Optional
 
 from app.core.graph_v2 import handle_message
+from app.agents.reader_agent import read_plainly
+from app.compute.verifier import verify_numbers
 from app.db import retriever
 
 
@@ -171,6 +173,10 @@ def _council_analysis(citations: list[dict]) -> list[dict]:
     return out[:2]
 
 
+def _looks_arabic(text: str) -> bool:
+    return bool(re.search(r"[؀-ۿ]", text or ""))
+
+
 def read_message(user_message: str, conversation_context: str = "",
                   session_state: Optional[dict] = None) -> dict:
     """Runs the normal pipeline, then re-presents it as a reading.
@@ -200,6 +206,7 @@ def read_message(user_message: str, conversation_context: str = "",
             "session_state": result["session_state"],
         }
 
+    language = "ar" if _looks_arabic(user_message) else "en"
     headline = _headline_from_facts(facts)
     indicator = facts.get("indicator")
     one_liner = None
@@ -209,6 +216,31 @@ def read_message(user_message: str, conversation_context: str = "",
 
     analysis = _council_analysis(citations)
 
+    # A plain-language retelling of the SAME facts, rather than the /chat answer
+    # repeated. Reusing that answer made "Read this for me" change nothing: the
+    # Composer writes for a policymaker — full precision, "Q4 2025", "YoY" —
+    # which is exactly the register a reader who pressed that button is asking
+    # for help with.
+    #
+    # Verified like any other generated text. The reader agent may round in its
+    # prose, so the check allows the rounding the numeric verifier already
+    # tolerates; if it slips a figure that is not in the facts, the /chat
+    # answer stands in rather than shipping an unverified retelling.
+    # Strip the Sources footer from the fallback: /chat appends it because that
+    # response has nowhere else to put provenance, while /read returns
+    # citations as their own field and the frontend renders them separately.
+    narration = re.split(r"\n\s*Sources:\s*\n", result["answer"])[0].strip()
+    try:
+        plain = read_plainly(payload, language, question=user_message)
+        clean, offending = verify_numbers(plain, payload)
+        if clean and plain.strip():
+            narration = plain.strip()
+        else:
+            payload["_plain_reading_rejected"] = offending
+    except Exception:
+        # The reading view must still render if this second model call fails.
+        payload["_plain_reading_failed"] = True
+
     return {
         "ok": True,
         "readable": result.get("readable", False),
@@ -216,10 +248,7 @@ def read_message(user_message: str, conversation_context: str = "",
         "one_liner": one_liner,
         "council_analysis": analysis,
         "evidence": _evidence_rows(facts, citations),
-        # The /chat answer already passed the numeric verifier against this same
-        # payload, so it is reused rather than regenerated — a second generation
-        # would need a second verification and could contradict the first.
-        "narration": result["answer"],
+        "narration": narration,
         "disclaimer": ("Generated from the readings above — not Council analysis."
                         if analysis else
                         "Generated from the readings above."),
