@@ -41,6 +41,24 @@ def is_arabic(language: Optional[str]) -> bool:
     return (language or "en").lower().startswith("ar")
 
 
+def answers_in_language(text: str, language: str) -> bool:
+    """Is this reply actually written in the language that was asked for?
+
+    Only Arabic is checked, and only for its presence. An Arabic answer
+    legitimately contains Latin script — indicator names are reproduced
+    verbatim by design, so "بلغ Real GDP 185.17 billion QAR" is correct — which
+    means a ratio test would reject good answers. What cannot happen is an
+    Arabic question answered with no Arabic in it at all.
+
+    The English direction is deliberately not checked: an English answer
+    quoting an Arabic indicator name is fine, and there is no comparable
+    failure to catch.
+    """
+    if not is_arabic(language):
+        return True
+    return bool(text) and bool(_ARABIC_CHARS.search(text))
+
+
 # --- greeting detection -----------------------------------------------------
 #
 # Classifying greetings is left to the intent agent, and it is inconsistent at

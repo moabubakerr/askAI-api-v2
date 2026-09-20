@@ -24,7 +24,7 @@ from typing import TypedDict, Optional
 
 from app.nlu.intent_agent import extract_intent
 from app.core.conversation import carry_forward
-from app.core.messages import msg, detect_language, is_greeting
+from app.core.messages import msg, detect_language, is_greeting, answers_in_language
 from app.resolvers.indicator_resolver import (resolve_indicator, has_usable_definition,
                                                resembles_catalogue_name, has_identifying_content)
 from app.resolvers.country_resolver import resolve_countries
@@ -1745,6 +1745,14 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
     else:
         draft = compose_answer(payload, language, question=question)
         clean, offending = verify_numbers(draft, payload)
+        # An answer in the wrong language is not an answer. The model is asked
+        # for Arabic and mostly complies, but "mostly" is not a guarantee and
+        # the failure is total from the reader's side. Checked here rather than
+        # hoped for, and the template it falls back to is bilingual, so the
+        # reply is in the right language whichever path produces it.
+        if clean and not answers_in_language(draft, language):
+            clean = False
+            payload["_wrong_language_draft"] = True
         answer = draft if clean else render_template_fallback(payload, language)
         if not clean:
             payload["_verifier_rejected_numbers"] = offending  # for logging/debugging only

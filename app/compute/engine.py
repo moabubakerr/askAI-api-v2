@@ -328,8 +328,10 @@ def scope_performance(entries: list[dict], best_first: bool = True,
             "polarity": e.get("polarity_en"),
         }
         if score is None:
-            row["reason"] = ("no reading yet" if e.get("actual") is None
-                             else "no target set")
+            # A CODE, not prose: this text is shown to the reader, and the
+            # reader may be reading in Arabic. The engine has no language, so
+            # it says what happened and the renderer says it in words.
+            row["reason_code"] = "no_reading" if e.get("actual") is None else "no_target"
             unassessable.append(row)
         else:
             ranked.append({**row, "attainment_percent": score,
@@ -393,8 +395,8 @@ def scope_direction(entries: list[dict]) -> ComputeResult:
             "polarity": e.get("polarity_en"),
         }
         if change is None:
-            row["reason"] = ("no reading yet" if e.get("actual") is None
-                             else "no year-on-year figure published")
+            row["reason_code"] = ("no_reading" if e.get("actual") is None
+                                   else "no_yoy_published")
             no_comparison.append(row)
             continue
         change = round(float(change), 4)
@@ -476,9 +478,9 @@ def direction_assessment(rows: list[dict], granularity: str,
         "polarity": polarity,
         # Spelled out so the Composer states it rather than deciding it.
         "assessment": verdict,
-        "assessment_basis": (
-            f"SCAI records the desired direction for this indicator as "
-            f"{'a decrease' if wants_lower else 'an increase'}."),
+        # The DIRECTION SCAI wants, as a code. The sentence around it is
+        # written by whatever renders the answer, in the reader's language.
+        "desired_direction": "decrease" if wants_lower else "increase",
         "granularity": granularity,
     })
 
@@ -503,7 +505,7 @@ def scope_snapshot(entries: list[dict]) -> ComputeResult:
     for e in entries:
         if e.get("actual") is None:
             missing.append({"indicator": (e.get("indicator") or "").strip(),
-                             "reason": "no reading published"})
+                             "reason_code": "no_reading"})
             continue
         line = {
             "indicator": (e.get("indicator") or "").strip(),

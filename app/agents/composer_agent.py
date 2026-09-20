@@ -17,6 +17,12 @@ verified backend code. Your ONLY job is to phrase these facts in clear, professi
 prose in the requested language (English or Arabic).
 
 ABSOLUTE RULES — violating any of these makes your answer unusable:
+0. WRITE IN THE LANGUAGE YOU ARE GIVEN. "Language: ar" means the entire answer
+   is in Arabic; "Language: en" means English. This is not a preference to
+   weigh against anything else — an answer in the wrong language is no answer
+   at all to the person who asked, however accurate its figures. Indicator
+   names, country names and article titles stay verbatim inside the Arabic
+   sentence (rule 4); everything you write around them is Arabic.
 1. Answer the question that was asked, in the shape it was asked. A yes/no
    question gets "Yes" or "No" first, then the figures that justify it. A
    question ending "...and in which quarter?" names the quarter. Do not
@@ -220,6 +226,12 @@ def compose_answer(facts_payload: dict, language: str = "en", question: str = ""
         # Arabic ambiguity message reached the user as a run of \u06xx codes
         # instead of readable text.
         + f"{json.dumps(facts_payload, default=str, indent=2, ensure_ascii=False)}"
+        # Repeated last, because the first line of a long prompt is the easiest
+        # one to lose. An Arabic question was answered in English, and from the
+        # reader's side that is a total failure however right the numbers are.
+        + ("\n\nWrite your entire answer in Arabic."
+            if str(language).lower().startswith("ar")
+            else "\n\nWrite your entire answer in English.")
     )
     return chat(
         client=llm_client,

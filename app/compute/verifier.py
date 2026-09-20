@@ -115,21 +115,172 @@ def verify_numbers(answer_text: str, facts_payload: dict, rounding_tolerance_dec
     return (len(offending) == 0, offending)
 
 
+# Every phrase the template fallback needs, in both languages.
+#
+# This existed only in English. render_template_fallback ACCEPTED a `language`
+# argument and ignored it, so any Arabic question whose composed answer failed
+# verification was answered in English — the product silently switching
+# language at the moment it was least confident in itself. The Composer was
+# never the problem here; the safety net was.
+_T = {
+    "no_data": {
+        "en": "No approved data is available for this request.",
+        "ar": "لا تتوفر بيانات معتمدة لهذا الطلب.",
+    },
+    "this_indicator": {"en": "This indicator", "ar": "هذا المؤشر"},
+    "was_in": {"en": "{ind} was {val} in {per}.", "ar": "بلغ {ind} {val} في {per}."},
+    "target_was": {"en": " The target for that period was {val}.",
+                    "ar": " وكان المستهدف لتلك الفترة {val}."},
+    "complement": {
+        "en": ("{other} account for approximately {pct}% of the total. {ind} was "
+                "{share}% in {per}, so the remainder is {derivation}."),
+        "ar": ("يمثل {other} نحو {pct}% من الإجمالي. وقد بلغ {ind} {share}% في {per}، "
+                "أي أن الباقي هو {derivation}."),
+    },
+    "remainder_unnamed": {
+        "en": ("The remaining share is approximately {pct}% of the total. {ind} was "
+                "{share}% in {per}, so the remainder is {derivation}. The data does not "
+                "state what that remainder consists of."),
+        "ar": ("النسبة المتبقية نحو {pct}% من الإجمالي. وقد بلغ {ind} {share}% في {per}، "
+                "أي أن الباقي هو {derivation}. ولا تحدد البيانات مكوّنات هذه النسبة المتبقية."),
+    },
+    "assessment": {
+        "en": "{ind} was {val} in {per}, {dir} {amount} {kind} year on year — {verdict}. {basis}",
+        "ar": "بلغ {ind} {val} في {per}، {dir} {amount} {kind} على أساس سنوي — {verdict}. {basis}",
+    },
+    "improving": {"en": "an improvement", "ar": "تحسّن"},
+    "deteriorating": {"en": "a deterioration", "ar": "تدهور"},
+    "unchanged_word": {"en": "no change", "ar": "دون تغيير"},
+    "up": {"en": "up", "ar": "بارتفاع"},
+    "down": {"en": "down", "ar": "بانخفاض"},
+    "flat": {"en": "unchanged", "ar": "دون تغيير"},
+    "pp": {"en": "percentage points", "ar": "نقطة مئوية"},
+    "pct_sign": {"en": "%", "ar": "%"},
+    "growth": {
+        "en": "{ind} moved from {v0} in {p0} to {v1} in {p1} — a {rate}% {method} growth rate.",
+        "ar": "تحرك {ind} من {v0} في {p0} إلى {v1} في {p1} — بمعدل نمو {rate}% {method}.",
+    },
+    "difference": {
+        "en": ("The highest {ind} was {hi} in {hip} and the lowest {lo} in {lop} — "
+                "a difference of {diff}."),
+        "ar": "أعلى قيمة لـ {ind} كانت {hi} في {hip} وأدناها {lo} في {lop} — بفارق {diff}.",
+    },
+    "change": {
+        "en": "{ind} was {a} in {pa} and {b} in {pb} — a change of {abschg} ({pct}%).",
+        "ar": "بلغ {ind} {a} في {pa} و{b} في {pb} — بتغير قدره {abschg} ({pct}%).",
+    },
+    "no_reading": {"en": "no reading", "ar": "لا توجد قراءة"},
+    "from_in": {"en": ", from {val} in {per}", "ar": "، مقارنة بـ {val} في {per}"},
+    "yoy": {"en": " ({pct}% YoY)", "ar": " ({pct}% على أساس سنوي)"},
+    "largest_decline": {"en": "Largest decline: ", "ar": "أكبر تراجع: "},
+    "then": {"en": ", then ", "ar": "، ثم "},
+    "no_reading_in_period": {
+        "en": "{ind} has no reading in the period asked about.",
+        "ar": "لا توجد قراءة لـ {ind} في الفترة المطلوبة.",
+    },
+    "covers": {
+        "en": " Its published series runs from {a} to {b}.",
+        "ar": " وتمتد سلسلته المنشورة من {a} إلى {b}.",
+    },
+    "not_found": {
+        "en": "Not found in the approved data: {names}.",
+        "ar": "لم يتم العثور عليها في البيانات المعتمدة: {names}.",
+    },
+    "these_indicators": {"en": "These indicators", "ar": "هذه المؤشرات"},
+    "vs_year_earlier": {
+        "en": "{scope}, compared with a year earlier:",
+        "ar": "{scope}، مقارنة بالعام السابق:",
+    },
+    "increasing": {"en": "Increasing", "ar": "مرتفعة"},
+    "declining": {"en": "Declining", "ar": "منخفضة"},
+    "unchanged_group": {"en": "Unchanged", "ar": "دون تغيير"},
+    "no_yoy_for": {
+        "en": "No year-on-year comparison available for {n} of {total}: ",
+        "ar": "لا تتوفر مقارنة سنوية لـ {n} من {total}: ",
+    },
+    "this_group": {"en": "this group", "ar": "هذه المجموعة"},
+    "ranked_by_target": {
+        "en": "{scope}, ranked by progress against each indicator's own target ({order}):",
+        "ar": "{scope}، مرتبة حسب التقدم نحو مستهدف كل مؤشر ({order}):",
+    },
+    "best_first": {"en": "closest to target first", "ar": "الأقرب إلى المستهدف أولاً"},
+    "worst_first": {"en": "furthest from target first", "ar": "الأبعد عن المستهدف أولاً"},
+    "of_target": {
+        "en": "{i}. {ind} — {pct}% of target ({val} in {per}, target {tgt})",
+        "ar": "{i}. {ind} — {pct}% من المستهدف ({val} في {per}، المستهدف {tgt})",
+    },
+    "indicators_word": {"en": "indicators", "ar": "مؤشراً"},
+    "in_the_sector": {"en": "published indicators in the {scope}",
+                       "ar": "مؤشراً منشوراً في {scope}"},
+    "published_type": {"en": "published {scope}s", "ar": "من {scope} المنشورة"},
+    "there_are": {"en": "There are {n} {what} in the approved data.",
+                   "ar": "يوجد {n} {what} في البيانات المعتمدة."},
+    "for_example": {"en": " For example: {names}.", "ar": " على سبيل المثال: {names}."},
+    "all_listed_below": {"en": " All {n} are listed below.",
+                          "ar": " جميعها البالغ عددها {n} مدرجة أدناه."},
+    "n_readings": {"en": "{ind}: {n} readings", "ar": "{ind}: {n} قراءة"},
+    "series_span": {"en": ", from {v0} in {p0} to {v1} in {p1}",
+                     "ar": "، من {v0} في {p0} إلى {v1} في {p1}"},
+    "series_change": {"en": " That is a change of {pct}% over the period.",
+                       "ar": " أي بتغير قدره {pct}% خلال الفترة."},
+    "series_extremes": {
+        "en": " The highest reading was {hi} in {hip}, the lowest {lo} in {lop}.",
+        "ar": " وكانت أعلى قراءة {hi} في {hip}، وأدناها {lo} في {lop}.",
+    },
+    "reason_no_reading": {"en": "no reading yet", "ar": "لا توجد قراءة بعد"},
+    "reason_no_target": {"en": "no target set", "ar": "لم يُحدَّد مستهدف"},
+    "reason_no_yoy_published": {"en": "no year-on-year figure published",
+                                 "ar": "لم تُنشر مقارنة سنوية"},
+    "desired_decrease": {
+        "en": "SCAI records the desired direction for this indicator as a decrease.",
+        "ar": "يسجّل المجلس الاتجاه المرغوب لهذا المؤشر على أنه انخفاض.",
+    },
+    "desired_increase": {
+        "en": "SCAI records the desired direction for this indicator as an increase.",
+        "ar": "يسجّل المجلس الاتجاه المرغوب لهذا المؤشر على أنه ارتفاع.",
+    },
+    "not_ranked": {
+        "en": "{n} of {total} could not be ranked: ",
+        "ar": "تعذّر ترتيب {n} من {total}: ",
+    },
+}
+
+
+def _t(key: str, language: str = "en", **kwargs) -> str:
+    entry = _T.get(key, {})
+    text = entry.get(language) or entry.get("en") or ""
+    return text.format(**kwargs) if kwargs else text
+
+
+def _reason(entry: dict, language: str) -> str:
+    """The reason an indicator could not be ranked or compared, in words.
+
+    The engine stores a code because it has no language. Falls back to any
+    legacy prose so a payload built before this change still renders.
+    """
+    code = entry.get("reason_code")
+    if code:
+        return _t(f"reason_{code}", language)
+    return entry.get("reason") or ""
+
+
 def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
     """A zero-LLM, template-only rendering used when the Composer's text
-    fails verification. Deliberately plain — correctness over eloquence."""
+    fails verification. Deliberately plain — correctness over eloquence.
+
+    Bilingual, because this is what a reader actually sees whenever the
+    generated wording is rejected. An English-only safety net means the product
+    changes language precisely when it is least sure of itself, which is how an
+    Arabic question about the economy came back as an English list.
+    """
+    language = "ar" if str(language).lower().startswith("ar") else "en"
     if facts_payload.get("ok") is False:
-        return facts_payload.get("message", "No approved data is available for this request.")
+        return facts_payload.get("message") or _t("no_data", language)
 
     facts = facts_payload.get("facts", {})
     unit = facts.get("unit") or ""
-    indicator = facts.get("indicator") or "This indicator"
+    indicator = facts.get("indicator") or _t("this_indicator", language)
 
-    # Readable sentences for the shapes that actually occur, rather than a dump
-    # of "period_label: 2025-Q4 / actual: 37.972". This text is what the user
-    # sees whenever the Composer's wording fails verification, so it is a normal
-    # answer, not a debug view — the previous version looked like the system had
-    # broken even though the data behind it was correct.
     def fmt(value):
         # trim_zeros, not rounding: Decimal('3.680000') printed "a change of
         # 3.680000 QAR" — six decimals of apparent precision on a figure that
@@ -137,125 +288,90 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
         return f"{trim_zeros(value)} {unit}".strip() if value is not None else "—"
 
     if "complement_share" in facts:
-        return (f"{facts['complement_of']} account for approximately "
-                f"{facts['complement_share']}% of the total. "
-                f"{facts['reported_share_of']} was {facts['reported_share']}% in "
-                f"{facts.get('period_label')}, so the remainder is "
-                f"{facts['derivation']}.")
+        key = "complement" if facts.get("complement_of") else "remainder_unnamed"
+        return _t(key, language, other=facts.get("complement_of") or "",
+                   pct=facts["complement_share"], ind=facts["reported_share_of"],
+                   share=facts["reported_share"], per=facts.get("period_label"),
+                   derivation=facts["derivation"])
     if "assessment" in facts:
-        word = {"improving": "an improvement", "deteriorating": "a deterioration",
-                "unchanged": "no change"}[facts["assessment"]]
-        moved = "percentage points" if facts.get("change_kind") == "percentage_points" else "%"
-        return (f"{indicator} was {fmt(facts.get('actual'))} in {facts.get('period_label')}, "
-                f"{'up' if facts.get('direction') == 'up' else 'down' if facts.get('direction') == 'down' else 'unchanged'} "
-                f"{abs(facts.get('change', 0))} {moved} year on year — {word}. "
-                f"{facts.get('assessment_basis', '')}".strip())
+        verdict = _t({"improving": "improving", "deteriorating": "deteriorating",
+                       "unchanged": "unchanged_word"}[facts["assessment"]], language)
+        kind = _t("pp" if facts.get("change_kind") == "percentage_points" else "pct_sign",
+                   language)
+        direction = _t({"up": "up", "down": "down"}.get(facts.get("direction"), "flat"), language)
+        return _t("assessment", language, ind=indicator, val=fmt(facts.get("actual")),
+                   per=facts.get("period_label"), dir=direction,
+                   amount=abs(facts.get("change", 0)), kind=kind, verdict=verdict,
+                   basis=_t(f"desired_{facts.get('desired_direction', 'increase')}",
+                             language) if facts.get("desired_direction")
+                   else facts.get("assessment_basis", "")).strip()
     if "actual" in facts and "period_label" in facts:
-        line = f"{indicator} was {fmt(facts['actual'])} in {facts['period_label']}."
+        line = _t("was_in", language, ind=indicator, val=fmt(facts["actual"]),
+                   per=facts["period_label"])
         if facts.get("target") is not None:
-            line += f" The target for that period was {fmt(facts['target'])}."
+            line += _t("target_was", language, val=fmt(facts["target"]))
         return line
     if "growth_rate_percent" in facts:
-        return (f"{indicator} moved from {fmt(facts.get('value_start'))} in "
-                f"{facts.get('period_start')} to {fmt(facts.get('value_end'))} in "
-                f"{facts.get('period_end')} — a {facts['growth_rate_percent']}% "
-                f"{facts.get('method', '')} growth rate.".replace("  ", " "))
+        return _t("growth", language, ind=indicator, v0=fmt(facts.get("value_start")),
+                   p0=facts.get("period_start"), v1=fmt(facts.get("value_end")),
+                   p1=facts.get("period_end"), rate=facts["growth_rate_percent"],
+                   method=facts.get("method", "")).replace("  ", " ")
     if "absolute_difference" in facts:
-        return (f"The highest {indicator} was {fmt(facts.get('high_value'))} in "
-                f"{facts.get('high_period')} and the lowest {fmt(facts.get('low_value'))} in "
-                f"{facts.get('low_period')} — a difference of "
-                f"{fmt(facts['absolute_difference'])}.")
+        return _t("difference", language, ind=indicator, hi=fmt(facts.get("high_value")),
+                   hip=facts.get("high_period"), lo=fmt(facts.get("low_value")),
+                   lop=facts.get("low_period"), diff=fmt(facts["absolute_difference"]))
     if "percent_change" in facts:
-        return (f"{indicator} was {fmt(facts.get('value_a'))} in {facts.get('period_a')} and "
-                f"{fmt(facts.get('value_b'))} in {facts.get('period_b')} — a change of "
-                f"{fmt(facts.get('absolute_change'))} ({facts['percent_change']}%).")
+        return _t("change", language, ind=indicator, a=fmt(facts.get("value_a")),
+                   pa=facts.get("period_a"), b=fmt(facts.get("value_b")),
+                   pb=facts.get("period_b"), abschg=fmt(facts.get("absolute_change")),
+                   pct=facts["percent_change"])
     if "definition" in facts:
         return facts["definition"]
     if "overview" in facts:
-        # One line per indicator, each with its own period — not a repr of the
-        # list, which is what a reader was being shown, Decimal() wrappers and
-        # all.
         lines = []
         for e in facts["overview"]:
             value = e.get("actual")
-            unit = e.get("unit") or ""
+            row_unit = e.get("unit") or ""
             if e.get("report_as_growth") and e.get("change_yoy_percent") is not None:
-                lines.append(f"{e.get('indicator')}: {e['change_yoy_percent']}% YoY "
-                             f"({e.get('period_label')})")
-            else:
-                shown = f"{trim_zeros(value)} {unit}".strip() if value is not None else "no reading"
-                line = f"{e.get('indicator')}: {shown} ({e.get('period_label')})"
-                # The movement, not just the level. "How is the economy doing"
-                # answered with four current values is a list of readings, not
-                # an answer — the direction is the question.
-                if e.get("previous_value") is not None:
-                    line += (f", from {trim_zeros(e['previous_value'])} {unit}".rstrip()
-                             + f" in {e.get('previous_period')}")
-                if e.get("change_yoy_percent") is not None:
-                    line += f" ({e['change_yoy_percent']}% YoY)"
-                lines.append(line)
-        if facts.get("change_ranking"):
-            ordered = facts["change_ranking"]
-            lines.append("Largest decline: " + ", then ".join(
-                f"{e['indicator']} ({e['change_yoy_percent']}%)" for e in ordered) + ".")
-        for e in facts.get("no_data_in_period") or []:
-            covers = (f" Its published series runs from {e['covers_from']} to {e['covers_to']}."
-                      if e.get("covers_from") else "")
-            lines.append(f"{e['indicator']} has no reading in the period asked about.{covers}")
-        if facts.get("not_found"):
-            lines.append("Not found in the approved data: " + ", ".join(facts["not_found"]) + ".")
-        return "\n".join(lines)
-    if "increasing" in facts and "declining" in facts:
-        scope = facts.get("scope") or "These indicators"
-        lines = [f"{scope}, compared with a year earlier:"]
-        for label, key in (("Increasing", "increasing"), ("Declining", "declining"),
-                            ("Unchanged", "unchanged")):
-            group = facts.get(key) or []
-            if not group:
+                lines.append(f"{e.get('indicator')}:"
+                             + _t("yoy", language, pct=e["change_yoy_percent"])
+                             + f" ({e.get('period_label')})")
                 continue
-            lines.append(f"\n{label} ({len(group)}):")
-            for e in group:
-                value = f"{trim_zeros(e.get('actual'))} {e.get('unit') or ''}".strip()
-                # A percentage-point move is not a percentage change. Printing
-                # "+0.1%" for a ratio that moved 40.5 -> 40.6 misstates it.
-                moved = (f"{e['change_yoy_percent']}%" if e.get("change_yoy_percent") is not None
-                         else f"{e.get('change_yoy_pp')} pp")
-                lines.append(f"- {e.get('indicator')}: {moved} "
-                             f"({value} in {e.get('period_label')})")
-        skipped = facts.get("no_comparison") or []
-        if skipped:
-            lines.append(f"\nNo year-on-year comparison available for {len(skipped)} of "
-                         f"{facts.get('n_total')}: "
-                         + "; ".join(f"{e.get('indicator')} ({e.get('reason')})" for e in skipped)
-                         + ".")
-        return "\n".join(lines)
-    if "ranked_indicators" in facts:
-        scope = facts.get("scope") or "this group"
-        order = "closest to target first" if facts.get("order") == "best_first" \
-            else "furthest from target first"
-        lines = [f"{scope}, ranked by progress against each indicator's own target "
-                 f"({order}):"]
-        for i, e in enumerate(facts["ranked_indicators"], 1):
-            value = f"{trim_zeros(e.get('actual'))} {e.get('unit') or ''}".strip()
-            lines.append(f"{i}. {e.get('indicator')} — {e.get('attainment_percent')}% of target "
-                         f"({value} in {e.get('period_label')}, target {e.get('target')})")
-        skipped = facts.get("not_assessable") or []
-        if skipped:
-            lines.append(f"{len(skipped)} of {facts.get('n_total')} could not be ranked: "
-                         + "; ".join(f"{e.get('indicator')} ({e.get('reason')})" for e in skipped)
-                         + ".")
+            shown = (f"{trim_zeros(value)} {row_unit}".strip() if value is not None
+                     else _t("no_reading", language))
+            line = f"{e.get('indicator')}: {shown} ({e.get('period_label')})"
+            # The movement, not just the level. "How is the economy doing"
+            # answered with four current values is a list of readings, not an
+            # answer — the direction is the question.
+            if e.get("previous_value") is not None:
+                line += _t("from_in", language,
+                            val=f"{trim_zeros(e['previous_value'])} {row_unit}".strip(),
+                            per=e.get("previous_period"))
+            if e.get("change_yoy_percent") is not None:
+                line += _t("yoy", language, pct=e["change_yoy_percent"])
+            lines.append(line)
+        if facts.get("change_ranking"):
+            lines.append(_t("largest_decline", language) + _t("then", language).join(
+                f"{e['indicator']} ({e['change_yoy_percent']}%)"
+                for e in facts["change_ranking"]) + ".")
+        for e in facts.get("no_data_in_period") or []:
+            covers = (_t("covers", language, a=e["covers_from"], b=e["covers_to"])
+                      if e.get("covers_from") else "")
+            lines.append(_t("no_reading_in_period", language, ind=e["indicator"]) + covers)
+        if facts.get("not_found"):
+            lines.append(_t("not_found", language, names=", ".join(facts["not_found"])))
         return "\n".join(lines)
     if "count" in facts and "names" in facts:
         scope = facts.get("scope")
         # A sector is a container, a type is a label: "101 published Sector
         # Indicators" is right, "13 published Education Sectors" is not.
         if not scope:
-            what = "indicators"
+            what = _t("indicators_word", language)
         elif facts.get("scope_kind") == "sector":
-            what = f"published indicators in the {scope}"
+            what = _t("in_the_sector", language, scope=scope)
         else:
-            what = f"published {scope}s"
-        line = f"There are {facts['count']} {what} in the approved data."
+            what = _t("published_type", language, scope=scope)
+        line = _t("there_are", language, n=facts["count"], what=what)
         # The names are rendered in full beside this text, so enumerating them
         # here prints them twice. But answering "give me all the names" with
         # "for example: ..." reads as a refusal of the question that was asked,
@@ -264,24 +380,68 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
         if facts["count"] > 15:
             sample = facts.get("names_sample") or facts["names"][:8]
             if sample:
-                line += " For example: " + "; ".join(str(n) for n in sample) + "."
-        return line + f" All {facts['count']} are listed below."
+                line += _t("for_example", language,
+                            names="; ".join(str(n) for n in sample))
+        return line + _t("all_listed_below", language, n=facts["count"])
     if "series" in facts:
         # Summarise; do NOT enumerate. The series is already rendered as a chart
         # and a table beside this text, so listing all 28 points printed the
         # same data three times on one screen.
-        parts = [f"{indicator}: {facts.get('n_points', len(facts['series']))} readings"]
+        line = _t("n_readings", language, ind=indicator,
+                   n=facts.get("n_points", len(facts["series"])))
         if facts.get("first_period"):
-            parts.append(f"from {fmt(facts.get('first_value'))} in {facts['first_period']} "
-                         f"to {fmt(facts.get('last_value'))} in {facts.get('last_period')}")
-        line = ", ".join(parts) + "."
+            line += _t("series_span", language, v0=fmt(facts.get("first_value")),
+                        p0=facts["first_period"], v1=fmt(facts.get("last_value")),
+                        p1=facts.get("last_period"))
+        line += "."
         if facts.get("change_percent") is not None:
-            line += f" That is a change of {facts['change_percent']}% over the period."
+            line += _t("series_change", language, pct=facts["change_percent"])
         if facts.get("highest_period"):
-            line += (f" The highest reading was {fmt(facts.get('highest_value'))} in "
-                     f"{facts['highest_period']}, the lowest {fmt(facts.get('lowest_value'))} "
-                     f"in {facts.get('lowest_period')}.")
+            line += _t("series_extremes", language, hi=fmt(facts.get("highest_value")),
+                        hip=facts["highest_period"], lo=fmt(facts.get("lowest_value")),
+                        lop=facts.get("lowest_period"))
         return line
+    if "increasing" in facts and "declining" in facts:
+        scope = facts.get("scope") or _t("these_indicators", language)
+        lines = [_t("vs_year_earlier", language, scope=scope)]
+        for key in ("increasing", "declining", "unchanged"):
+            group = facts.get(key) or []
+            if not group:
+                continue
+            label = _t({"increasing": "increasing", "declining": "declining",
+                         "unchanged": "unchanged_group"}[key], language)
+            lines.append(f"\n{label} ({len(group)}):")
+            for e in group:
+                value = f"{trim_zeros(e.get('actual'))} {e.get('unit') or ''}".strip()
+                # A percentage-point move is not a percentage change. Printing
+                # "+0.1%" for a ratio that moved 40.5 -> 40.6 misstates it.
+                moved = (f"{e['change_yoy_percent']}%" if e.get("change_yoy_percent") is not None
+                         else f"{e.get('change_yoy_pp')} {_t('pp', language)}")
+                lines.append(f"- {e.get('indicator')}: {moved} "
+                             f"({value} — {e.get('period_label')})")
+        skipped = facts.get("no_comparison") or []
+        if skipped:
+            lines.append("\n" + _t("no_yoy_for", language, n=len(skipped),
+                                    total=facts.get("n_total"))
+                         + "; ".join(f"{e.get('indicator')} ({_reason(e, language)})"
+                                      for e in skipped) + ".")
+        return "\n".join(lines)
+    if "ranked_indicators" in facts:
+        scope = facts.get("scope") or _t("this_group", language)
+        order = _t("best_first" if facts.get("order") == "best_first" else "worst_first",
+                    language)
+        lines = [_t("ranked_by_target", language, scope=scope, order=order)]
+        for i, e in enumerate(facts["ranked_indicators"], 1):
+            value = f"{trim_zeros(e.get('actual'))} {e.get('unit') or ''}".strip()
+            lines.append(_t("of_target", language, i=i, ind=e.get("indicator"),
+                             pct=e.get("attainment_percent"), val=value,
+                             per=e.get("period_label"), tgt=e.get("target")))
+        skipped = facts.get("not_assessable") or []
+        if skipped:
+            lines.append(_t("not_ranked", language, n=len(skipped), total=facts.get("n_total"))
+                         + "; ".join(f"{e.get('indicator')} ({_reason(e, language)})"
+                                      for e in skipped) + ".")
+        return "\n".join(lines)
 
     lines = []
     for key, value in facts.items():
