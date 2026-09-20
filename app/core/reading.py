@@ -99,6 +99,8 @@ def _evidence_rows(facts: dict, citations: list[dict]) -> list[dict]:
         return [{**row(e.get("period_label"), e.get("actual")),
                  "indicator": e.get("indicator"), "unit": e.get("unit"),
                  "change_yoy_percent": e.get("change_yoy_percent"),
+                 "change_yoy_pp": e.get("change_yoy_pp"),
+                 "change_kind": e.get("change_kind"),
                  "direction": direction}
                 for direction in ("increasing", "declining", "unchanged")
                 for e in (facts.get(direction) or [])]

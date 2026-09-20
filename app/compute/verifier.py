@@ -210,7 +210,11 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
             lines.append(f"\n{label} ({len(group)}):")
             for e in group:
                 value = f"{trim_zeros(e.get('actual'))} {e.get('unit') or ''}".strip()
-                lines.append(f"- {e.get('indicator')}: {e.get('change_yoy_percent')}% "
+                # A percentage-point move is not a percentage change. Printing
+                # "+0.1%" for a ratio that moved 40.5 -> 40.6 misstates it.
+                moved = (f"{e['change_yoy_percent']}%" if e.get("change_yoy_percent") is not None
+                         else f"{e.get('change_yoy_pp')} pp")
+                lines.append(f"- {e.get('indicator')}: {moved} "
                              f"({value} in {e.get('period_label')})")
         skipped = facts.get("no_comparison") or []
         if skipped:

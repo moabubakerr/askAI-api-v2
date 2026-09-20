@@ -55,7 +55,20 @@ def get_series(indicator_detail_id: str, published_indicator_detail_id: Optional
                        actual, target, outlook,
                        monthly_mom_percent, monthly_yoy_percent,
                        quarterly_qoq_percent, quarterly_yoy_percent,
-                       yearly_yoy_percent
+                       yearly_yoy_percent,
+                       -- The percentage-POINT columns, which were never
+                       -- selected. preferred_change_field(as_points=True)
+                       -- therefore looked up a key that was not in the row and
+                       -- always returned None, everywhere it was called.
+                       -- It matters for ratios: Public Debt as a Percentage of
+                       -- GDP publishes quarterly_yoy_pp and leaves
+                       -- quarterly_yoy_percent empty, so "is public debt
+                       -- improving?" was answered "no published change is
+                       -- available" about an indicator whose change SCAI
+                       -- publishes.
+                       monthly_mom_pp, monthly_yoy_pp,
+                       quarterly_qoq_pp, quarterly_yoy_pp,
+                       yearly_yoy_pp
                 FROM published_data_points
                 WHERE published_indicator_detail_id = :pdid
                   AND granularity = :gran
@@ -382,7 +395,10 @@ latest AS (
            -- SCAI's own vetted year-on-year figures, never a fresh derivation
            -- (F-022..F-026). Which one applies depends on the granularity, so
            -- all three come back and preferred_change_field picks.
-           p.monthly_yoy_percent, p.quarterly_yoy_percent, p.yearly_yoy_percent
+           p.monthly_yoy_percent, p.quarterly_yoy_percent, p.yearly_yoy_percent,
+           -- And the percentage-point forms, for the ratio indicators that
+           -- publish only those.
+           p.monthly_yoy_pp, p.quarterly_yoy_pp, p.yearly_yoy_pp
     FROM published_data_points p
     WHERE p.actual IS NOT NULL
       AND (p.country_en IS NULL OR p.country_en = '' OR p.country_en = 'National / Overall')
@@ -392,7 +408,8 @@ SELECT i.name_en AS indicator, i.indicator_id AS indicator_record_id,
        d.unit_en, d.format, d.polarity_en,
        d.target_value, d.target_year, d.baseline_value, d.baseline_year,
        l.period_label, l.actual, l.period_target, l.record_id, l.granularity,
-       l.monthly_yoy_percent, l.quarterly_yoy_percent, l.yearly_yoy_percent
+       l.monthly_yoy_percent, l.quarterly_yoy_percent, l.yearly_yoy_percent,
+       l.monthly_yoy_pp, l.quarterly_yoy_pp, l.yearly_yoy_pp
 FROM scoped s
 JOIN indicators i ON i.published_indicator_id = s.published_indicator_id
 JOIN indicator_details d ON d.indicator_id = i.indicator_id AND d.is_published = TRUE

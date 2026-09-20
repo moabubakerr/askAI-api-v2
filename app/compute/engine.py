@@ -376,6 +376,14 @@ def scope_direction(entries: list[dict]) -> ComputeResult:
     increasing, declining, unchanged, no_comparison = [], [], [], []
     for e in entries:
         change = preferred_change_field(e, e.get("granularity") or "")
+        change_kind = "percent"
+        if change is None:
+            # Ratio indicators publish the percentage-POINT move and leave the
+            # percent column empty. Public Debt as a Percentage of GDP was
+            # being reported as having no year-on-year figure at all because of
+            # it, in a list whose entire purpose is which way things moved.
+            change = preferred_change_field(e, e.get("granularity") or "", as_points=True)
+            change_kind = "percentage_points"
         row = {
             "indicator": (e.get("indicator") or "").strip(),
             "actual": e.get("actual"),
@@ -389,7 +397,10 @@ def scope_direction(entries: list[dict]) -> ComputeResult:
             no_comparison.append(row)
             continue
         change = round(float(change), 4)
-        row["change_yoy_percent"] = change
+        # Named by what it is: a percentage-point move on a ratio is not a
+        # percentage change, and labelling it as one misstates the figure.
+        row["change_yoy_percent" if change_kind == "percent" else "change_yoy_pp"] = change
+        row["change_kind"] = change_kind
         # Whether a rise is welcome depends on the indicator; whether it IS a
         # rise does not. Only the second is decided here.
         (increasing if change > 0 else declining if change < 0 else unchanged).append(row)
@@ -399,8 +410,11 @@ def scope_direction(entries: list[dict]) -> ComputeResult:
             "None of the indicators in this group have a published year-on-year "
             "change, so there is no basis for saying which are rising or falling."))
 
-    increasing.sort(key=lambda r: r["change_yoy_percent"], reverse=True)
-    declining.sort(key=lambda r: r["change_yoy_percent"])
+    def moved(r):
+        return r.get("change_yoy_percent", r.get("change_yoy_pp"))
+
+    increasing.sort(key=moved, reverse=True)
+    declining.sort(key=moved)
     return ComputeResult(True, facts={
         "increasing": increasing,
         "declining": declining,
