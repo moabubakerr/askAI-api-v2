@@ -251,6 +251,32 @@ INDICATOR_ALIASES = {
 }
 
 
+# Words that cannot identify an indicator on their own. What is left after
+# these and the noise patterns is the substance of the question.
+_CONTENTLESS = {
+    "for", "the", "a", "an", "of", "in", "on", "at", "to", "and", "or",
+    "year", "years", "period", "time", "data", "value", "values", "figure",
+    "figures", "number", "is", "was", "were", "are", "be", "it", "this", "that",
+    "please", "me", "my", "we", "you",
+    "سنة", "عام", "الفترة", "بيانات", "قيمة", "رقم", "في", "من", "عن", "على",
+}
+
+
+def has_identifying_content(phrase: str) -> bool:
+    """Whether anything is left to match on once noise is removed.
+
+    "what is the GDP for the year 2034" can reach the resolver as "for the year
+    2034": the period is stripped, and what remains is scaffolding. Matching
+    that against the catalogue and reporting 'no indicator matching "for the
+    year 2034"' quotes a string the user never meant as a name and diagnoses
+    the wrong problem — they did not misname an indicator, they named none.
+    """
+    cleaned = normalize_indicator_phrase(phrase or "")
+    words = [w for w in re.findall(r"[\w؀-ۿ]+", cleaned.lower())
+             if w not in _CONTENTLESS and len(w) > 1 and not w.isdigit()]
+    return bool(words)
+
+
 def resembles_catalogue_name(phrase: str, cutoff: float = 0.85) -> bool:
     """Whether the WHOLE phrase is close to one indicator's actual name.
 
@@ -399,7 +425,7 @@ def resolve_indicator(phrase: str, require_data: bool = True,
 
     Definition lookups pass require_data=False: a stub can still carry a
     perfectly good definition, and no figures are being claimed."""
-    if not phrase or not phrase.strip():
+    if not phrase or not phrase.strip() or not has_identifying_content(phrase):
         return ResolutionResult(None, "not_found", [],
                                  msg("no_indicator_in_question", language))
 

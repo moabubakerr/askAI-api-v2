@@ -156,14 +156,18 @@ _MESSAGES = {
     # the user unable to tell whether they misnamed the indicator, asked for a
     # period that isn't covered, or hit a genuine gap.
     "indicator_not_found": {
-        "en": ("I couldn't find an indicator in the approved SCAI data matching \"{phrase}\". "
-                "I won't guess at a similar-sounding one, because answering with the wrong "
-                "indicator is worse than not answering. Try the metric's name as SCAI "
-                "publishes it, or ask \"what can you do?\" to see what's covered."),
-        "ar": ("لم أجد مؤشراً في بيانات المجلس المعتمدة يطابق \"{phrase}\". "
-                "لن أخمّن مؤشراً مشابهاً في الاسم، لأن الإجابة بمؤشر خاطئ أسوأ من عدم الإجابة. "
-                "جرّب اسم المؤشر كما ينشره المجلس، أو اسأل \"ماذا يمكنك أن تفعل؟\" "
-                "لمعرفة ما هو مشمول."),
+        "en": ("No indicator in SCAI's approved data matches \"{phrase}\", and I'd rather say "
+                "so than answer with a near-miss.\n\n"
+                "Two things that usually help:\n"
+                "• name the metric more plainly — \"inflation\", \"Real GDP\", "
+                "\"trade balance\", \"government revenues\"\n"
+                "• or ask \"what can you do?\" for the full list of what's published"),
+        "ar": ("لا يوجد مؤشر في بيانات المجلس المعتمدة يطابق \"{phrase}\"، وأفضّل أن أقول ذلك "
+                "بدلاً من الإجابة بمؤشر قريب.\n\n"
+                "عادةً ما يساعد أحد أمرين:\n"
+                "• اذكر اسم المؤشر بصيغة أبسط — \"التضخم\"، \"الناتج المحلي الإجمالي الحقيقي\"، "
+                "\"الميزان التجاري\"، \"الإيرادات الحكومية\"\n"
+                "• أو اسأل \"ماذا يمكنك أن تفعل؟\" للاطلاع على القائمة الكاملة لما هو منشور"),
     },
     "indicator_ambiguous": {
         "en": ("\"{phrase}\" could match more than one indicator: {names}. "
@@ -236,12 +240,18 @@ _MESSAGES = {
     # Replaces a bare "No indicator was mentioned." — technically true, useless
     # in practice, and what an unrecognised greeting used to be answered with.
     "no_indicator_in_question": {
-        "en": ("I couldn't tell which indicator you're asking about. Name the metric — "
-                "for example \"Real GDP\", \"Inflation\" or \"Number of International "
-                "Visitors\" — or ask \"what can you do?\" to see what's covered."),
-        "ar": ("لم أتبيّن المؤشر الذي تسأل عنه. اذكر اسم المؤشر — مثل \"الناتج المحلي "
-                "الإجمالي الحقيقي\" أو \"التضخم\" أو \"عدد الزوار الدوليين\" — أو اسأل "
-                "\"ماذا يمكنك أن تفعل؟\" لمعرفة ما هو مشمول."),
+        "en": ("I have the period you asked about, but not which indicator you want for it.\n\n"
+                "Add the metric and I can answer — for example:\n"
+                "• \"Real GDP in 2024\"\n"
+                "• \"inflation in May 2025\"\n"
+                "• \"government revenues last year\"\n\n"
+                "Or ask \"what can you do?\" to see everything that's published."),
+        "ar": ("لديّ الفترة التي سألت عنها، لكن ليس المؤشر الذي تريده لها.\n\n"
+                "أضف اسم المؤشر وسأجيبك — مثل:\n"
+                "• \"الناتج المحلي الإجمالي الحقيقي في 2024\"\n"
+                "• \"التضخم في مايو 2025\"\n"
+                "• \"الإيرادات الحكومية العام الماضي\"\n\n"
+                "أو اسأل \"ماذا يمكنك أن تفعل؟\" للاطلاع على كل ما هو منشور."),
     },
     "empty_catalog": {
         "en": ("The indicator catalog is empty — the database has no indicator data loaded. "
