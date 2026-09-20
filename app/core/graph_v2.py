@@ -39,7 +39,7 @@ from app.compute.verifier import verify_numbers, render_template_fallback
 from app.compute.citations import Citation, citations_for_rows, render_sources_footer, citations_to_dicts
 from app.compute.chart_builder import build_chart_spec
 from app.compute.chart_request import wants_chart
-from app.compute.formatting import display_unit, decimals_from_format
+from app.compute.formatting import display_unit, decimals_from_format, trim_decimal
 from app.agents.composer_agent import compose_answer
 from app.agents.article_agent import answer_from_articles
 from app.resolvers.embeddings import get_embedding
@@ -956,7 +956,13 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         # the system losing its place in the conversation, not a real ambiguity.
         if not pair:
             named = single_period_label(period.raw or user_message)
-            prior = (session_state or {}).get("last_period_used")
+            state = session_state or {}
+            # Prefer an endpoint of the previous comparison that is NOT the one
+            # just named; fall back to the single period the last answer
+            # reported. "compare it with Q4 2025" after "2024-Q4 vs 2025-Q4"
+            # means the other end, not a period the user has to restate.
+            candidates = [p for p in (state.get("last_periods_used") or []) if p != named]
+            prior = candidates[-1] if candidates else state.get("last_period_used")
             if (named and prior and prior != named
                     and period_kind(named) == period_kind(prior)):
                 rows = retriever.get_series(match.indicator_detail_id, published_detail_id,
@@ -1466,9 +1472,25 @@ def _latest_common_period(series_by_country: dict[str, list[dict]]) -> Optional[
     return max(common) if common else None
 
 
+def _strip_padding(value):
+    """trim_decimal applied to a whole facts tree.
+
+    Done in one place rather than at each computation so that no call site can
+    forget it. The frontend renders payload values into its own tiles, so a
+    Decimal still carrying its stored scale showed up as "+3.680000 billion
+    QAR" beside prose that correctly said 3.68 — the text had been fixed and
+    the payload had not.
+    """
+    if isinstance(value, dict):
+        return {k: _strip_padding(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_strip_padding(v) for v in value]
+    return trim_decimal(value)
+
+
 def _wrap(result: compute.ComputeResult, unit: str, extra_note: Optional[str] = None,
           indicator_name: Optional[str] = None, decimals: Optional[int] = None) -> dict:
-    payload = {"ok": result.ok, "facts": {**result.facts, "unit": unit}} if result.ok else \
+    payload = {"ok": result.ok, "facts": {**_strip_padding(result.facts), "unit": unit}} if result.ok else \
               {"ok": False, "message": result.message}
     # Name the indicator in every successful payload. Without it the Composer
     # has nothing to name and writes "the specified economic indicator", which
@@ -1708,6 +1730,15 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
         if facts_out.get(key):
             session_state["last_period_used"] = facts_out[key]
             break
+    # BOTH endpoints when the answer was a comparison. Keeping only one made
+    # "compare it with Q4 2025" fail after an answer about 2024-Q4 vs 2025-Q4:
+    # the period named was the one already recorded, the "must be a different
+    # period" guard rejected it, and the user was asked to supply two periods
+    # they had just been shown.
+    endpoints = [facts_out.get(k) for k in ("period_a", "period_b", "period_start", "period_end")]
+    endpoints = [p for p in endpoints if p]
+    if endpoints:
+        session_state["last_periods_used"] = endpoints
 
     if skip_compose:
         answer = canned or ""

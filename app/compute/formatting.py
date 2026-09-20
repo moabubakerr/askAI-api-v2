@@ -19,6 +19,7 @@ place the information exists.
 Nothing here changes a stored value. It decides how the same number is written.
 """
 import re
+from decimal import Decimal
 from typing import Optional
 
 # "bn0.00", "0.000m", "0.0k" — the scale may lead or trail the digits.
@@ -120,3 +121,25 @@ def trim_zeros(value) -> str:
         return text
     text = text.rstrip("0").rstrip(".")
     return text or "0"
+
+
+def trim_decimal(value):
+    """Removes stored padding from a numeric WITHOUT changing its value.
+
+    trim_zeros fixes the text; this fixes the payload, which is what the
+    frontend renders into its own tiles. Postgres NUMERIC keeps the scale it
+    was stored with, so subtracting two 2-decimal values yields
+    Decimal('3.680000') and the tile printed "+3.680000 billion QAR" beside
+    prose that correctly said 3.68.
+
+    Decimal.normalize() alone is not safe here: it turns Decimal('100') into
+    Decimal('1E+2'), which renders as "1E+2". Integers are quantized back to a
+    plain form instead.
+    """
+    if not isinstance(value, Decimal):
+        return value
+    normalized = value.normalize()
+    exponent = normalized.as_tuple().exponent
+    if isinstance(exponent, int) and exponent > 0:
+        return normalized.quantize(Decimal(1))
+    return normalized
