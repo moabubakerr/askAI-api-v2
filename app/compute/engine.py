@@ -102,6 +102,29 @@ def period_to_period_change(rows: list[dict], period_label_a: str, period_label_
     Fixes F-011: must use the EXACT two periods named, not just 'the latest'."""
     by_label = {r["period_label"]: r for r in rows}
     a, b = by_label.get(period_label_a), by_label.get(period_label_b)
+
+    # One side missing is not nothing. "How much did total exports decline in
+    # Q1 2026 compared with Q1 2025?" was answered "No approved data point
+    # found for 2026-Q1" and threw away the Q1 2025 reading the question also
+    # named and the data does hold. Report the half that exists, say plainly
+    # which half does not and what the series actually covers, and do not
+    # compute a change — there is nothing to compute it against.
+    present = [(label, row) for label, row in
+               ((period_label_a, a), (period_label_b, b))
+               if row is not None and row.get("actual") is not None]
+    if len(present) == 1:
+        label, row = present[0]
+        missing = period_label_b if label == period_label_a else period_label_a
+        actuals = [r for r in rows if r.get("actual") is not None]
+        return ComputeResult(True, facts={
+            "actual": row["actual"],
+            "period_label": label,
+            "comparison_unavailable": True,
+            "missing_period": missing,
+            "covers_from": actuals[0]["period_label"] if actuals else None,
+            "covers_to": actuals[-1]["period_label"] if actuals else None,
+        })
+
     if a is None or b is None:
         missing = period_label_a if a is None else period_label_b
         return ComputeResult(False, message=f"No approved data point found for {missing}.")
@@ -123,6 +146,25 @@ def growth_rate(rows: list[dict], period_label_start: str, period_label_end: str
     the LLM free-associates from a full list of quarterly points."""
     by_label = {r["period_label"]: r for r in rows}
     start, end = by_label.get(period_label_start), by_label.get(period_label_end)
+
+    # Same as period_to_period_change: one endpoint missing still leaves a
+    # reading the question named, and refusing outright discards it.
+    present = [(label, row) for label, row in
+               ((period_label_start, start), (period_label_end, end))
+               if row is not None and row.get("actual") is not None]
+    if len(present) == 1:
+        label, row = present[0]
+        missing = period_label_end if label == period_label_start else period_label_start
+        actuals = [r for r in rows if r.get("actual") is not None]
+        return ComputeResult(True, facts={
+            "actual": row["actual"],
+            "period_label": label,
+            "comparison_unavailable": True,
+            "missing_period": missing,
+            "covers_from": actuals[0]["period_label"] if actuals else None,
+            "covers_to": actuals[-1]["period_label"] if actuals else None,
+        })
+
     if start is None or end is None:
         missing = period_label_start if start is None else period_label_end
         return ComputeResult(False, message=f"No approved data point found for {missing}.")

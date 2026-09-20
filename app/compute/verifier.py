@@ -273,6 +273,16 @@ _T = {
         "en": " It was {prev} in {prevper}.",
         "ar": " وكان {prev} في {prevper}.",
     },
+    "one_side_only": {
+        "en": ("{ind} was {val} in {per}. There is no published reading for "
+                "{missing}, so the comparison cannot be made."),
+        "ar": ("بلغ {ind} {val} في {per}. ولا توجد قراءة منشورة لـ {missing}، "
+                "لذا لا يمكن إجراء المقارنة."),
+    },
+    "series_covers": {
+        "en": " The published series runs from {a} to {b}.",
+        "ar": " وتمتد السلسلة المنشورة من {a} إلى {b}.",
+    },
     "not_ranked": {
         "en": "{n} of {total} could not be ranked: ",
         "ar": "تعذّر ترتيب {n} من {total}: ",
@@ -352,6 +362,14 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                    basis=_t(f"desired_{facts.get('desired_direction', 'increase')}",
                              language) if facts.get("desired_direction")
                    else facts.get("assessment_basis", "")).strip()
+    if facts.get("comparison_unavailable"):
+        line = _t("one_side_only", language, ind=indicator,
+                   val=fmt(facts.get("actual")), per=facts.get("period_label"),
+                   missing=facts.get("missing_period"))
+        if facts.get("covers_from"):
+            line += _t("series_covers", language, a=facts["covers_from"],
+                        b=facts["covers_to"])
+        return line
     if "actual" in facts and "period_label" in facts:
         line = _t("was_in", language, ind=indicator, val=fmt(facts["actual"]),
                    per=facts["period_label"])
