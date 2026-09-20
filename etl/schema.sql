@@ -55,6 +55,10 @@ CREATE TABLE indicator_details (
     target_year               INTEGER,
     is_published              BOOLEAN NOT NULL DEFAULT FALSE,
     published_detail_id       TEXT UNIQUE,            -- P02.PublishedIndicatorDetailId, if published
+    is_main                   BOOLEAN,                -- P02.IsMain: the headline reading for its
+                                                      -- indicator, vs a sub-breakdown of it. 189 True
+                                                      -- (1:1 with published indicators), 100 False.
+                                                      -- NULL for unpublished details.
     unit_en                   TEXT,                   -- only present if published (Item_4 lacks unit)
     unit_ar                   TEXT,
     polarity_en               TEXT,                   -- 'Increase' | 'Decrease' — whether higher is better

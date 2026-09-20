@@ -352,3 +352,62 @@ def scope_performance(entries: list[dict], best_first: bool = True,
         # against each indicator's own target, not a comparison between them.
         "basis": "percent of each indicator's own target attained, with polarity applied",
     })
+
+
+def scope_direction(entries: list[dict]) -> ComputeResult:
+    """Splits a group of indicators into those rising and those falling,
+    year on year.
+
+    "Which national indicators are increasing, and which are declining
+    compared with the previous year?" was read as a two-period comparison and
+    asked the user to name both periods, then — once they did — sent the whole
+    sentence to the indicator resolver, which found no indicator called that.
+    It is neither. It is one question about eight indicators, and each one's
+    year-on-year change is already stored and vetted.
+
+    Unlike scope_performance this needs no target, so it covers indicators a
+    performance ranking cannot reach. It says nothing about whether a movement
+    is good: polarity is carried on every row so the caller can, and for
+    Inflation or Cost per Student a rise is not an improvement.
+    """
+    if not entries:
+        return ComputeResult(False, message="No published indicators were found for this group.")
+
+    increasing, declining, unchanged, no_comparison = [], [], [], []
+    for e in entries:
+        change = preferred_change_field(e, e.get("granularity") or "")
+        row = {
+            "indicator": (e.get("indicator") or "").strip(),
+            "actual": e.get("actual"),
+            "period_label": e.get("period_label"),
+            "unit": e.get("unit_en"),
+            "polarity": e.get("polarity_en"),
+        }
+        if change is None:
+            row["reason"] = ("no reading yet" if e.get("actual") is None
+                             else "no year-on-year figure published")
+            no_comparison.append(row)
+            continue
+        change = round(float(change), 4)
+        row["change_yoy_percent"] = change
+        # Whether a rise is welcome depends on the indicator; whether it IS a
+        # rise does not. Only the second is decided here.
+        (increasing if change > 0 else declining if change < 0 else unchanged).append(row)
+
+    if not (increasing or declining or unchanged):
+        return ComputeResult(False, message=(
+            "None of the indicators in this group have a published year-on-year "
+            "change, so there is no basis for saying which are rising or falling."))
+
+    increasing.sort(key=lambda r: r["change_yoy_percent"], reverse=True)
+    declining.sort(key=lambda r: r["change_yoy_percent"])
+    return ComputeResult(True, facts={
+        "increasing": increasing,
+        "declining": declining,
+        "unchanged": unchanged,
+        "no_comparison": no_comparison,
+        "n_increasing": len(increasing),
+        "n_declining": len(declining),
+        "n_total": len(entries),
+        "comparison": "year-on-year, at each indicator's most recent reading",
+    })

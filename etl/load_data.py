@@ -149,6 +149,13 @@ def load_indicator_details(csv_dir, engine):
             "target_year": int(to_float(r["TargetYear"])) if to_float(r["TargetYear"]) else None,
             "is_published": pub is not None,
             "published_detail_id": pub["PublishedIndicatorDetailId"] if pub is not None else None,
+            # P02.IsMain — the headline reading for its indicator, as opposed to
+            # a sub-breakdown of it. Exactly 189 True (one per published
+            # indicator) and 100 False. Without it, "which national indicators
+            # are increasing?" listed Real GDP three times — the total and its
+            # hydrocarbon and non-hydrocarbon components — all under the same
+            # name and indistinguishable.
+            "is_main": str(pub["IsMain"]).strip().lower() == "true" if pub is not None else None,
             "unit_en": pub["UnitEN"] if pub is not None else None,
             "unit_ar": pub["UnitAR"] if pub is not None else None,
             "polarity_en": pub["PolarityEN"] if pub is not None else None,
@@ -468,6 +475,18 @@ def main():
     args = parser.parse_args()
 
     engine = create_engine(args.dsn)
+
+    # Columns added to schema.sql after a database was first created. schema.sql
+    # only ever runs on an empty database, so without this an existing
+    # deployment would need hand-run SQL before the app would start — and a
+    # missing column is not a degraded feature, it is a 500 on every query that
+    # touches it. Each is additive and nullable, so applying them is safe on a
+    # database that already has them.
+    with engine.begin() as conn:
+        for ddl in [
+            "ALTER TABLE indicator_details ADD COLUMN IF NOT EXISTS is_main BOOLEAN",
+        ]:
+            conn.execute(text(ddl))
 
     with engine.begin() as conn:
         for t in TABLES_IN_LOAD_ORDER:

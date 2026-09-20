@@ -378,7 +378,11 @@ latest AS (
            p.published_indicator_detail_id AS detail_id,
            p.period_label, p.period_date, p.granularity,
            p.actual, p.target AS period_target,
-           p.published_data_point_id AS record_id
+           p.published_data_point_id AS record_id,
+           -- SCAI's own vetted year-on-year figures, never a fresh derivation
+           -- (F-022..F-026). Which one applies depends on the granularity, so
+           -- all three come back and preferred_change_field picks.
+           p.monthly_yoy_percent, p.quarterly_yoy_percent, p.yearly_yoy_percent
     FROM published_data_points p
     WHERE p.actual IS NOT NULL
       AND (p.country_en IS NULL OR p.country_en = '' OR p.country_en = 'National / Overall')
@@ -387,10 +391,22 @@ latest AS (
 SELECT i.name_en AS indicator, i.indicator_id AS indicator_record_id,
        d.unit_en, d.format, d.polarity_en,
        d.target_value, d.target_year, d.baseline_value, d.baseline_year,
-       l.period_label, l.actual, l.period_target, l.record_id
+       l.period_label, l.actual, l.period_target, l.record_id, l.granularity,
+       l.monthly_yoy_percent, l.quarterly_yoy_percent, l.yearly_yoy_percent
 FROM scoped s
 JOIN indicators i ON i.published_indicator_id = s.published_indicator_id
 JOIN indicator_details d ON d.indicator_id = i.indicator_id AND d.is_published = TRUE
+-- One row per INDICATOR, not per detail. Several published indicators carry
+-- sub-breakdowns as extra details — Real GDP has Hydrocarbon and
+-- Non-Hydrocarbon beneath it — and without this filter "which national
+-- indicators are increasing?" returned Real GDP three times under one name,
+-- listing a total alongside its own components as though they were peers.
+-- Matching the detail name against the indicator name instead is NOT a valid
+-- substitute, and was tried: indicator names carry a qualifier their detail
+-- does not ("Sector Contribution To GDP (Education)" vs "Sector Contribution
+-- To GDP"), so that rule disagrees with IsMain on 39 of the 289 published
+-- details and drops them. This column has to be loaded.
+AND d.is_main IS TRUE
 LEFT JOIN latest l ON l.detail_id = d.published_detail_id
 ORDER BY i.name_en
 """

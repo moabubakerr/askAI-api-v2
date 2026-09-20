@@ -166,6 +166,8 @@ def handle_message(user_message: str, conversation_context: str = "",
     # already worked, and the difference between them was one word.
     elif _asks_about_the_economy(user_message):
         ctype = "macro_overview"
+    elif _asks_for_direction_split(user_message):
+        ctype = "scope_direction"
     elif _asks_for_performance_ranking(user_message):
         ctype = "scope_performance"
     elif _looks_like_catalog_request(user_message):
@@ -244,9 +246,10 @@ def handle_message(user_message: str, conversation_context: str = "",
         return _finish(payload, language, session_state, citations,
                         question=user_message)
 
-    if ctype == "scope_performance":
+    if ctype in ("scope_performance", "scope_direction"):
         # The group can come from this message ("best performing education
-        # indicators") or, far more often, from the turn that just listed them.
+        # indicators", "which national indicators are rising") or, far more
+        # often, from the turn that just listed them.
         kind, scope = _match_catalog_scope(user_message)
         if not kind and session_state.get("last_catalog_scope"):
             kind = session_state["last_catalog_scope"]["kind"]
@@ -256,7 +259,10 @@ def handle_message(user_message: str, conversation_context: str = "",
         # means best on that indicator, and the answer is already sitting in the
         # previous turn — asking it again as a fresh question is how this came
         # back "No indicator matches 'most preformed one'".
-        if not kind and session_state.get("last_indicator_name"):
+        # Only for a performance ranking. "Which are increasing and which are
+        # declining" is a question about a group of indicators; redirecting it
+        # onto one indicator's countries would answer something else entirely.
+        if not kind and ctype == "scope_performance" and session_state.get("last_indicator_name"):
             ctype = "country_ranking"
             intent["indicator_phrase"] = (intent.get("indicator_phrase")
                                            or session_state["last_indicator_name"])
@@ -269,7 +275,7 @@ def handle_message(user_message: str, conversation_context: str = "",
             payload = {"ok": False, "message": msg("performance_needs_scope", language)}
             return _finish(payload, language, session_state, [], question=user_message)
 
-    if ctype == "scope_performance":
+    if ctype in ("scope_performance", "scope_direction"):
         session_state["last_catalog_scope"] = {"kind": kind, "scope": scope}
         entries = retriever.get_scope_performance(kind, scope)
         # Each row is a different indicator with its own unit and precision, so
@@ -277,7 +283,9 @@ def handle_message(user_message: str, conversation_context: str = "",
         # answer. Without this the ratio indicators print as "9.0 NA".
         for e in entries:
             e["unit_en"] = display_unit(e.get("unit_en"), e.get("format"))
-        result = compute.scope_performance(entries, best_first=not _asks_for_worst(user_message))
+        result = (compute.scope_direction(entries) if ctype == "scope_direction"
+                  else compute.scope_performance(
+                      entries, best_first=not _asks_for_worst(user_message)))
         payload = {"ok": result.ok, "facts": {**result.facts, "scope": scope, "scope_kind": kind}} \
             if result.ok else {"ok": False, "message": result.message}
         citations = [Citation(indicator=e.get("indicator"), data_source=None,
@@ -1135,6 +1143,39 @@ def _asks_for_worst(text: str) -> bool:
     return bool(text and _WORST_FIRST.search(text))
 
 
+# A group split by direction of travel: which are up, which are down. Both
+# halves must appear, so "which indicators are increasing?" alone still counts
+# but "is inflation increasing?" — one named indicator — does not.
+_DIRECTION_UP = re.compile(
+    r"\b(increas\w*|rising|rise|risen|up|grow\w*|improv\w*|higher)\b|ارتفع\w*|ترتفع|تزايد|زيادة",
+    re.IGNORECASE)
+_DIRECTION_DOWN = re.compile(
+    r"\b(declin\w*|decreas\w*|falling|fall\w*|down|drop\w*|shrink\w*|worsen\w*|lower)\b"
+    r"|انخفض\w*|تنخفض|تراجع|هبوط",
+    re.IGNORECASE)
+_DIRECTION_PLURAL = re.compile(
+    r"\bindicators\b|\bmetrics\b|\bones\b|\bwhich\s+are\b|المؤشرات", re.IGNORECASE)
+
+
+def _asks_for_direction_split(text: str) -> bool:
+    """"Which of these are increasing and which are declining?"
+
+    Distinct from a two-period comparison of ONE indicator, which is what this
+    was being read as — it asked the user to name two periods, then sent the
+    whole sentence to the indicator resolver once they did. It is one question
+    about a whole group, and each member's year-on-year change answers it.
+
+    Both directions are required. A question with only one ("which indicators
+    are rising?") still qualifies via the plural, but "is inflation rising?"
+    names a single indicator and must stay a single-indicator question.
+    """
+    if not text:
+        return False
+    if not (_DIRECTION_UP.search(text) and _DIRECTION_DOWN.search(text)):
+        return False
+    return bool(_DIRECTION_PLURAL.search(text))
+
+
 # The economy as a whole, rather than any one indicator in it. Deliberately
 # narrow: it requires the word itself, so "how is the education sector doing"
 # and "how are prices doing" keep their own routes.
@@ -1402,7 +1443,7 @@ def _macro_overview(language="en"):
 # button that reveals nothing they were not already shown.
 _READABLE_FACT_KEYS = {"actual", "series", "ranked", "rows", "ranked_periods",
                        "overview", "high_value", "value_a", "value_start",
-                       "ranked_indicators"}
+                       "ranked_indicators", "increasing"}
 
 
 def is_readable(payload: dict) -> bool:

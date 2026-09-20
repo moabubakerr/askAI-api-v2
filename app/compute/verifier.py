@@ -178,6 +178,26 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
         if facts.get("not_found"):
             lines.append("Not found in the approved data: " + ", ".join(facts["not_found"]) + ".")
         return "\n".join(lines)
+    if "increasing" in facts and "declining" in facts:
+        scope = facts.get("scope") or "These indicators"
+        lines = [f"{scope}, compared with a year earlier:"]
+        for label, key in (("Increasing", "increasing"), ("Declining", "declining"),
+                            ("Unchanged", "unchanged")):
+            group = facts.get(key) or []
+            if not group:
+                continue
+            lines.append(f"\n{label} ({len(group)}):")
+            for e in group:
+                value = f"{e.get('actual')} {e.get('unit') or ''}".strip()
+                lines.append(f"- {e.get('indicator')}: {e.get('change_yoy_percent')}% "
+                             f"({value} in {e.get('period_label')})")
+        skipped = facts.get("no_comparison") or []
+        if skipped:
+            lines.append(f"\nNo year-on-year comparison available for {len(skipped)} of "
+                         f"{facts.get('n_total')}: "
+                         + "; ".join(f"{e.get('indicator')} ({e.get('reason')})" for e in skipped)
+                         + ".")
+        return "\n".join(lines)
     if "ranked_indicators" in facts:
         scope = facts.get("scope") or "this group"
         order = "closest to target first" if facts.get("order") == "best_first" \

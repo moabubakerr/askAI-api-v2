@@ -122,6 +122,17 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    and concerning are judgements — report the movement and let it speak. You
    may say a figure rose, fell or was unchanged, because that is what the
    numbers say.
+
+18. For a payload with "increasing" and "declining" (a group split by direction),
+   give the two counts first — "Of the 8 National Indicators, 5 rose and 2 fell
+   compared with a year earlier" — then the members of each group with their
+   change_yoy_percent, actual, unit and period.
+   Report the DIRECTION, not a verdict on it. "polarity" says which way is
+   welcome and it is not the same for every line: a rise in Inflation or in
+   Cost per Student is not an improvement. If you characterise a movement at
+   all, use polarity; if polarity is absent, just say it rose or fell.
+   If "no_comparison" is non-empty, say how many had no year-on-year figure and
+   why. Do not count them as unchanged.
 """
 
 
