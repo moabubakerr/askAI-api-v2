@@ -46,7 +46,7 @@ def answers_in_language(text: str, language: str) -> bool:
 
     Only Arabic is checked, and only for its presence. An Arabic answer
     legitimately contains Latin script — indicator names are reproduced
-    verbatim by design, so "بلغ Real GDP 185.17 billion QAR" is correct — which
+    verbatim by design, so "بلغ Real GDP 185.17 مليار ر.ق" is correct — which
     means a ratio test would reject good answers. What cannot happen is an
     Arabic question answered with no Arabic in it at all.
 

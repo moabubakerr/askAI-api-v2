@@ -12,8 +12,8 @@ This is systematic, not incidental: of the 30 published indicators whose
 Format carries a scale, NONE repeat that scale in unit_en. It is the only
 place the information exists.
 
-  Real GDP                         Format "bn0.0"   Unit "QAR"    -> 185.2 billion QAR
-  Number of International Visitors Format "0.000m"  Unit "Count"  -> 2.297 million
+  Real GDP                         Format "bn0.0"   Unit "QAR"    -> 185.17 Bn QAR
+  Number of International Visitors Format "0.000m"  Unit "Count"  -> 2.297 Mn
   Inflation                        Format "0.0"     Unit "%"      -> 2.6 %
 
 Nothing here changes a stored value. It decides how the same number is written.
@@ -66,7 +66,7 @@ _NO_UNIT = {"na", "n/a", "none", "-", "null", "count", "number"}
 
 
 def _expand_scale_words(unit: str) -> tuple[str, Optional[str]]:
-    """Turns SCAI's abbreviated scale into a word: 'bn QAR' -> ('billion QAR', 'bn').
+    """Normalises the scale in a unit: 'bn QAR' -> ('Bn QAR', 'bn').
 
     Returns the rewritten unit and which scale it already carried, or None.
     Whole tokens only, so 'months' is not read as 'm' and 'M3/MT' is left alone.
@@ -87,7 +87,7 @@ def _expand_scale_words(unit: str) -> tuple[str, Optional[str]]:
 
 
 # The Arabic side of the same three decisions. The catalogue carries unit_ar
-# for every published detail, so an Arabic answer saying "185.17 billion QAR"
+# for every published detail, so an Arabic answer saying "185.17 Bn QAR"
 # was reading a column it did not have to.
 _SCALE_WORDS_AR = {"bn": "مليار", "m": "مليون", "k": "ألف"}
 _NO_UNIT_AR = {"غير متاح", "لا ينطبق", "لا يوجد", "العدد", "عدد", "-"}
@@ -108,12 +108,11 @@ def display_unit(unit_en: Optional[str], format_str: Optional[str],
                   language: str = "en", unit_ar: Optional[str] = None) -> str:
     """The unit as it should appear beside the number, scale included.
 
-    Spelled out and scale-first — "billion QAR", not "QAR bn". Both choices
+    Abbreviated and scale-first — "Bn QAR", not "QAR bn". Both choices
     follow SCAI's own catalogue, where 64 units are written "bn QAR", "m QAR",
-    "m USD", "m MT" with the scale leading, and one is already spelled out in
-    full as "million ton-km". Abbreviating what they spell out, or reordering
-    what they order, would make the same quantity read two different ways
-    depending on which column it happened to come from.
+    "m USD", "m MT" with the scale leading. Reordering what they order, or
+    writing the scale one way here and another there, would make the same
+    quantity read two different ways depending on which column it came from.
     """
     arabic = str(language).lower().startswith("ar")
     # Fall back to English when the Arabic unit is absent, rather than printing
@@ -168,7 +167,7 @@ def trim_decimal(value):
     trim_zeros fixes the text; this fixes the payload, which is what the
     frontend renders into its own tiles. Postgres NUMERIC keeps the scale it
     was stored with, so subtracting two 2-decimal values yields
-    Decimal('3.680000') and the tile printed "+3.680000 billion QAR" beside
+    Decimal('3.680000') and the tile printed "+3.680000 Bn QAR" beside
     prose that correctly said 3.68.
 
     Decimal.normalize() alone is not safe here: it turns Decimal('100') into
