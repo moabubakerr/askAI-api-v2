@@ -191,6 +191,16 @@ _PHRASE_PERIOD = re.compile(
 )
 
 
+# Interrogative openings. Pure noise for matching an indicator NAME, and they
+# matter more now that the whole question is used when the intent agent does
+# not isolate a phrase.
+_PHRASE_QUESTION = re.compile(
+    r"^\s*(what('s| is| was| are| were)?|how (many|much|fast|is|are|did|does)|"
+    r"show( me)?|give me|tell me|list|which|when (was|is)|who)\b[\s,:]*",
+    re.IGNORECASE,
+)
+
+
 def normalize_indicator_phrase(phrase: str) -> str:
     """Strips country and frequency words from the user's phrase before matching.
 
@@ -210,10 +220,15 @@ def normalize_indicator_phrase(phrase: str) -> str:
     Applied only to the query, never to catalogue names — plenty of real
     indicators are named "... in Qatar" and must keep it.
     """
-    cleaned = _PHRASE_PERIOD.sub(" ", phrase or "")
+    cleaned = _PHRASE_QUESTION.sub(" ", (phrase or "").strip())
+    cleaned = _PHRASE_PERIOD.sub(" ", cleaned)
     cleaned = _PHRASE_NOISE.sub(" ", cleaned)
     cleaned = _PHRASE_NOISE_AR.sub(" ", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.-")
+    # Trailing punctuation survives into the phrase once the whole question is
+    # used as the fallback: "What was inflation in May 2025?" reduced to
+    # "inflation ?", and that stray token is compared against every catalogue
+    # name.
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.-?!;:؟")
     # If stripping leaves nothing to match on, the words were the question.
     return cleaned if len(cleaned) >= 3 else (phrase or "").strip()
 

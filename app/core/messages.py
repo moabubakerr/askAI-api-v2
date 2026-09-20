@@ -293,6 +293,17 @@ _MESSAGES = {
                 "حسب الدولة، لذا لا يوجد رقم خاص بـ {countries}. يمكنك أن تسألني عن الإجمالي "
                 "وسأجيبك."),
     },
+    "no_forecast": {
+        "en": ("I don't produce forecasts — I report figures SCAI has already published, "
+                "and the approved data contains no projection for {topic}. What it does "
+                "carry for some indicators is SCAI's own TARGET for a future period, which "
+                "is a policy goal rather than a prediction. Ask for a target, or for the "
+                "latest actual reading, and I can answer either."),
+        "ar": ("لا أقدّم تنبؤات — أعرض الأرقام التي نشرها المجلس، ولا تتضمن البيانات "
+                "المعتمدة أي إسقاط لـ {topic}. ما تتضمنه لبعض المؤشرات هو هدف المجلس "
+                "لفترة مستقبلية، وهو غاية سياسات لا تنبؤ. اسألني عن الهدف أو عن أحدث "
+                "قراءة فعلية وسأجيبك."),
+    },
     "no_overview": {
         "en": "No headline indicators were available to build an overview.",
         "ar": "لا توجد مؤشرات رئيسية متاحة لإعداد نظرة عامة.",

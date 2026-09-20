@@ -254,6 +254,15 @@ def handle_message(user_message: str, conversation_context: str = "",
     indicator_phrase = intent.get("indicator_phrase")
     if not indicator_phrase and intent.get("is_followup") and session_state.get("last_indicator_name"):
         indicator_phrase = session_state["last_indicator_name"]
+    if not indicator_phrase:
+        # The intent agent dropped the field. It happens — that prompt now
+        # carries seventeen computation types and fifteen rules — and when it
+        # did, "What was inflation in May 2025?" was refused with "I couldn't
+        # tell which indicator you're asking about", about a question that
+        # names one plainly. The question itself is always available, and the
+        # phrase normalizer strips the parts that are not the indicator, so
+        # there is no reason to refuse without trying it.
+        indicator_phrase = user_message
 
     # A definition question is answered from catalog text, so a stub with no
     # data points is still a legitimate match. Every other path needs figures.
@@ -294,6 +303,17 @@ def handle_message(user_message: str, conversation_context: str = "",
                         question=user_message)
 
     if resolution.status != "resolved" and resolution.status != "inactive":
+        # "What is the GDP forecast 2026" was refused with "I couldn't find an
+        # indicator matching 'GDP forecast'", which blames the wording. The
+        # wording is fine; the gap is that this system does not forecast and
+        # SCAI publishes none. Say that instead — and point at what the data
+        # does hold, since a future TARGET is often what the asker wants.
+        if _asks_for_forecast(user_message) and resolution.status == "not_found":
+            payload = {"ok": False, "message": msg("no_forecast", language,
+                                                    topic=(indicator_phrase or "").strip()
+                                                          or user_message.strip())}
+            return _finish(payload, language, session_state, [],
+                            question=user_message)
         payload = {"ok": False, "message": resolution.message}
         if resolution.status == "ambiguous" and resolution.candidates:
             names = [c.name_en.strip() for c in resolution.candidates]
@@ -741,6 +761,18 @@ _ASKS_FOR_WRITING = re.compile(
     r"|كتب|مقال|مقالات|رأي|وجهة نظر|موقف|تحليل المجلس",
     re.IGNORECASE,
 )
+
+
+_ASKS_FOR_FORECAST = re.compile(
+    r"\b(forecast|forecasts?ed|projection|projected|predict(ion|ed)?|outlook|"
+    r"expected\s+(to|value|level)|will\s+be|going\s+to\s+be)\b"
+    r"|توقع|توقعات|تنبؤ|إسقاط|المتوقع",
+    re.IGNORECASE,
+)
+
+
+def _asks_for_forecast(text: str) -> bool:
+    return bool(_ASKS_FOR_FORECAST.search(text or ""))
 
 
 def _explicitly_asks_for_writing(text: str) -> bool:
