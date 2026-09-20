@@ -189,6 +189,20 @@ _MESSAGES = {
         "ar": ("\"{indicator}\" لا يحتوي على بيانات {granularity_ar} للفترة {period}. "
                 "البيانات المعتمدة تمتد من {first} إلى {last}."),
     },
+    # Appended when the missing period is in the FUTURE. Asking for 2026 and
+    # being told the data stops at 2025-Q4 is accurate but incomplete: it reads
+    # as a gap that might be filled, when the real answer is that this system
+    # reports published figures and does not project. Without this, the same
+    # user got a forecast explanation for "GDP forecast 2026" and a bare
+    # date-range reply for "GDP growth for 2026" — two different answers to one
+    # underlying limitation.
+    "future_period_suffix": {
+        "en": (" That period is in the future: I report published figures and don't "
+                "forecast. Where SCAI has set a TARGET for a future period I can give "
+                "that instead — it's a policy goal, not a prediction."),
+        "ar": (" هذه الفترة مستقبلية: أعرض الأرقام المنشورة ولا أقدّم تنبؤات. وإذا كان "
+                "المجلس قد حدد هدفاً لفترة مستقبلية يمكنني عرضه — وهو غاية سياسات لا تنبؤ."),
+    },
     "no_data_at_all": {
         "en": "\"{indicator}\" has no data points in the approved dataset.",
         "ar": "\"{indicator}\" لا يحتوي على أي نقاط بيانات في مجموعة البيانات المعتمدة.",

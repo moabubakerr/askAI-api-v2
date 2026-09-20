@@ -634,11 +634,18 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
     if not rows and (period.start_date or period.end_date):
         available = retriever.get_series(match.indicator_detail_id, published_detail_id, granularity)
         if available:
-            return {"ok": False, "message": msg(
-                "no_data_for_period", language, indicator=indicator_name.strip(),
-                granularity=granularity, period=period.raw or "that period",
-                first=available[0]["period_label"], last=available[-1]["period_label"],
-            )}, []
+            message = msg("no_data_for_period", language,
+                           indicator=indicator_name.strip(), granularity=granularity,
+                           period=period.raw or "that period",
+                           first=available[0]["period_label"],
+                           last=available[-1]["period_label"])
+            # One limitation, one explanation, however the question was worded.
+            latest_dated = max((r["period_date"] for r in available if r.get("period_date")),
+                                default=None)
+            asked_start = period.start_date
+            if (latest_dated and asked_start and asked_start > latest_dated) or                _asks_for_forecast(user_message):
+                message += msg("future_period_suffix", language)
+            return {"ok": False, "message": message}, []
 
     if ctype == "latest_value":
         result = compute.latest_value(rows)

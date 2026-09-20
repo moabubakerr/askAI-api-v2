@@ -201,6 +201,66 @@ _PHRASE_QUESTION = re.compile(
 )
 
 
+# Everyday vocabulary that no embedding reliably connects to the catalogue's
+# own wording. Measured against the real model, "How fast are prices rising"
+# ranks Inflation FIRST — the definition embedding got the ranking right — but
+# at 0.457, far below any threshold that also refuses "number of penguins in
+# Qatar" at 0.602. Ranking is not the problem; absolute similarity is, and no
+# cutoff fixes it.
+#
+# Each entry is an extra PHRASING of the question, not an answer: the aliased
+# form is scored alongside the user's own words and still has to clear
+# MIN_CONFIDENCE, survive the contradiction check and win its tie. So a wrong
+# alias cannot force a wrong answer, it can only offer a candidate.
+#
+# Every target below was checked to exist, be published, and have data. This
+# table is editorial and belongs with SCAI: it encodes which everyday term maps
+# to which published metric, which is their judgement to make, not the model's.
+INDICATOR_ALIASES = {
+    "prices": "Inflation",
+    "price level": "Inflation",
+    "cost of living": "Inflation",
+    "inflation rate": "Inflation",
+    "how fast prices are rising": "Inflation",
+    "الأسعار": "Inflation",
+    "غلاء المعيشة": "Inflation",
+
+    "economic output": "Real GDP",
+    "economic growth": "Real GDP",
+    "size of the economy": "Real GDP",
+    "gdp": "Real GDP",
+    "الناتج المحلي": "Real GDP",
+
+    "non-oil economy": "Non-Hydrocarbon Real GDP",
+    "non-hydrocarbon economy": "Non-Hydrocarbon Real GDP",
+
+    "tourists": "Number of International Visitors",
+    "tourist arrivals": "Number of International Visitors",
+    "visitors": "Number of International Visitors",
+    "السياح": "Number of International Visitors",
+    "الزوار": "Number of International Visitors",
+
+    "trade surplus": "Trade Balance (Goods & Services)",
+    "trade deficit": "Trade Balance (Goods & Services)",
+    "trade balance": "Trade Balance (Goods & Services)",
+    "الميزان التجاري": "Trade Balance (Goods & Services)",
+
+    "government income": "Government Revenues",
+    "state revenues": "Government Revenues",
+    "إيرادات الحكومة": "Government Revenues",
+}
+
+
+def alias_forms(phrase: str) -> list:
+    """Catalogue names implied by everyday wording in the phrase."""
+    text = (phrase or "").lower()
+    hits = []
+    for term, target in INDICATOR_ALIASES.items():
+        if term in text and target not in hits:
+            hits.append(target)
+    return hits
+
+
 def normalize_indicator_phrase(phrase: str) -> str:
     """Strips country and frequency words from the user's phrase before matching.
 
@@ -341,6 +401,9 @@ def resolve_indicator(phrase: str, require_data: bool = True,
     # costs nothing and keeps the gain.
     original_phrase = (phrase or "").strip()
     phrases = [match_phrase] if match_phrase == original_phrase else [match_phrase, original_phrase]
+    # Everyday wording gets the catalogue's own name added as a further form to
+    # score. It competes; it does not decide.
+    phrases += [a for a in alias_forms(phrase) if a not in phrases]
 
     # Each entry is embedded as its NAME plus the opening of its definition.
     # The name alone carries no synonym: nothing in "Number of International
