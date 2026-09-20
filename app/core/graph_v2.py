@@ -296,10 +296,34 @@ def handle_message(user_message: str, conversation_context: str = "",
     # offered "Real GDP" as a query form, that scored near 1.0, and a
     # three-metric question was answered about one indicator with the other two
     # reported as unavailable — while asking for each separately worked.
+    # Resolved BEFORE the multi-metric split, not after: the snapshot needs it.
+    # "Show GDP growth, inflation, and government revenues for the year 2023"
+    # returned each indicator's latest reading — 2025-Q4, 2026-04, 2026-Q1 —
+    # because the period was parsed forty lines further down, long after the
+    # snapshot had already answered. Asking for any one of the three on its own
+    # honoured 2023 correctly, which is what made the omission visible.
+    period = parse_period_expression(intent.get("period_expression"))
+    if period.kind == "unspecified":
+        # The model dropped the period. Read it from the question instead.
+        #
+        # This produced the worst failure yet: "What was inflation in May
+        # 2025?" came back "There is no approved data for inflation in May
+        # 2025" alongside April 2026's figure, while the identical question
+        # without its opening words returned 0.08365% for May 2025. The data
+        # was there the whole time; the filter was simply never applied, so the
+        # series ran to its end and the newest row was reported.
+        #
+        # Same shape as the indicator_phrase fallback: the question always
+        # carries what the model may or may not have extracted, and the parser
+        # is deterministic, so there is no reason to depend on the extraction.
+        from_message = parse_period_expression(user_message)
+        if from_message.kind != "unspecified":
+            period = from_message
+            session_state["last_period_expression"] = user_message
     if ctype != "definition" and not resembles_catalogue_name(indicator_phrase or ""):
         parts = split_indicator_phrases(indicator_phrase or "")
         if len(parts) > 1:
-            payload, citations = _indicator_snapshot(parts, language)
+            payload, citations = _indicator_snapshot(parts, language, period)
             if payload.get("ok") and len(payload["facts"]["overview"]) > 1:
                 if wants_chart(user_message, "macro_overview"):
                     payload["chart"] = build_chart_spec("macro_overview", payload["facts"],
@@ -483,24 +507,6 @@ def handle_message(user_message: str, conversation_context: str = "",
         return _finish(payload, language, session_state, [],
                         question=user_message)
 
-    period = parse_period_expression(intent.get("period_expression"))
-    if period.kind == "unspecified":
-        # The model dropped the period. Read it from the question instead.
-        #
-        # This produced the worst failure yet: "What was inflation in May
-        # 2025?" came back "There is no approved data for inflation in May
-        # 2025" alongside April 2026's figure, while the identical question
-        # without its opening words returned 0.08365% for May 2025. The data
-        # was there the whole time; the filter was simply never applied, so the
-        # series ran to its end and the newest row was reported.
-        #
-        # Same shape as the indicator_phrase fallback: the question always
-        # carries what the model may or may not have extracted, and the parser
-        # is deterministic, so there is no reason to depend on the extraction.
-        from_message = parse_period_expression(user_message)
-        if from_message.kind != "unspecified":
-            period = from_message
-            session_state["last_period_expression"] = user_message
     countries_res = resolve_countries(intent.get("countries_mentioned", []), intent.get("country_group_mentioned"))
 
     payload, citations = _dispatch_computation(ctype, intent, match, published_detail_id, granularity,
@@ -1086,7 +1092,7 @@ def _asks_for_growth(phrase: str) -> bool:
                           re.IGNORECASE))
 
 
-def _indicator_snapshot(phrases: list[str], language: str = "en"):
+def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
     """One latest reading per named indicator, each with its OWN period.
 
     Different indicators report on different schedules, so a snapshot that
@@ -1108,9 +1114,18 @@ def _indicator_snapshot(phrases: list[str], language: str = "en"):
         if not gran:
             missing.append(phrase)
             continue
-        rows = retriever.get_series(match.indicator_detail_id, published_id, gran)
+        # Honour the period the question asked for. Each indicator is then read
+        # at ITS latest reading WITHIN that window, which is why a 2023 question
+        # yields 2023-Q4 for a quarterly series and 2023-12 for a monthly one.
+        rows = retriever.get_series(match.indicator_detail_id, published_id, gran,
+                                     start_date=getattr(period, "start_date", None),
+                                     end_date=getattr(period, "end_date", None))
+        if period is not None:
+            rows = _apply_last_n_years(rows, period)
         latest = compute.latest_value(rows)
         if not latest.ok:
+            # Named, resolved, but nothing in the window asked for — distinct
+            # from "no such indicator", and reported separately below.
             missing.append(phrase)
             continue
         row = _find_row_by_period(rows, latest.facts.get("period_label"))
@@ -1131,6 +1146,13 @@ def _indicator_snapshot(phrases: list[str], language: str = "en"):
         facts.append(entry)
 
     if not facts:
+        # A period was asked for and nothing falls inside it — that is a
+        # different answer from "no headline indicators exist", which is what
+        # the overview message says.
+        asked_period = getattr(period, "raw", None)
+        if asked_period:
+            return {"ok": False, "message": msg("none_in_period", language,
+                                                 period=asked_period)}, []
         return {"ok": False, "message": msg("no_overview", language)}, []
     payload = {"ok": True, "facts": {"overview": facts}}
     if missing:

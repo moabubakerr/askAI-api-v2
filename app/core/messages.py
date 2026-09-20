@@ -156,14 +156,12 @@ _MESSAGES = {
     # the user unable to tell whether they misnamed the indicator, asked for a
     # period that isn't covered, or hit a genuine gap.
     "indicator_not_found": {
-        "en": ("No indicator in SCAI's approved data matches \"{phrase}\", and I'd rather say "
-                "so than answer with a near-miss.\n\n"
+        "en": ("No indicator in SCAI's approved data matches \"{phrase}\".\n\n"
                 "Two things that usually help:\n"
                 "• name the metric more plainly — \"inflation\", \"Real GDP\", "
                 "\"trade balance\", \"government revenues\"\n"
                 "• or ask \"what can you do?\" for the full list of what's published"),
-        "ar": ("لا يوجد مؤشر في بيانات المجلس المعتمدة يطابق \"{phrase}\"، وأفضّل أن أقول ذلك "
-                "بدلاً من الإجابة بمؤشر قريب.\n\n"
+        "ar": ("لا يوجد مؤشر في بيانات المجلس المعتمدة يطابق \"{phrase}\"\n\n"
                 "عادةً ما يساعد أحد أمرين:\n"
                 "• اذكر اسم المؤشر بصيغة أبسط — \"التضخم\"، \"الناتج المحلي الإجمالي الحقيقي\"، "
                 "\"الميزان التجاري\"، \"الإيرادات الحكومية\"\n"
@@ -327,6 +325,13 @@ _MESSAGES = {
                 "المعتمدة أي إسقاط لـ {topic}. ما تتضمنه لبعض المؤشرات هو هدف المجلس "
                 "لفترة مستقبلية، وهو غاية سياسات لا تنبؤ. اسألني عن الهدف أو عن أحدث "
                 "قراءة فعلية وسأجيبك."),
+    },
+    "none_in_period": {
+        "en": ("None of the indicators you asked for have approved data for {period}. "
+                "Try a period closer to the present, or ask for one of them on its own "
+                "and I'll tell you the range it covers."),
+        "ar": ("لا يوجد لدى أي من المؤشرات التي طلبتها بيانات معتمدة للفترة {period}. "
+                "جرّب فترة أقرب إلى الحاضر، أو اسأل عن أحدها بمفرده وسأخبرك بالمدى الذي يغطيه."),
     },
     "no_overview": {
         "en": "No headline indicators were available to build an overview.",
