@@ -205,3 +205,63 @@ def choose_granularity(explicit: Optional[str], available_granularities: set[str
         if g in available_granularities:
             return g
     return None
+
+
+def year_earlier_label(period_label: Optional[str]) -> Optional[str]:
+    """'2025-Q4' -> '2024-Q4', '2026-04' -> '2025-04', '2025' -> '2024'.
+
+    Built by subtracting from the label rather than by stepping back four rows
+    in the series, because a series with a gap in it would make "four rows
+    back" a different quarter with nothing in the output to show it happened.
+    """
+    if not period_label:
+        return None
+    match = re.match(r"^(\d{4})(.*)$", str(period_label).strip())
+    if not match:
+        return None
+    return f"{int(match.group(1)) - 1}{match.group(2)}"
+
+
+# Relative comparisons, which carry no year to match on. "this year and the
+# year before it" named no period the token scanner could see, so it was
+# answered "I need two specific periods to compare" — asking the user to
+# restate, in the system's vocabulary, something they had already said clearly.
+_REL_PREV_YEAR = re.compile(
+    r"\b(this|current|latest)\s+(year|quarter|month)\b.{0,30}?\b(year|one)\s+before\b"
+    r"|\b(compared|versus|vs\.?|against)\b.{0,20}?\b(the\s+)?(previous|prior|last|preceding)\s+year\b"
+    r"|\byear[\s-]on[\s-]year\b|\byear[\s-]over[\s-]year\b|\byoy\b"
+    r"|\b(this|current)\s+year\s+(and|vs\.?|versus|against)\s+(the\s+)?(previous|prior|last)\s+year\b"
+    r"|مقارنة\s*ب?العام\s*(الماضي|السابق)|على\s*أساس\s*سنوي",
+    re.IGNORECASE)
+
+_REL_PREV_TWO = re.compile(
+    r"\b(last|previous|prior)\s+year\b.{0,30}?\bthe\s+year\s+before\s+(that|it)\b",
+    re.IGNORECASE)
+
+_REL_PREV_PERIOD = re.compile(
+    r"\b(this|current|latest)\s+(quarter|month)\b.{0,30}?\b(previous|prior|last|preceding|one\s+before)\b"
+    r"|\b(compared|versus|vs\.?|against)\b.{0,20}?\b(the\s+)?(previous|prior|preceding)\s+(quarter|month|period)\b"
+    r"|\bquarter[\s-]on[\s-]quarter\b|\bqoq\b|\bmonth[\s-]on[\s-]month\b|\bmom\b",
+    re.IGNORECASE)
+
+
+def parse_relative_pair(expr: Optional[str]) -> Optional[str]:
+    """Names a comparison the user expressed relative to now, not by date.
+
+    Returns "prev_year", "prev_two_years" or "prev_period" — a description of
+    WHICH two readings, to be resolved against the series that is actually
+    available. Resolving it here against the calendar instead would ask for
+    2026 on an indicator whose latest yearly reading is 2023, and report that
+    as missing data when the user's question was answerable all along.
+    """
+    if not expr:
+        return None
+    # Checked first: "last year and the year before that" also matches the
+    # prev_year pattern, and the more specific reading is the right one.
+    if _REL_PREV_TWO.search(expr):
+        return "prev_two_years"
+    if _REL_PREV_PERIOD.search(expr):
+        return "prev_period"
+    if _REL_PREV_YEAR.search(expr):
+        return "prev_year"
+    return None

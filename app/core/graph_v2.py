@@ -29,7 +29,8 @@ from app.resolvers.indicator_resolver import (resolve_indicator, has_usable_defi
                                                resembles_catalogue_name, has_identifying_content)
 from app.resolvers.country_resolver import resolve_countries
 from app.resolvers.period_resolver import (parse_period_expression, parse_explicit_frequency,
-                                            choose_granularity, parse_period_pair)
+                                            choose_granularity, parse_period_pair,
+                                            parse_relative_pair, year_earlier_label)
 from app.db import retriever
 from app.compute import engine as compute
 from app.compute.verifier import verify_numbers, render_template_fallback
@@ -843,12 +844,34 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         # of the period parser — so "between Q1 2025 and Q4 2025" returned one
         # row and the answer was "could not find two distinct periods".
         pair = parse_period_pair(period.raw)
-        if pair:
-            label_a, label_b = pair
-            # Re-fetch unfiltered: both named periods have to be present, and
-            # the earlier query was scoped to just one of them.
+        # A comparison stated relative to now — "this year and the year before
+        # it", "compared with the previous year" — names no date for the token
+        # scanner to find, so it was answered "I need two specific periods to
+        # compare", asking the user to restate in the system's vocabulary
+        # something they had already said clearly.
+        relative = None if pair else parse_relative_pair(period.raw or user_message)
+        if relative:
             rows = retriever.get_series(match.indicator_detail_id, published_detail_id,
                                          granularity, country_en=single_country)
+            actuals = [r for r in rows if r.get("actual") is not None]
+            if len(actuals) >= 2:
+                if relative == "prev_period":
+                    # The reading immediately before the latest, whatever the
+                    # series' own spacing is.
+                    label_b, label_a = actuals[-1]["period_label"], actuals[-2]["period_label"]
+                else:
+                    anchor = actuals[-1]["period_label"]
+                    if relative == "prev_two_years":
+                        anchor = year_earlier_label(anchor)
+                    label_b, label_a = anchor, year_earlier_label(anchor)
+                pair = (label_a, label_b)
+        if pair:
+            label_a, label_b = pair
+            if not relative:
+                # Re-fetch unfiltered: both named periods have to be present,
+                # and the earlier query was scoped to just one of them.
+                rows = retriever.get_series(match.indicator_detail_id, published_detail_id,
+                                             granularity, country_en=single_country)
         elif len(rows) >= 2:
             label_a, label_b = rows[0]["period_label"], rows[-1]["period_label"]
         else:
@@ -1308,23 +1331,6 @@ def _asks_for_growth(phrase: str) -> bool:
                           re.IGNORECASE))
 
 
-def _year_earlier_label(period_label: Optional[str]) -> Optional[str]:
-    """'2025-Q4' -> '2024-Q4', '2026-04' -> '2025-04', '2025' -> '2024'.
-
-    The label the YoY change was measured against. Built by subtracting from
-    the label rather than by index arithmetic on the series, because a series
-    with a gap in it would make "four rows back" the wrong row and there would
-    be nothing in the output to show that it had happened.
-    """
-    if not period_label:
-        return None
-    label = str(period_label).strip()
-    match = re.match(r"^(\d{4})(.*)$", label)
-    if not match:
-        return None
-    return f"{int(match.group(1)) - 1}{match.group(2)}"
-
-
 def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
     """One latest reading per named indicator, each with its OWN period.
 
@@ -1375,7 +1381,7 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
             # is a claim the reader has to take on trust; the pair of values is
             # the evidence for it, and it is what "show me before and after"
             # asks for.
-            prior = _find_row_by_period(rows, _year_earlier_label(
+            prior = _find_row_by_period(rows, year_earlier_label(
                 latest.facts.get("period_label")))
             if prior and prior.get("actual") is not None:
                 entry["previous_period"] = prior["period_label"]
