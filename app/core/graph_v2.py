@@ -725,7 +725,24 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
                                  _find_row_by_period(rows, result.facts.get("period_b"))) if r]
         return _wrap(result, unit, indicator_name=indicator_name), citations_for_rows(used, indicator_name, data_source_en)
 
-    return {"ok": False, "message": "I couldn't determine what computation this question needs."}, []
+    # Anything that reached here named an indicator, resolved it, and has rows.
+    # Refusing at this point blames the user for the routing taxonomy — and
+    # "I couldn't determine what computation this question needs" is internal
+    # vocabulary that means nothing to a reader.
+    #
+    # It was reachable: "multi_indicator" is a real computation_type that is
+    # handled only when the phrase splits into two or more metrics that both
+    # resolve. "What was inflation in May 2025?" was classified as one, did not
+    # split, and fell through — while the same question without the opening
+    # words was answered fine. The latest value is the sensible default for a
+    # question about an indicator and a period.
+    result = compute.latest_value(rows)
+    used = []
+    if result.ok:
+        row = _find_row_by_period(rows, result.facts.get("period_label"))
+        used = [row] if row else []
+    return (_wrap(result, unit, indicator_name=indicator_name),
+            citations_for_rows(used, indicator_name, data_source_en))
 
 
 def _apply_last_n_years(rows: list[dict], period) -> list[dict]:
