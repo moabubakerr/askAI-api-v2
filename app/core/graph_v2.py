@@ -907,6 +907,22 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         rows = retriever.get_series(match.indicator_detail_id, published_detail_id,
                                      granularity, country_en=single_country)
         latest = compute.latest_value(rows)
+        # A figure quoted in the question may not be a wrong premise at all —
+        # it may BE one of this indicator's readings, and so name the period
+        # the question is about. "...account for 33.41532% of total exports..."
+        # is Non-Hydrocarbon Exports in 2023-Q2 to six decimals; answering it
+        # about Q4 2025 and calling 33.41532 a mistake gets both halves wrong.
+        #
+        # Only an exact match at the quoted precision, and only when exactly
+        # one reading matches — otherwise the figure identifies nothing and the
+        # latest reading stands, with the disagreement reported as before.
+        anchored = _row_matching_quoted_value(rows, user_message)             if not (period.start_date or period.end_date) else None
+        if anchored:
+            latest = compute.ComputeResult(True, facts={
+                "period_label": anchored["period_label"],
+                "actual": anchored["actual"],
+                "target": anchored.get("target"),
+            })
         result = compute.complement_of_share(
             latest.facts.get("actual") if latest.ok else None,
             indicator_name, user_message)
@@ -1765,6 +1781,28 @@ def _disambiguate_by_asked_unit(candidates, user_message: str):
     amounts = [c for c in candidates if (c.unit_en or "").strip() != "%"]
     wanted = amounts if wants_amount else shares
     return wanted[0] if len(wanted) == 1 else None
+
+
+def _row_matching_quoted_value(rows, user_message: str):
+    """The reading a quoted figure names, when it names exactly one.
+
+    The counterpart of _disambiguate_by_quoted_value, which uses a quoted
+    figure to pick an INDICATOR. This uses one to pick a PERIOD: a reader
+    quoting 33.41532% is quoting a specific row, not proposing a hypothesis.
+
+    Matched at the precision written, so "38.6%" matches 38.589 and "33%"
+    matches nothing in particular — it would match several rows and is
+    therefore ignored.
+    """
+    quoted = [m for m in _QUOTED_FIGURE.findall(user_message or "")]
+    actuals = [r for r in rows if r.get("actual") is not None]
+    for text in quoted:
+        value = float(text)
+        places = len(text.split(".")[1]) if "." in text else 0
+        hits = [r for r in actuals if round(float(r["actual"]), places) == value]
+        if len(hits) == 1:
+            return hits[0]
+    return None
 
 
 def _disambiguate_by_quoted_value(candidates, user_message: str):
