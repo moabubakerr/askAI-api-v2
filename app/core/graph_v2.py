@@ -36,6 +36,7 @@ from app.compute.verifier import verify_numbers, render_template_fallback
 from app.compute.citations import Citation, citations_for_rows, render_sources_footer, citations_to_dicts
 from app.compute.chart_builder import build_chart_spec
 from app.compute.chart_request import wants_chart
+from app.compute.formatting import display_unit, decimals_from_format
 from app.agents.composer_agent import compose_answer
 from app.agents.article_agent import answer_from_articles
 from app.resolvers.embeddings import get_embedding
@@ -545,7 +546,11 @@ def handle_message(user_message: str, conversation_context: str = "",
 
 def _dispatch_computation(ctype, intent, match, published_detail_id, granularity, period,
                            countries_res, language="en"):
-    unit = match.unit_en or ""
+    # Unit AND scale, both of which live in the catalogue: unit_en says "QAR",
+    # Format says "bn0.0". Reading only the first printed "185.17 QAR" beside
+    # prose that said "QAR 185.2 billion".
+    unit = display_unit(match.unit_en, match.format)
+    decimals = decimals_from_format(match.format)
     indicator_name = match.name_en
     data_source_en = match.data_source_en
 
@@ -654,7 +659,7 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
                 if row:
                     citations.append(Citation(indicator_name, data_source_en, row.get("source_table", "unknown"),
                                                row.get("record_id"), row.get("period_label"), entry["country"]))
-        return _wrap(result, unit, extra_note=note, indicator_name=indicator_name), citations
+        return _wrap(result, unit, extra_note=note, indicator_name=indicator_name, decimals=decimals), citations
 
     rows = retriever.get_series(match.indicator_detail_id, published_detail_id, granularity,
                                  start_date=period.start_date, end_date=period.end_date,
@@ -701,7 +706,7 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         if result.ok:
             row = _find_row_by_period(rows, result.facts.get("period_label"))
             used = [row] if row else []
-        return _wrap(result, unit, indicator_name=indicator_name), citations_for_rows(used, indicator_name, data_source_en)
+        return _wrap(result, unit, indicator_name=indicator_name, decimals=decimals), citations_for_rows(used, indicator_name, data_source_en)
 
     if ctype == "period_ranking":
         # extremum "min" means lowest-first; anything else (including the usual
@@ -710,18 +715,18 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         result = compute.period_ranking(rows, descending=descending)
         # Cite every row that appears in the ranking, not just the winner —
         # each listed figure is a claim of its own.
-        return _wrap(result, unit, indicator_name=indicator_name), citations_for_rows(rows, indicator_name, data_source_en)
+        return _wrap(result, unit, indicator_name=indicator_name, decimals=decimals), citations_for_rows(rows, indicator_name, data_source_en)
 
     if ctype == "trend":
         result = compute.trend(rows)
-        return _wrap(result, unit, indicator_name=indicator_name), citations_for_rows(rows, indicator_name, data_source_en)
+        return _wrap(result, unit, indicator_name=indicator_name, decimals=decimals), citations_for_rows(rows, indicator_name, data_source_en)
 
     if ctype == "min_max":
         which = intent.get("extremum") or "max"
         result = compute.min_max(rows, which)
         used = [_find_row_by_period(rows, result.facts.get("period_label"))] if result.ok else []
         used = [r for r in used if r]
-        return _wrap(result, unit, indicator_name=indicator_name), citations_for_rows(used, indicator_name, data_source_en)
+        return _wrap(result, unit, indicator_name=indicator_name, decimals=decimals), citations_for_rows(used, indicator_name, data_source_en)
 
     if ctype == "difference":
         result = compute.difference(rows)
@@ -729,7 +734,7 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         if result.ok:
             used = [r for r in (_find_row_by_period(rows, result.facts.get("high_period")),
                                  _find_row_by_period(rows, result.facts.get("low_period"))) if r]
-        return _wrap(result, unit, indicator_name=indicator_name), citations_for_rows(used, indicator_name, data_source_en)
+        return _wrap(result, unit, indicator_name=indicator_name, decimals=decimals), citations_for_rows(used, indicator_name, data_source_en)
 
     if ctype == "growth_rate":
         if len(rows) < 2:
@@ -741,7 +746,7 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         if result.ok:
             used = [r for r in (_find_row_by_period(rows, result.facts.get("period_start")),
                                  _find_row_by_period(rows, result.facts.get("period_end"))) if r]
-        return _wrap(result, unit, indicator_name=indicator_name), citations_for_rows(used, indicator_name, data_source_en)
+        return _wrap(result, unit, indicator_name=indicator_name, decimals=decimals), citations_for_rows(used, indicator_name, data_source_en)
 
     if ctype == "period_comparison":
         # Use the two periods the user actually named. Previously this took the
@@ -766,7 +771,7 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         if result.ok:
             used = [r for r in (_find_row_by_period(rows, result.facts.get("period_a")),
                                  _find_row_by_period(rows, result.facts.get("period_b"))) if r]
-        return _wrap(result, unit, indicator_name=indicator_name), citations_for_rows(used, indicator_name, data_source_en)
+        return _wrap(result, unit, indicator_name=indicator_name, decimals=decimals), citations_for_rows(used, indicator_name, data_source_en)
 
     # Anything that reached here named an indicator, resolved it, and has rows.
     # Refusing at this point blames the user for the routing taxonomy — and
@@ -784,7 +789,7 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
     if result.ok:
         row = _find_row_by_period(rows, result.facts.get("period_label"))
         used = [row] if row else []
-    return (_wrap(result, unit, indicator_name=indicator_name),
+    return (_wrap(result, unit, indicator_name=indicator_name, decimals=decimals),
             citations_for_rows(used, indicator_name, data_source_en))
 
 
@@ -1071,7 +1076,7 @@ def _latest_common_period(series_by_country: dict[str, list[dict]]) -> Optional[
 
 
 def _wrap(result: compute.ComputeResult, unit: str, extra_note: Optional[str] = None,
-          indicator_name: Optional[str] = None) -> dict:
+          indicator_name: Optional[str] = None, decimals: Optional[int] = None) -> dict:
     payload = {"ok": result.ok, "facts": {**result.facts, "unit": unit}} if result.ok else \
               {"ok": False, "message": result.message}
     # Name the indicator in every successful payload. Without it the Composer
@@ -1081,6 +1086,10 @@ def _wrap(result: compute.ComputeResult, unit: str, extra_note: Optional[str] = 
     # answer text never said which indicator it used.
     if payload.get("ok") and indicator_name:
         payload["facts"]["indicator"] = indicator_name.strip()
+    # How many decimals SCAI specifies for this indicator, so the frontend and
+    # the Composer round the same way instead of each choosing.
+    if payload.get("ok") and decimals is not None:
+        payload["facts"]["decimal_places"] = decimals
     if extra_note and payload.get("ok"):
         payload["facts"]["note"] = extra_note
     return payload
@@ -1144,7 +1153,9 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
             missing.append(phrase)
             continue
         row = _find_row_by_period(rows, latest.facts.get("period_label"))
-        entry = {"indicator": match.name_en.strip(), "unit": match.unit_en,
+        entry = {"indicator": match.name_en.strip(),
+                 "unit": display_unit(match.unit_en, match.format),
+                 "decimal_places": decimals_from_format(match.format),
                  "granularity": gran, "asked_as": phrase, **latest.facts}
         # SCAI's own vetted period-on-period change, never a fresh derivation
         # (F-022..F-026). Carried on every line so "GDP growth" can be answered

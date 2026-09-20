@@ -1,3 +1,5 @@
+from app.compute.formatting import decimals_from_format
+
 """
 Chart Builder — turns already-computed facts into a chart spec, with no
 LLM call anywhere in this file. Two things this fixes directly from the
@@ -31,6 +33,12 @@ CHART_TYPE_BY_COMPUTATION = {
 
 
 def _decimal_places_from_format(format_str: Optional[str]) -> int:
+    """Delegates to the shared helper — the chart and the prose beside it were
+    each deciding their own precision."""
+    return decimals_from_format(format_str)
+
+
+def _unused_decimal_places_from_format(format_str: Optional[str]) -> int:
     """SCAI's own `Format` field (e.g. '0.00', 'bn0.0', '0') encodes decimal
     places — read it instead of guessing or letting the LLM pick a
     precision, which is exactly what caused F-004."""
@@ -51,6 +59,8 @@ def build_chart_spec(computation_type: str, facts: dict, indicator_name: str,
     base = {
         "chart_type": chart_type,
         "title": indicator_name,
+        # Scale included, as in the text answer: a chart axis labelled "QAR"
+        # for values SCAI publishes in billions understates them by 10^9.
         "unit": unit or "",
         "decimal_places": decimals,
     }
