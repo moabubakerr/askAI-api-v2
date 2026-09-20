@@ -159,6 +159,13 @@ def handle_message(user_message: str, conversation_context: str = "",
     # for the same reason and checked BEFORE count_list, because the phrasings
     # overlap ("what are the top performing indicators" is both a list request
     # and a ranking) and the ranking is the more specific reading.
+    # "Is Qatar's economy growing?" was sent to indicator resolution and refused
+    # with "name the metric more plainly" — asking the user to already know the
+    # catalogue in order to ask the most natural question there is about an
+    # economy. It is the same question as "how is Qatar's economy doing", which
+    # already worked, and the difference between them was one word.
+    elif _asks_about_the_economy(user_message):
+        ctype = "macro_overview"
     elif _asks_for_performance_ranking(user_message):
         ctype = "scope_performance"
     elif _looks_like_catalog_request(user_message):
@@ -1128,6 +1135,44 @@ def _asks_for_worst(text: str) -> bool:
     return bool(text and _WORST_FIRST.search(text))
 
 
+# The economy as a whole, rather than any one indicator in it. Deliberately
+# narrow: it requires the word itself, so "how is the education sector doing"
+# and "how are prices doing" keep their own routes.
+# The Arabic stem is matched bare, with no word boundary and no definite
+# article: \b does not behave on Arabic script, and requiring "ال" missed
+# "هل ينمو اقتصاد قطر؟" while matching "الاقتصاد القطري". The stem covers both,
+# plus the adjective اقتصادي.
+_ECONOMY_WORD = re.compile(r"\becon(omy|omic)\b|اقتصاد", re.IGNORECASE)
+_ECONOMY_STATE = re.compile(
+    r"\b(doing|going|growing|grow|growth|shrink\w*|contract\w*|expand\w*|"
+    r"perform\w*|preform\w*|health\w*|healthy|strong|weak|state|situation|"
+    r"outlook|condition|overview|snapshot|shape|fine|ok|okay|well|recover\w*)\b"
+    r"|\bhow\s+is\b|\bhow'?s\b"
+    r"|ينمو|نمو|كيف|وضع|حال|أداء",
+    re.IGNORECASE)
+
+
+def _asks_about_the_economy(text: str) -> bool:
+    """A question about the economy overall, which is the macro snapshot.
+
+    "How is Qatar's economy doing right now?" already worked. "Is Qatar's
+    economy growing?" did not — it went to indicator resolution and was told to
+    "name the metric more plainly", which asks the user to know the catalogue
+    before they are allowed to ask the most natural question there is. Both
+    halves are required so that a question naming a real indicator still goes
+    to that indicator: "what is economic growth" is one word away, and belongs
+    with Real GDP.
+    """
+    if not text or not _ECONOMY_WORD.search(text):
+        return False
+    if not _ECONOMY_STATE.search(text):
+        return False
+    # A question that also names a sector or an indicator type is about that
+    # group, not about the economy at large.
+    kind, _ = _match_catalog_scope(text)
+    return kind is None
+
+
 def _match_catalog_scope(phrase: str):
     """Maps a question fragment onto a real indicator type or sector name.
 
@@ -1222,6 +1267,23 @@ def _asks_for_growth(phrase: str) -> bool:
                           re.IGNORECASE))
 
 
+def _year_earlier_label(period_label: Optional[str]) -> Optional[str]:
+    """'2025-Q4' -> '2024-Q4', '2026-04' -> '2025-04', '2025' -> '2024'.
+
+    The label the YoY change was measured against. Built by subtracting from
+    the label rather than by index arithmetic on the series, because a series
+    with a gap in it would make "four rows back" the wrong row and there would
+    be nothing in the output to show that it had happened.
+    """
+    if not period_label:
+        return None
+    label = str(period_label).strip()
+    match = re.match(r"^(\d{4})(.*)$", label)
+    if not match:
+        return None
+    return f"{int(match.group(1)) - 1}{match.group(2)}"
+
+
 def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
     """One latest reading per named indicator, each with its OWN period.
 
@@ -1267,6 +1329,17 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
         # (F-022..F-026). Carried on every line so "GDP growth" can be answered
         # as a growth rate rather than a level.
         if row:
+            # The reading a year earlier, so the answer can show what the
+            # figure moved FROM. A percentage on its own ("Real GDP grew 2.1%")
+            # is a claim the reader has to take on trust; the pair of values is
+            # the evidence for it, and it is what "show me before and after"
+            # asks for.
+            prior = _find_row_by_period(rows, _year_earlier_label(
+                latest.facts.get("period_label")))
+            if prior and prior.get("actual") is not None:
+                entry["previous_period"] = prior["period_label"]
+                entry["previous_value"] = prior["actual"]
+                citations += citations_for_rows([prior], match.name_en, match.data_source_en)
             change = compute.preferred_change_field(row, gran)
             if change is not None:
                 # SCAI's stored figure carries full float noise
@@ -1294,34 +1367,33 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
     return payload, citations
 
 
+# The standard macro snapshot. An editorial list — refine it once SCAI says
+# which indicators they want surfaced as the headline set.
+HEADLINE_NAMES = ["Real GDP", "Inflation", "Trade Balance", "Government Revenues"]
+
+
 def _macro_overview(language="en"):
-    """Fixes F-007/F-018: a deterministic curated overview instead of
-    silently falling back to a single indicator. HEADLINE_NAMES is an
-    editorial list — refine it once you know which indicators SCAI wants
-    surfaced as the standard macro snapshot."""
-    HEADLINE_NAMES = ["Real GDP", "Inflation", "Trade Balance", "Government Revenues"]
-    facts, citations = [], []
-    for name in HEADLINE_NAMES:
-        res = resolve_indicator(name)
-        if res.status != "resolved":
-            continue
-        # Same distinction as in handle_message: published_data_points keys on
-        # P02's PublishedIndicatorDetailId, not on indicator_detail_id.
-        published_id = res.match.published_detail_id if res.match.is_published else None
-        avail = retriever.get_available_granularities(published_id, res.match.indicator_detail_id)
-        gran = choose_granularity(None, avail)
-        if not gran:
-            continue
-        rows = retriever.get_series(res.match.indicator_detail_id, published_id, gran)
-        latest = compute.latest_value(rows)
-        if latest.ok:
-            facts.append({"indicator": res.match.name_en, "unit": res.match.unit_en,
-                          "granularity": gran, **latest.facts})
-            if rows:
-                citations += citations_for_rows([rows[-1]], res.match.name_en, res.match.data_source_en)
-    if not facts:
-        return {"ok": False, "message": msg("no_overview", language)}, []
-    return {"ok": True, "facts": {"overview": facts}}, citations
+    """Fixes F-007/F-018: a deterministic curated overview instead of silently
+    falling back to a single indicator.
+
+    Delegates to _indicator_snapshot rather than repeating it. This function
+    used to be its own older copy of the same loop, and had drifted: it read
+    unit_en raw, so Real GDP printed as "185.17 QAR" instead of "185.17 QAR bn"
+    while the prose beside it said "QAR 185.2 billion"; and it carried no
+    period-on-period change at all, so "how is the economy doing right now?"
+    could only list four levels and call that an answer.
+    """
+    payload, citations = _indicator_snapshot(HEADLINE_NAMES, language=language)
+    if payload.get("ok"):
+        # Tells the Composer this is the "how is the economy doing" question
+        # rather than an arbitrary set of metrics, so it reports the movement
+        # rather than reading out four numbers.
+        payload["facts"]["overview_kind"] = "macro"
+        # Named indicators that failed to resolve are an internal problem with
+        # the editorial list above, not something to report to a user who never
+        # named them.
+        payload["facts"].pop("not_found", None)
+    return payload, citations
 
 
 # facts keys that represent an actual READING — a value measured at a period.

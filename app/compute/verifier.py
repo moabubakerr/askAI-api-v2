@@ -165,7 +165,16 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                              f"({e.get('period_label')})")
             else:
                 shown = f"{value} {unit}".strip() if value is not None else "no reading"
-                lines.append(f"{e.get('indicator')}: {shown} ({e.get('period_label')})")
+                line = f"{e.get('indicator')}: {shown} ({e.get('period_label')})"
+                # The movement, not just the level. "How is the economy doing"
+                # answered with four current values is a list of readings, not
+                # an answer — the direction is the question.
+                if e.get("previous_value") is not None:
+                    line += (f", from {e['previous_value']} {unit}".rstrip()
+                             + f" in {e.get('previous_period')}")
+                if e.get("change_yoy_percent") is not None:
+                    line += f" ({e['change_yoy_percent']}% YoY)"
+                lines.append(line)
         if facts.get("not_found"):
             lines.append("Not found in the approved data: " + ", ".join(facts["not_found"]) + ".")
         return "\n".join(lines)

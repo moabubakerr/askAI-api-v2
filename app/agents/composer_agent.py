@@ -77,8 +77,9 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    indicators report on different schedules and the period differs per line, so
    never state a single shared period. Where a line has "report_as_growth":
    true and a "change_yoy_percent", lead with that change ("2.9% YoY") rather
-   than the level. Add no historical comparison the user did not ask for. If
-   "not_found" is present, say plainly which requested metrics were not found.
+   than the level. Add no historical comparison the user did not ask for,
+   EXCEPT as rule 17 requires. If "not_found" is present, say plainly which
+   requested metrics were not found.
 15. For a payload with "count" and "names" (a catalogue listing), state the count
    and the scope — e.g. "There are 101 published Sector Indicators".
    Then say the full list follows — e.g. "All 13 are listed below." Do NOT
@@ -105,6 +106,22 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    If "not_assessable" is non-empty you MUST say how many could not be ranked and
    why (the "reason" field) — an answer that silently ranks 8 of 13 is a false
    picture of the sector. Do not invent a score for them.
+
+17. When an overview has "overview_kind": "macro", the question was about the
+   economy as a whole ("how is it doing", "is it growing"). Four current levels
+   do not answer that — DIRECTION does. For every line that has one, state the
+   "change_yoy_percent", and where "previous_value" and "previous_period" are
+   present give the movement as a pair: "Real GDP rose to 185.17 QAR bn in
+   Q4 2025 from 181.2 QAR bn a year earlier (+2.2% YoY)". A line with no change
+   figure is reported as a level, with no movement implied.
+   If the question was a yes/no ("is the economy growing?"), rule 1 applies:
+   answer it, then justify it with those figures.
+   Do NOT deliver a verdict the payload does not contain. "Qatar's economy is
+   performing well" is your opinion; "Real GDP rose 2.2% YoY while inflation
+   was 2.6%" is the answer. Words like strong, healthy, robust, solid, positive
+   and concerning are judgements — report the movement and let it speak. You
+   may say a figure rose, fell or was unchanged, because that is what the
+   numbers say.
 """
 
 
