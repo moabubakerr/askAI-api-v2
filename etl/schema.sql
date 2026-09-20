@@ -120,7 +120,15 @@ CREATE TABLE indicator_analysis (
     summary_en                  TEXT,
     detailed_analysis_en        TEXT,
     npc_analysis_en              TEXT,
-    benchmark_en                  TEXT
+    benchmark_en                  TEXT,
+    -- P04 carries all four in Arabic as well and they were never loaded, so
+    -- SCAI's own commentary came back in English to an Arabic reader. Coverage
+    -- is partial (667 of 1031 rows have SummaryAR), which is why every reader
+    -- falls back to the English text rather than being shown nothing.
+    summary_ar                  TEXT,
+    detailed_analysis_ar        TEXT,
+    npc_analysis_ar              TEXT,
+    benchmark_ar                  TEXT
 );
 
 CREATE TABLE benchmark_countries (

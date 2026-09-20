@@ -241,6 +241,11 @@ def load_indicator_analysis(csv_dir, engine):
             "detailed_analysis_en": html_to_text(fix_mojibake(r["DetailedAnalysis_EN"])),
             "npc_analysis_en": None,
             "benchmark_en": None,
+            # Item_1 is English-only; P04 below carries the Arabic.
+            "summary_ar": None,
+            "detailed_analysis_ar": None,
+            "npc_analysis_ar": None,
+            "benchmark_ar": None,
         })
     for _, r in p04.iterrows():
         rows.append({
@@ -251,6 +256,12 @@ def load_indicator_analysis(csv_dir, engine):
             "detailed_analysis_en": html_to_text(fix_mojibake(r["DetailedAnalysisEN"])),
             "npc_analysis_en": html_to_text(fix_mojibake(r["NPCAnalysisEN"])),
             "benchmark_en": html_to_text(fix_mojibake(r["BenchmarkEN"])),
+            # Present in the export all along and never loaded, which is why
+            # SCAI's own commentary reached an Arabic reader in English.
+            "summary_ar": html_to_text(fix_mojibake(r["SummaryAR"])),
+            "detailed_analysis_ar": html_to_text(fix_mojibake(r["DetailedAnalysisAR"])),
+            "npc_analysis_ar": html_to_text(fix_mojibake(r["NPCAnalysisAR"])),
+            "benchmark_ar": html_to_text(fix_mojibake(r["BenchmarkAR"])),
         })
     out = pd.DataFrame(rows)
     out.to_sql("indicator_analysis", engine, if_exists="append", index=False)
@@ -485,6 +496,10 @@ def main():
     with engine.begin() as conn:
         for ddl in [
             "ALTER TABLE indicator_details ADD COLUMN IF NOT EXISTS is_main BOOLEAN",
+            "ALTER TABLE indicator_analysis ADD COLUMN IF NOT EXISTS summary_ar TEXT",
+            "ALTER TABLE indicator_analysis ADD COLUMN IF NOT EXISTS detailed_analysis_ar TEXT",
+            "ALTER TABLE indicator_analysis ADD COLUMN IF NOT EXISTS npc_analysis_ar TEXT",
+            "ALTER TABLE indicator_analysis ADD COLUMN IF NOT EXISTS benchmark_ar TEXT",
         ]:
             conn.execute(text(ddl))
 

@@ -152,7 +152,7 @@ def _period_mismatch(entry: dict) -> bool:
     return bool(years_in_text) and year.group(1) not in years_in_text
 
 
-def _council_analysis(citations: list[dict]) -> list[dict]:
+def _council_analysis(citations: list[dict], language: str = "en") -> list[dict]:
     """SCAI's written commentary for the exact readings used, verbatim."""
     record_ids = [c["record_id"] for c in citations if c.get("record_id")]
     found = retriever.get_analysis_for_data_points(record_ids)
@@ -170,13 +170,7 @@ def _council_analysis(citations: list[dict]) -> list[dict]:
             "record_id": record_id,
             "is_published_analysis": analysis.get("source") == "published",
         }
-        for field, key in (("summary_en", "summary"),
-                            ("detailed_analysis_en", "detailed"),
-                            ("npc_analysis_en", "npc_analysis"),
-                            ("benchmark_en", "benchmark")):
-            value = (analysis.get(field) or "").strip()
-            if value and value != "-":
-                entry[key] = value
+        entry.update(retriever.analysis_text(analysis, language))
         # Nothing but metadata means the row exists but is empty — drop it
         # rather than render an "analysis" heading over blank space.
         if any(k in entry for k in ("summary", "detailed", "npc_analysis", "benchmark")):
@@ -231,7 +225,7 @@ def read_message(user_message: str, conversation_context: str = "",
         one_liner = (f"{indicator} — {_format_value(headline['value'], headline['unit'])}"
                      f"{', ' + headline['period_label'] if headline['period_label'] else ''}.")
 
-    analysis = _council_analysis(citations)
+    analysis = _council_analysis(citations, language)
 
     # A plain-language retelling of the SAME facts, rather than the /chat answer
     # repeated. Reusing that answer made "Read this for me" change nothing: the

@@ -116,10 +116,41 @@ def get_series_multi_country(indicator_detail_id: str, published_indicator_detai
     return result
 
 
+ANALYSIS_FIELDS = (("summary", "summary"), ("detailed_analysis", "detailed"),
+                    ("npc_analysis", "npc_analysis"), ("benchmark", "benchmark"))
+
+
+def analysis_text(analysis: dict, language: str = "en") -> dict:
+    """SCAI's commentary in the reader's language, falling back to English.
+
+    P04 carries all four fields in Arabic and the ETL never loaded them, so an
+    Arabic question about inflation was answered with SCAI's English analysis —
+    the one part of the reply that is quoted verbatim and cannot be rephrased
+    by the Composer.
+
+    Coverage is partial: 667 of 1031 published rows have an Arabic summary and
+    626 have the detail. Falling back per FIELD rather than per row means a row
+    with Arabic commentary and an English benchmark shows both, instead of
+    dropping whichever the reader cannot have.
+    """
+    arabic = str(language).lower().startswith("ar")
+    out = {}
+    for base, key in ANALYSIS_FIELDS:
+        value = ""
+        if arabic:
+            value = (analysis.get(f"{base}_ar") or "").strip()
+        if not value:
+            value = (analysis.get(f"{base}_en") or "").strip()
+        if value and value != "-":
+            out[key] = value
+    return out
+
+
 def get_analysis(ref_data_point_id: str) -> Optional[dict]:
     with engine.connect() as conn:
         row = conn.execute(text("""
-            SELECT summary_en, detailed_analysis_en, npc_analysis_en, benchmark_en, source
+            SELECT summary_en, detailed_analysis_en, npc_analysis_en, benchmark_en,
+                   summary_ar, detailed_analysis_ar, npc_analysis_ar, benchmark_ar, source
             FROM indicator_analysis WHERE ref_data_point_id = :rid
             ORDER BY (source = 'published') DESC LIMIT 1
         """), {"rid": ref_data_point_id}).fetchone()
@@ -252,7 +283,8 @@ def get_analysis_for_data_points(record_ids: list[str]) -> dict[str, dict]:
     with engine.connect() as conn:
         rows = conn.execute(text("""
             SELECT ref_data_point_id, source, summary_en, detailed_analysis_en,
-                   npc_analysis_en, benchmark_en
+                   npc_analysis_en, benchmark_en,
+                   summary_ar, detailed_analysis_ar, npc_analysis_ar, benchmark_ar
             FROM indicator_analysis
             WHERE ref_data_point_id = ANY(:ids)
         """), {"ids": list(record_ids)}).fetchall()

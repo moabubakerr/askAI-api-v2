@@ -577,11 +577,7 @@ def handle_message(user_message: str, conversation_context: str = "",
             if not analysis:
                 continue
             entry = {"period_label": row["period_label"], "value": row.get("actual")}
-            for field, key in (("summary_en", "summary"), ("detailed_analysis_en", "detailed"),
-                                ("npc_analysis_en", "npc_analysis"), ("benchmark_en", "benchmark")):
-                value = (analysis.get(field) or "").strip()
-                if value and value != "-":
-                    entry[key] = value
+            entry.update(retriever.analysis_text(analysis, language))
             if len(entry) > 2:
                 entries.append(entry)
             if entries:
