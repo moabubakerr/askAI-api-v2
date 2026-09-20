@@ -196,18 +196,16 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
         else:
             what = f"published {scope}s"
         line = f"There are {facts['count']} {what} in the approved data."
-        # Short lists are printed in full. Answering "give me all the indicator
-        # names" for a 13-entry sector with "for example: ..." refuses the
-        # question that was asked; the truncation exists for the 101-entry
-        # types, not for every listing.
-        if facts["count"] <= 15:
-            return line + "\n" + "\n".join(f"- {n}" for n in facts["names"])
-        sample = facts.get("names_sample") or facts["names"][:8]
-        if sample:
-            line += " For example: " + "; ".join(str(n) for n in sample) + "."
-        if facts["count"] > len(sample):
-            line += f" The full list of {facts['count']} is shown alongside."
-        return line
+        # The names are rendered in full beside this text, so enumerating them
+        # here prints them twice. But answering "give me all the names" with
+        # "for example: ..." reads as a refusal of the question that was asked,
+        # so say plainly that all of them are there. Examples only earn their
+        # space on a list too long to take in at a glance.
+        if facts["count"] > 15:
+            sample = facts.get("names_sample") or facts["names"][:8]
+            if sample:
+                line += " For example: " + "; ".join(str(n) for n in sample) + "."
+        return line + f" All {facts['count']} are listed below."
     if "series" in facts:
         # Summarise; do NOT enumerate. The series is already rendered as a chart
         # and a table beside this text, so listing all 28 points printed the

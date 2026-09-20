@@ -81,12 +81,14 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    "not_found" is present, say plainly which requested metrics were not found.
 15. For a payload with "count" and "names" (a catalogue listing), state the count
    and the scope — e.g. "There are 101 published Sector Indicators".
-   Then: if "count" is 15 or fewer, LIST THEM ALL from "names", one per line,
-   copied exactly. If it is more than 15, give a few examples from
-   "names_sample" and say the full list is shown below — narrating 101 entries
-   runs out of room and gets cut off mid-sentence.
-   Never answer "give me all the names" with "some examples include" when the
-   list is short enough to print. The user asked for all of them.
+   Then say the full list follows — e.g. "All 13 are listed below." Do NOT
+   enumerate them: the list is rendered in full beside your text, so repeating
+   it prints the same names twice, and narrating 101 entries runs out of room
+   and gets cut off mid-sentence.
+   Never answer "give me all the names" with "some examples include" — the user
+   asked for all of them, and the answer is that all of them are there. Only
+   when "count" is above 15 may you name two or three from "names_sample", as a
+   flavour of what the group contains.
    Say NOTHING about the items beyond their names. You are given names only, so
    you cannot know whether each has data, how recent it is, or what it shows —
    annotating every entry with something like "Data available" states a fact that
