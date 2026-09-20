@@ -251,6 +251,31 @@ INDICATOR_ALIASES = {
 }
 
 
+def resembles_catalogue_name(phrase: str, cutoff: float = 0.85) -> bool:
+    """Whether the WHOLE phrase is close to one indicator's actual name.
+
+    The test that decides if a comma-separated phrase is one indicator or
+    several. "Crop Yield - Vegetables, Greenhouses" is a real name and must not
+    be torn in half; "GDP growth, inflation, and government revenues" is three
+    questions and must be.
+
+    Character similarity, deliberately: this asks whether the user typed a
+    NAME, which is a spelling question, not a meaning one. Using confidence
+    instead made the answer depend on whatever the embedding and the alias
+    table happened to think — and once "gdp" aliased to "Real GDP", the
+    three-metric question resolved confidently to one indicator and stopped
+    being split at all.
+    """
+    if not phrase:
+        return False
+    target = phrase.strip().lower()
+    for row in _fetch_catalog():
+        for name in (row.get("name_en"), row.get("name_ar")):
+            if name and _similarity(target, name) >= cutoff:
+                return True
+    return False
+
+
 def alias_forms(phrase: str) -> list:
     """Catalogue names implied by everyday wording in the phrase."""
     text = (phrase or "").lower()

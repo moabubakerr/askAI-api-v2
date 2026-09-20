@@ -25,7 +25,8 @@ from typing import TypedDict, Optional
 from app.nlu.intent_agent import extract_intent
 from app.core.conversation import carry_forward
 from app.core.messages import msg, detect_language, is_greeting
-from app.resolvers.indicator_resolver import resolve_indicator, has_usable_definition
+from app.resolvers.indicator_resolver import (resolve_indicator, has_usable_definition,
+                                               resembles_catalogue_name)
 from app.resolvers.country_resolver import resolve_countries
 from app.resolvers.period_resolver import (parse_period_expression, parse_explicit_frequency,
                                             choose_granularity, parse_period_pair)
@@ -289,9 +290,13 @@ def handle_message(user_message: str, conversation_context: str = "",
     # inflation, and government revenues" does not resolve as one name; it was
     # reported as ambiguous and offered a choice between three indicators, none
     # of which was the question.
-    confident_single = (resolution.status in ("resolved", "inactive") and resolution.match
-                        and resolution.match.confidence >= CONFIDENT_MATCH)
-    if ctype != "definition" and not confident_single:
+    # Split on whether the phrase IS a catalogue name, not on how confidently it
+    # resolved. Confidence stopped working the moment the alias table existed:
+    # "GDP growth, inflation, and government revenues" contains "gdp", the alias
+    # offered "Real GDP" as a query form, that scored near 1.0, and a
+    # three-metric question was answered about one indicator with the other two
+    # reported as unavailable — while asking for each separately worked.
+    if ctype != "definition" and not resembles_catalogue_name(indicator_phrase or ""):
         parts = split_indicator_phrases(indicator_phrase or "")
         if len(parts) > 1:
             payload, citations = _indicator_snapshot(parts, language)
