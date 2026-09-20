@@ -26,6 +26,7 @@ from app.nlu.intent_agent import extract_intent
 from app.core.conversation import carry_forward
 from app.core.messages import msg, detect_language, is_greeting, answers_in_language
 from app.resolvers.indicator_resolver import (resolve_indicator, has_usable_definition,
+                                               ResolutionResult,
                                                resembles_catalogue_name, has_identifying_content)
 from app.resolvers.country_resolver import resolve_countries
 from app.resolvers.period_resolver import (parse_period_expression, parse_explicit_frequency,
@@ -293,7 +294,8 @@ def handle_message(user_message: str, conversation_context: str = "",
         # the Format column has to be applied per row rather than once for the
         # answer. Without this the ratio indicators print as "9.0 NA".
         for e in entries:
-            e["unit_en"] = display_unit(e.get("unit_en"), e.get("format"))
+            e["unit_en"] = display_unit(e.get("unit_en"), e.get("format"),
+                                         language, e.get("unit_ar"))
             e["decimal_places"] = decimals_from_format(e.get("format"))
         if ctype == "scope_snapshot":
             result = compute.scope_snapshot(entries)
@@ -442,6 +444,16 @@ def handle_message(user_message: str, conversation_context: str = "",
                 session_state.pop("last_indicator_name", None)
                 return _finish(payload, language, session_state, citations,
                         question=user_message)
+
+    # The question may already have answered the question we are about to ask.
+    # "What does the 13.4% share of non-hydrocarbon government revenue mean"
+    # offered a choice of three indicators whose latest readings are 13.36, 5.1
+    # and 3.94 — the figure the user quoted picks one outright, and asking them
+    # to choose again ignores what they already said.
+    if resolution.status == "ambiguous" and resolution.candidates:
+        picked = _disambiguate_by_quoted_value(resolution.candidates, user_message)
+        if picked:
+            resolution = ResolutionResult(picked, "resolved", [])
 
     if resolution.status != "resolved" and resolution.status != "inactive":
         # "What is the GDP forecast 2026" was refused with "I couldn't find an
@@ -663,7 +675,7 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
     # Unit AND scale, both of which live in the catalogue: unit_en says "QAR",
     # Format says "bn0.0". Reading only the first printed "185.17 QAR" beside
     # prose that said "QAR 185.2 billion".
-    unit = display_unit(match.unit_en, match.format)
+    unit = display_unit(match.unit_en, match.format, language, match.unit_ar)
     decimals = decimals_from_format(match.format)
     indicator_name = match.name_en
     data_source_en = match.data_source_en
@@ -1516,7 +1528,17 @@ def _wrap(result: compute.ComputeResult, unit: str, extra_note: Optional[str] = 
     return payload
 
 
-_SPLIT_METRICS = re.compile(r"\s*(?:,|;|\band\b|\bو\s)\s*", re.IGNORECASE)
+# Commas and "and" were the only separators, so "compare the diversification of
+# exports WITH the diversification of government revenues" was never seen as two
+# questions and went to the resolver as one long phrase.
+#
+# Safe despite "Domestic vs External Debt" and "Revenue vs Expenditure" being
+# real catalogue names: the split only runs when the phrase does NOT resemble a
+# catalogue name, and both of those do.
+_SPLIT_METRICS = re.compile(
+    r"\s*(?:,|;|\band\b|\bcompared\s+(?:with|to)\b|\bwith\b|\bversus\b|\bvs\.?\b"
+    r"|\bagainst\b|\bو\s|\bمقابل\b|\bمقارنة\s*ب)\s*",
+    re.IGNORECASE)
 
 
 def split_indicator_phrases(phrase: str) -> list[str]:
@@ -1568,6 +1590,46 @@ def _asks_if_improving(text: str) -> bool:
     is the WELCOME one, which only polarity_en can answer.
     """
     return bool(text and _IMPROVING.search(text))
+
+
+# A figure the user quoted back at us, e.g. "the 13.4% share of ...".
+_QUOTED_FIGURE = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s*%")
+
+
+def _disambiguate_by_quoted_value(candidates, user_message: str):
+    """Picks the candidate whose latest reading is the figure the user quoted.
+
+    Only decides when exactly ONE candidate matches. Two candidates that both
+    round to the quoted figure is a real ambiguity and still gets the question;
+    no match at all means the figure came from somewhere else and proves
+    nothing.
+
+    Matched at the precision the user wrote, so "13.4%" selects a reading of
+    13.36014 and would not select 13.9. That is the whole signal: they are
+    quoting a number the system published.
+    """
+    quoted = [float(m) for m in _QUOTED_FIGURE.findall(user_message or "")]
+    if not quoted or not candidates:
+        return None
+
+    matches = []
+    for candidate in candidates:
+        published_id = candidate.published_detail_id if candidate.is_published else None
+        gran = choose_granularity(None, retriever.get_available_granularities(
+            published_id, candidate.indicator_detail_id))
+        if not gran:
+            continue
+        rows = retriever.get_series(candidate.indicator_detail_id, published_id, gran)
+        latest = compute.latest_value(rows)
+        if not latest.ok or latest.facts.get("actual") is None:
+            continue
+        actual = float(latest.facts["actual"])
+        for value in quoted:
+            places = len(str(value).split(".")[1]) if "." in str(value) else 0
+            if round(actual, places) == value:
+                matches.append(candidate)
+                break
+    return matches[0] if len(matches) == 1 else None
 
 
 def _asks_for_growth(phrase: str) -> bool:
@@ -1623,7 +1685,7 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
             continue
         row = _find_row_by_period(rows, latest.facts.get("period_label"))
         entry = {"indicator": match.name_en.strip(),
-                 "unit": display_unit(match.unit_en, match.format),
+                 "unit": display_unit(match.unit_en, match.format, language, match.unit_ar),
                  "decimal_places": decimals_from_format(match.format),
                  "granularity": gran, "asked_as": phrase, **latest.facts}
         # SCAI's own vetted period-on-period change, never a fresh derivation
@@ -1666,6 +1728,38 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
     # of work the QC report found it getting wrong (F-009). Only over the lines
     # that actually have a change; the ones that do not are reported, never
     # ranked as though they were flat.
+    # Comparing the LEVELS, when they are in the same unit and so comparable at
+    # all. change_ranking orders by movement; this answers "which is more X",
+    # which is a different question and had no answer: "compare the
+    # diversification of exports with that of government revenues" needs
+    # 38.589% against 13.36014%, not their growth rates.
+    comparable = [e for e in facts
+                  if e.get("actual") is not None and (e.get("unit") or "").strip()]
+    units = {(e.get("unit") or "").strip() for e in comparable}
+    if len(comparable) > 1 and len(units) == 1:
+        ordered = sorted(comparable, key=lambda e: float(e["actual"]), reverse=True)
+        unit = units.pop()
+        gap = round(float(ordered[0]["actual"]) - float(ordered[-1]["actual"]), 4)
+        periods = [e.get("period_label") for e in ordered]
+        payload_levels = {
+            "ranked_by_level": [
+                {"indicator": e["indicator"], "actual": e["actual"],
+                 "period_label": e.get("period_label"), "unit": unit}
+                for e in ordered
+            ],
+            "difference": gap,
+            # A gap between two percentages is percentage POINTS, not a percent.
+            "difference_kind": "percentage_points" if unit == "%" else "absolute",
+            "unit": unit,
+            # QC's point, and a fair one: Q4 2025 against Q1 2026 is not a
+            # matched-period comparison, and an answer that does not say so
+            # implies a precision it does not have.
+            "periods_differ": len(set(periods)) > 1,
+            "periods_compared": periods,
+        }
+        facts_out = payload["facts"]
+        facts_out.update(payload_levels)
+
     changed = [e for e in facts if e.get("change_yoy_percent") is not None]
     if len(changed) > 1:
         payload["facts"]["change_ranking"] = [

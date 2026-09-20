@@ -119,6 +119,7 @@ class IndicatorMatch:
     published_detail_id: Optional[str]
     is_active: Optional[bool]
     unit_en: Optional[str]
+    unit_ar: Optional[str]
     polarity_en: Optional[str]
     data_source_en: Optional[str]
     format: Optional[str]
@@ -412,7 +413,7 @@ def _fetch_catalog() -> list[dict]:
         rows = conn.execute(text("""
             SELECT d.indicator_detail_id, d.indicator_id, d.name_en, d.name_ar,
                    d.is_published, d.published_detail_id,
-                   i.is_active, d.unit_en, d.polarity_en,
+                   i.is_active, d.unit_en, d.unit_ar, d.polarity_en,
                    d.data_source_en, d.format,
                    d.definition_en, d.definition_ar,
                    (SELECT COUNT(*) FROM published_data_points p
@@ -646,7 +647,7 @@ def _resolve_scored(scored, phrase, language="en"):
             candidates = [
                 IndicatorMatch(r["indicator_detail_id"], r["indicator_id"], r["name_en"],
                                 r["is_published"], r["published_detail_id"],
-                                r["is_active"], r["unit_en"], r["polarity_en"],
+                                r["is_active"], r["unit_en"], r.get("unit_ar"), r["polarity_en"],
                                 r["data_source_en"], r["format"],
                                 r["definition_en"], r["definition_ar"], s)
                 for r, s in scored[:3]
@@ -660,7 +661,7 @@ def _resolve_scored(scored, phrase, language="en"):
     match = IndicatorMatch(
         top_row["indicator_detail_id"], top_row["indicator_id"], top_row["name_en"],
         top_row["is_published"], top_row["published_detail_id"],
-        top_row["is_active"], top_row["unit_en"], top_row["polarity_en"],
+        top_row["is_active"], top_row["unit_en"], top_row.get("unit_ar"), top_row["polarity_en"],
         top_row["data_source_en"], top_row["format"],
         top_row["definition_en"], top_row["definition_ar"],
         top_score,

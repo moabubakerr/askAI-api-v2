@@ -101,6 +101,13 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    its published series runs to 2025-Q4." Never omit them: a question about
    three metrics answered about one, with no mention of the other two, reads as
    though only one was asked for.
+   "ranked_by_level" orders the lines by VALUE, highest first, and only exists
+   when they share a unit and are therefore comparable. Use it for "which is
+   more/higher/greater", with "difference" and "difference_kind" — a gap
+   between two percentages is percentage POINTS, not a percent. When
+   "periods_differ" is true you MUST say the readings are from different
+   periods and that this is a directional comparison, not a matched-period one;
+   omitting that claims a precision the figures do not have.
    "change_ranking" orders the lines by movement, most negative first. Use it
    to answer "which fell the most" / "which grew fastest" — never order the
    figures yourself. It covers only the lines that HAVE a change; if some do

@@ -79,7 +79,26 @@ def _expand_scale_words(unit: str) -> tuple[str, Optional[str]]:
     return " ".join(tokens), found
 
 
-def display_unit(unit_en: Optional[str], format_str: Optional[str]) -> str:
+# The Arabic side of the same three decisions. The catalogue carries unit_ar
+# for every published detail, so an Arabic answer saying "185.17 billion QAR"
+# was reading a column it did not have to.
+_SCALE_WORDS_AR = {"bn": "مليار", "m": "مليون", "k": "ألف"}
+_NO_UNIT_AR = {"غير متاح", "لا ينطبق", "لا يوجد", "العدد", "عدد", "-"}
+_DIMENSIONLESS_AR = {"", "العدد", "عدد", "غير متاح", "الترتيب"}
+
+
+def _expand_scale_words_ar(unit: str) -> tuple[str, Optional[str]]:
+    """Whether the Arabic unit already names its scale. Substring, not token:
+    Arabic attaches prefixes, so "بمليار" carries مليار without standing alone.
+    """
+    for key, word in _SCALE_WORDS_AR.items():
+        if word in unit:
+            return unit, key
+    return unit, None
+
+
+def display_unit(unit_en: Optional[str], format_str: Optional[str],
+                  language: str = "en", unit_ar: Optional[str] = None) -> str:
     """The unit as it should appear beside the number, scale included.
 
     Spelled out and scale-first — "billion QAR", not "QAR bn". Both choices
@@ -89,19 +108,32 @@ def display_unit(unit_en: Optional[str], format_str: Optional[str]) -> str:
     what they order, would make the same quantity read two different ways
     depending on which column it happened to come from.
     """
-    unit = (unit_en or "").strip()
-    if unit.lower() in _NO_UNIT:
+    arabic = str(language).lower().startswith("ar")
+    # Fall back to English when the Arabic unit is absent, rather than printing
+    # nothing: a missing translation should cost the reader a language, not the
+    # unit itself.
+    if arabic and (unit_ar or "").strip():
+        unit = (unit_ar or "").strip()
+        no_unit, dimensionless = _NO_UNIT_AR, _DIMENSIONLESS_AR
+        words, expand = _SCALE_WORDS_AR, _expand_scale_words_ar
+    else:
+        unit = (unit_en or "").strip()
+        no_unit, dimensionless = _NO_UNIT, _DIMENSIONLESS
+        words, expand = _SCALE_WORDS, _expand_scale_words
+        arabic = False
+
+    if unit.lower() in no_unit or unit in no_unit:
         unit = ""
-    unit, existing_scale = _expand_scale_words(unit)
+    unit, existing_scale = expand(unit)
     scale = scale_from_format(format_str)
     if not scale:
         return unit
     # The unit already says it — don't say it twice.
     if existing_scale:
         return unit
-    if unit.lower() in _DIMENSIONLESS:
-        return _SCALE_WORDS[scale]
-    return f"{_SCALE_WORDS[scale]} {unit}"
+    if unit.lower() in dimensionless or unit in dimensionless:
+        return words[scale]
+    return f"{words[scale]} {unit}"
 
 
 def trim_zeros(value) -> str:

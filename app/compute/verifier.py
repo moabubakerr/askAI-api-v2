@@ -254,6 +254,17 @@ _T = {
     "highest": {"en": "highest", "ar": "أعلى"},
     "no_data_for": {"en": "No approved data for: {names}.",
                      "ar": "لا تتوفر بيانات معتمدة لـ: {names}."},
+    "level_lead": {
+        "en": "{top} is the higher at {topval} ({topper}); {bottom} is {botval} ({botper}).",
+        "ar": "{top} هو الأعلى بـ {topval} ({topper})؛ و{bottom} بـ {botval} ({botper}).",
+    },
+    "level_gap": {"en": " The gap is {gap} {kind}.", "ar": " والفارق {gap} {kind}."},
+    "periods_differ": {
+        "en": (" The readings are from different periods ({periods}), so treat this "
+                "as a directional comparison rather than a matched-period one."),
+        "ar": (" القراءتان من فترتين مختلفتين ({periods})، لذا تُعامل هذه المقارنة "
+                "كمؤشر اتجاه لا كمقارنة متطابقة الفترة."),
+    },
     "not_ranked": {
         "en": "{n} of {total} could not be ranked: ",
         "ar": "تعذّر ترتيب {n} من {total}: ",
@@ -377,6 +388,21 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                             per=e.get("previous_period"))
             if e.get("change_yoy_percent") is not None:
                 line += _t("yoy", language, pct=e["change_yoy_percent"])
+            lines.append(line)
+        if facts.get("ranked_by_level"):
+            ordered = facts["ranked_by_level"]
+            top, bottom = ordered[0], ordered[-1]
+            kind = _t("pp", language) if facts.get("difference_kind") == "percentage_points"                 else (facts.get("unit") or "")
+            line = _t("level_lead", language, top=top["indicator"],
+                       topval=f"{trim_zeros(top['actual'])} {top.get('unit') or ''}".strip(),
+                       topper=top.get("period_label"), bottom=bottom["indicator"],
+                       botval=f"{trim_zeros(bottom['actual'])} {bottom.get('unit') or ''}".strip(),
+                       botper=bottom.get("period_label"))
+            if facts.get("difference") is not None:
+                line += _t("level_gap", language, gap=facts["difference"], kind=kind)
+            if facts.get("periods_differ"):
+                line += _t("periods_differ", language,
+                            periods=", ".join(str(p) for p in facts.get("periods_compared") or []))
             lines.append(line)
         if facts.get("change_ranking"):
             lines.append(_t("largest_decline", language) + _t("then", language).join(

@@ -405,7 +405,7 @@ latest AS (
     ORDER BY p.published_indicator_detail_id, p.period_date DESC
 )
 SELECT i.name_en AS indicator, i.indicator_id AS indicator_record_id,
-       d.unit_en, d.format, d.polarity_en,
+       d.unit_en, d.unit_ar, d.format, d.polarity_en,
        d.target_value, d.target_year, d.baseline_value, d.baseline_year,
        l.period_label, l.actual, l.period_target, l.record_id, l.granularity,
        l.monthly_yoy_percent, l.quarterly_yoy_percent, l.yearly_yoy_percent,
