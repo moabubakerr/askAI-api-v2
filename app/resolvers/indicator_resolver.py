@@ -31,6 +31,7 @@ from sqlalchemy import text
 from app.db.executor import engine
 from app.resolvers.embeddings import get_embedding, cosine_similarity, embed_keyed
 from app.core.messages import msg
+from app.nlu.indicator_picker import pick_indicator
 
 # Embedding cosine similarity is the primary score; difflib contributes a
 # small bonus for exact/near-exact phrasing so "GDP" still resolves fast
@@ -502,7 +503,53 @@ def resolve_indicator(phrase: str, require_data: bool = True,
     # questions should not.
     if require_data:
         scored = _prefer_published(scored, MIN_CONFIDENCE)
-    return _resolve_scored(scored, phrase, language)
+    result = _resolve_scored(scored, phrase, language)
+    if result.status == "not_found":
+        rescued = _pick_from_near_misses(scored, phrase, language)
+        if rescued:
+            return rescued
+    return result
+
+
+# The band where the embeddings ranked something sensibly but not confidently.
+# Below this the field is noise and there is nothing worth asking about; above
+# it the resolver has already answered. Measured: the true answers that were
+# being refused scored 0.542 and 0.573, and the worst nonsense reached 0.602.
+NEAR_MISS_FLOOR = 0.45
+NEAR_MISS_CANDIDATES = 8
+
+
+def _pick_from_near_misses(scored, phrase, language):
+    """Ask the model to choose among names the embeddings already ranked.
+
+    Calibration showed a gap no threshold can close: "public debt" ranks
+    Public Debt as a Percentage of GDP (%) FIRST, at 0.573, and "number of
+    penguins in Qatar" reaches 0.602 on a Qatari jobs indicator. The ranking is
+    right and the confidence is not, so the choice — not the score — has to
+    decide it.
+
+    Constrained on both sides. The model only ever sees real, published names
+    that already scored plausibly, and its answer is checked back against that
+    list, so the worst it can do is return None and leave the refusal in place.
+    """
+    candidates = [row for row, score in scored
+                  if score >= NEAR_MISS_FLOOR and row.get("is_published")][:NEAR_MISS_CANDIDATES]
+    if not candidates:
+        return None
+    names = [row["name_en"].strip() for row in candidates]
+    chosen = pick_indicator(phrase, names, language)
+    if not chosen:
+        return None
+    row = next((r for r in candidates if r["name_en"].strip() == chosen), None)
+    if not row:
+        return None
+    # Re-enter the normal path with this row first, so every downstream check —
+    # inactive, no-data, the ambiguity tie-break — still applies. The score is
+    # kept as it was: this decided WHICH indicator, not how sure we are.
+    reordered = ([(r, s) for r, s in scored if r is row]
+                 + [(r, s) for r, s in scored if r is not row])
+    picked_score = max(reordered[0][1], MIN_CONFIDENCE)
+    return _resolve_scored([(reordered[0][0], picked_score)] + reordered[1:], phrase, language)
 
 
 def _score_catalog(catalog, phrases, phrase_embeddings):

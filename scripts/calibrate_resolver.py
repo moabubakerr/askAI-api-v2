@@ -36,7 +36,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.resolvers.indicator_resolver import (
-    _fetch_catalog, _score_catalog, normalize_indicator_phrase,
+    _fetch_catalog, _score_catalog, _prefer_published, normalize_indicator_phrase,
     EMBED_WEIGHT, STRING_WEIGHT, STRING_MIN_TO_COUNT,
     MIN_CONFIDENCE, MIN_GAP_TO_RUNNER_UP,
 )
@@ -76,7 +76,10 @@ CASES = [
 def main():
     catalog = [r for r in _fetch_catalog() if (r.get("data_point_count") or 0) > 0]
     names = [r["name_en"] for r in catalog]
-    print(f"catalog: {len(catalog)} entries with data")
+    published = sum(1 for r in catalog if r.get("is_published"))
+    print(f"catalog: {len(catalog)} entries with data ({published} published)")
+    print("NOTE: unpublished rows are scored too, then _prefer_published is applied,")
+    print("      exactly as the deployed resolver does.")
     print(f"MIN_CONFIDENCE={MIN_CONFIDENCE}  MIN_GAP_TO_RUNNER_UP={MIN_GAP_TO_RUNNER_UP}")
     print(f"scoring: {EMBED_WEIGHT}*embedding + {STRING_WEIGHT}*string\n")
 
@@ -94,6 +97,13 @@ def main():
         normalized = normalize_indicator_phrase(phrase)
         forms = [normalized] if normalized == phrase.strip() else [normalized, phrase.strip()]
         scored = _score_catalog(catalog, forms, [get_embedding(f) for f in forms])
+        # Production applies this and the harness did not, so three cases were
+        # reported as misses that the deployed resolver gets right: the winning
+        # row for "tourists arrived" (0.715, "Tourists Number of arrival Tests")
+        # and for "debt to GDP" (0.871, "Debt to GDP Ratio") are UNPUBLISHED.
+        # A calibration run that does not mirror the pipeline measures a
+        # pipeline nobody is running.
+        scored = _prefer_published(scored, MIN_CONFIDENCE)
         top, top_score = scored[0]
         second = scored[1][1] if len(scored) > 1 else 0.0
         gap = top_score - second
