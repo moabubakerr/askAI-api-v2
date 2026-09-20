@@ -257,13 +257,16 @@ INDICATOR_ALIASES = {
     "تنويع الصادرات": "Non-Hydrocarbon Exports (share of total exports)",
     "تنويع الإيرادات": "Non-Hydrocarbon Government Revenues as Share of Government Revenues",
 
-    # "exports" alone was ambiguous between Export Cost and four different
-    # "Sector Exports" details, none of which is what anyone means by Qatar's
-    # exports. The headline series is Total Exports (Goods and Services).
-    "exports": "Total Exports (Goods and Services)",
+    # Deliberately NOT a bare "exports". That alias was tried and made things
+    # worse: "how much of Qatar's exports are non-oil?" does not contain the
+    # contiguous phrase "non-oil exports", so only the bare alias matched and a
+    # question about the non-hydrocarbon share was pointed at total exports in
+    # riyals. Bare "exports" is genuinely ambiguous — between Export Cost and
+    # four different "Sector Exports" — and ambiguity is now resolved by asking
+    # the model to choose from the real candidates, which is what
+    # _pick_from_ambiguous does.
     "total exports": "Total Exports (Goods and Services)",
-    "qatar exports": "Total Exports (Goods and Services)",
-    "الصادرات": "Total Exports (Goods and Services)",
+    "إجمالي الصادرات": "Total Exports (Goods and Services)",
 
     # The catalogue calls it "World Competitiveness Index Rank"; nobody asks
     # for it by that name.
@@ -367,11 +370,26 @@ def resembles_catalogue_name(phrase: str, cutoff: float = 0.85) -> bool:
 
 
 def alias_forms(phrase: str) -> list:
-    """Catalogue names implied by everyday wording in the phrase."""
+    """Catalogue names implied by everyday wording in the phrase.
+
+    The most specific alias wins. Every matching alias used to contribute a
+    form, so "how much of Qatar's exports are non-oil" matched both "non-oil
+    exports" and the bare "exports" — two different indicators, both boosted,
+    and a question with an obvious answer came back as a three-way choice.
+
+    A shorter alias contained in a longer one that also matched is dropped:
+    "exports" is what "non-oil exports" is made of, not a second reading of
+    the question. Aliases that merely happen to both appear ("inflation and
+    exports") are unaffected, since neither contains the other.
+    """
     text = (phrase or "").lower()
+    matched = [term for term in INDICATOR_ALIASES if term in text]
+    specific = [term for term in matched
+                if not any(other != term and term in other for other in matched)]
     hits = []
-    for term, target in INDICATOR_ALIASES.items():
-        if term in text and target not in hits:
+    for term in specific:
+        target = INDICATOR_ALIASES[term]
+        if target not in hits:
             hits.append(target)
     return hits
 
@@ -542,6 +560,19 @@ def resolve_indicator(phrase: str, require_data: bool = True,
         rescued = _pick_from_near_misses(scored, phrase, language)
         if rescued:
             return rescued
+    # Ambiguity is the question the picker exists to answer — "which of these
+    # did you mean" — and we were about to put it to the user. Asking the model
+    # first, over the same candidates and with the same validation, is strictly
+    # better than asking a person to choose between three catalogue names; if
+    # it declines, the user is still asked.
+    if result.status == "ambiguous" and result.candidates:
+        chosen = pick_indicator(phrase, [c.name_en.strip() for c in result.candidates],
+                                 language)
+        if chosen:
+            match = next((c for c in result.candidates
+                          if c.name_en.strip() == chosen), None)
+            if match:
+                return ResolutionResult(match, "resolved", [])
     return result
 
 

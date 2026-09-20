@@ -1704,7 +1704,12 @@ _ASKS_AMOUNT = re.compile(
     r"|\bvalue of\b|\bamount of\b|\btotal\b|كم\s|قيمة|مبلغ",
     re.IGNORECASE)
 _ASKS_SHARE = re.compile(
-    r"\bshare\b|\bpercent\w*\b|\bproportion\b|\bas a %\b|%|نسبة|حصة",
+    r"\bshare\b|\bpercent\w*\b|\bproportion\b|\bas a %\b|%|نسبة|حصة"
+    # "How much OF Qatar's exports are non-oil" is partitive: it asks for a
+    # part of a whole, which is a share, even though it opens with "how much".
+    # Without this the amount rule fired and would have picked total exports
+    # in riyals to answer a question about a percentage.
+    r"|\bhow much of\b|\bwhat (?:share|part|portion) of\b|\bكم من\b",
     re.IGNORECASE)
 
 
