@@ -40,7 +40,8 @@ from app.compute.verifier import verify_numbers, render_template_fallback
 from app.compute.citations import Citation, citations_for_rows, render_sources_footer, citations_to_dicts
 from app.compute.chart_builder import build_chart_spec
 from app.compute.chart_request import wants_chart
-from app.compute.formatting import display_unit, decimals_from_format, trim_decimal
+from app.compute.formatting import (display_unit, decimals_from_format, trim_decimal,
+                                     round_for_display)
 from app.agents.composer_agent import compose_answer
 from app.agents.article_agent import answer_from_articles
 from app.resolvers.embeddings import get_embedding
@@ -330,7 +331,8 @@ def handle_message(user_message: str, conversation_context: str = "",
         else:
             result = compute.scope_performance(
                 entries, best_first=not _asks_for_worst(user_message))
-        payload = {"ok": result.ok, "facts": {**result.facts, "scope": scope, "scope_kind": kind}} \
+        payload = {"ok": result.ok,
+                   "facts": {**_round_facts(result.facts), "scope": scope, "scope_kind": kind}} \
             if result.ok else {"ok": False, "message": result.message}
         citations = [Citation(indicator=e.get("indicator"), data_source=None,
                                table="published_data_points", record_id=e.get("record_id"),
@@ -1587,6 +1589,27 @@ def _latest_common_period(series_by_country: dict[str, list[dict]]) -> Optional[
     return max(common) if common else None
 
 
+def _round_facts(value, decimals=None):
+    """round_for_display over a whole facts tree.
+
+    Applied in the same place as _strip_padding, for the same reason: the
+    frontend renders payload values into its own tiles, so rounding only the
+    sentence would leave "166.107182" on the card beside it.
+
+    A dict carrying its own decimal_places — one line of a multi-indicator
+    answer — is rounded to ITS precision rather than the answer's, and
+    decimal_places itself is never rounded, since it is a count of digits and
+    not a figure.
+    """
+    if isinstance(value, dict):
+        own = value.get("decimal_places", decimals)
+        return {k: (v if k == "decimal_places" else _round_facts(v, own))
+                for k, v in value.items()}
+    if isinstance(value, list):
+        return [_round_facts(v, decimals) for v in value]
+    return round_for_display(value, decimals)
+
+
 def _strip_padding(value):
     """trim_decimal applied to a whole facts tree.
 
@@ -1605,8 +1628,9 @@ def _strip_padding(value):
 
 def _wrap(result: compute.ComputeResult, unit: str, extra_note: Optional[str] = None,
           indicator_name: Optional[str] = None, decimals: Optional[int] = None) -> dict:
-    payload = {"ok": result.ok, "facts": {**_strip_padding(result.facts), "unit": unit}} if result.ok else \
-              {"ok": False, "message": result.message}
+    payload = {"ok": result.ok,
+               "facts": {**_round_facts(_strip_padding(result.facts), decimals), "unit": unit}} \
+        if result.ok else {"ok": False, "message": result.message}
     # Name the indicator in every successful payload. Without it the Composer
     # has nothing to name and writes "the specified economic indicator", which
     # hides a mis-resolution: a question about solar energy was answered with a
@@ -1857,7 +1881,9 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
             return {"ok": False, "message": msg("none_in_period", language,
                                                  period=asked_period)}, []
         return {"ok": False, "message": msg("no_overview", language)}, []
-    payload = {"ok": True, "facts": {"overview": facts}}
+    # Each line carries its own decimal_places, so _round_facts rounds each to
+    # its own precision rather than to one shared figure.
+    payload = {"ok": True, "facts": {"overview": _round_facts(facts)}}
     # Ranking by movement, so "which experienced the largest decline?" can be
     # answered without the Composer ordering figures itself — the exact class
     # of work the QC report found it getting wrong (F-009). Only over the lines

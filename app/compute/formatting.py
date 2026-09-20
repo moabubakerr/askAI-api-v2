@@ -19,13 +19,17 @@ place the information exists.
 Nothing here changes a stored value. It decides how the same number is written.
 """
 import re
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Optional
 
 # "bn0.00", "0.000m", "0.0k" — the scale may lead or trail the digits.
 _SCALE = re.compile(r"^(?P<lead>bn|m|k)?[\d.]*(?P<trail>bn|m|k)?$", re.IGNORECASE)
 
-_SCALE_WORDS = {"bn": "billion", "m": "million", "k": "thousand"}
+# Abbreviated and capitalised, scale first: "Bn QAR". SCAI writes "bn QAR" in
+# the units it spells out; this keeps their order and their abbreviation and
+# just capitalises it, so a figure reads the same whether its scale came from
+# unit_en or from the Format column.
+_SCALE_WORDS = {"bn": "Bn", "m": "Mn", "k": "K"}
 
 # Units that name no dimension of their own, so the scale word stands alone
 # rather than being appended: "2.297 million", not "2.297 Count m".
@@ -73,6 +77,9 @@ def _expand_scale_words(unit: str) -> tuple[str, Optional[str]]:
     found = None
     for i, token in enumerate(tokens):
         key = token.lower()
+        # "million ton-km" is spelled out in the catalogue; normalise it to the
+        # same abbreviation everything else uses.
+        key = {"billion": "bn", "million": "m", "thousand": "k"}.get(key, key)
         if key in _SCALE_WORDS:
             found = key
             tokens[i] = _SCALE_WORDS[key]
@@ -175,3 +182,30 @@ def trim_decimal(value):
     if isinstance(exponent, int) and exponent > 0:
         return normalized.quantize(Decimal(1))
     return normalized
+
+
+# The floor on displayed precision. SCAI's Format specifies one decimal for
+# Real GDP, which is fine for a headline and too coarse beside a change of
+# 19.062818 — and the raw value carries six decimals of stored noise. Two is
+# the requested minimum; an indicator whose Format asks for MORE keeps it, so
+# "2.297 million visitors" does not become "2.30 million".
+MIN_DISPLAY_DECIMALS = 2
+
+
+def round_for_display(value, decimals: Optional[int] = None):
+    """Rounds a figure to the precision it should be read at.
+
+    Padding is removed afterwards, so a whole number stays whole: a rank of 11
+    is "11", not "11.00". Non-numeric values pass through untouched.
+    """
+    if isinstance(value, bool) or value is None:
+        return value
+    if not isinstance(value, (int, float, Decimal)):
+        return value
+    places = max(int(decimals) if decimals is not None else 0, MIN_DISPLAY_DECIMALS)
+    try:
+        quantum = Decimal(1).scaleb(-places)
+        rounded = Decimal(str(value)).quantize(quantum, rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        return value
+    return trim_decimal(rounded)
