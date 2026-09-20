@@ -123,7 +123,9 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    LOWER actual is the better result, so never describe a falling value there as
    underperformance.
    If "not_assessable" is non-empty you MUST say how many could not be ranked and
-   why (the "reason" field) — an answer that silently ranks 8 of 13 is a false
+   why ("reason_code": no_reading = no reading yet, no_target = no target set,
+   no_yoy_published = no year-on-year figure published; put it in your own
+   words, in the answer's language) — an answer that silently ranks 8 of 13 is a false
    picture of the sector. Do not invent a score for them.
 
 17. When an overview has "overview_kind": "macro", the question was about the
@@ -156,7 +158,7 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    Cost per Student is not an improvement. If you characterise a movement at
    all, use polarity; if polarity is absent, just say it rose or fell.
    If "no_comparison" is non-empty, say how many had no year-on-year figure and
-   why. Do not count them as unchanged.
+   why ("reason_code", as in rule 16). Do not count them as unchanged.
 
 19. If the payload carries "periods_interpreted_as", the question did not spell
    its periods out and they were worked out. SAY which two were used, in your
