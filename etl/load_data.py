@@ -500,6 +500,10 @@ def main():
             "ALTER TABLE indicator_analysis ADD COLUMN IF NOT EXISTS detailed_analysis_ar TEXT",
             "ALTER TABLE indicator_analysis ADD COLUMN IF NOT EXISTS npc_analysis_ar TEXT",
             "ALTER TABLE indicator_analysis ADD COLUMN IF NOT EXISTS benchmark_ar TEXT",
+            "CREATE TABLE IF NOT EXISTS indicator_embeddings ("
+            " text_key TEXT PRIMARY KEY, model TEXT NOT NULL, embedding vector(1024))",
+            "CREATE INDEX IF NOT EXISTS idx_indicator_embeddings_model"
+            " ON indicator_embeddings(model)",
         ]:
             conn.execute(text(ddl))
 

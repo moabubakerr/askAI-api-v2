@@ -503,3 +503,31 @@ def get_scope_performance(kind: str, scope: str) -> list[dict]:
         rows = conn.execute(text(_SCOPE_PERFORMANCE_SQL.format(scope_cte=cte)),
                             {"scope": f"%{scope}%"}).fetchall()
     return [dict(r._mapping) for r in rows]
+
+
+def load_indicator_embeddings(model: str) -> dict:
+    """Catalogue vectors stored by scripts/index_indicators.py, for THIS model.
+
+    Filtered on the model deliberately. Vectors from different embedding models
+    are not comparable, so serving a question against rows written by another
+    one would give confidently wrong indicator matches with nothing in the
+    answer to show it. A model with no stored vectors simply returns nothing
+    and the resolver embeds at runtime, exactly as it did before this existed.
+
+    Missing table is not an error: a database loaded before this step existed
+    should keep working, more slowly, rather than refuse to start.
+    """
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT text_key, embedding FROM indicator_embeddings
+                WHERE model = :model AND embedding IS NOT NULL
+            """), {"model": model}).fetchall()
+    except Exception:
+        return {}
+    out = {}
+    for key, vector in rows:
+        if isinstance(vector, str):
+            vector = [float(x) for x in vector.strip("[]").split(",") if x.strip()]
+        out[key] = list(vector)
+    return out

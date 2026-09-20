@@ -218,7 +218,9 @@ ${EDITOR:-vi} .env        # set both passwords + RUNTIMES_NETWORK from step 1
 
 docker compose up -d --build       # builds the image on the VM, starts postgres + api
 docker compose run --rm etl        # one-shot data load
-docker compose run --rm etl index-articles   # chunk + embed the articles (needs TEI up)
+docker compose run --rm etl index-articles     # chunk + embed the articles (needs TEI up)
+docker compose run --rm etl index-indicators   # embed the indicator catalogue (needs TEI up)
+docker compose restart api         # REQUIRED: the api caches the catalogue per process
 ```
 
 `index-articles` is separate from the data load on purpose: the load must work
@@ -239,6 +241,11 @@ docker compose down -v            # destroys the database
 docker compose up -d --build
 docker compose run --rm etl
 docker compose run --rm etl index-articles
+docker compose run --rm etl index-indicators
+# The api caches the indicator catalogue for the life of the process, so it
+# will keep serving the OLD catalogue until it is restarted. This is not
+# optional after a reload.
+docker compose restart api
 ```
 
 **Step 3 — verify, in this order.** Each check isolates one dependency, so a

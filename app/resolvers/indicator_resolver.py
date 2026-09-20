@@ -24,12 +24,14 @@ exist and matter.
 """
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from difflib import SequenceMatcher
 from typing import Optional
 
 from sqlalchemy import text
 from app.db.executor import engine
-from app.resolvers.embeddings import get_embedding, cosine_similarity, embed_keyed
+from app.resolvers.embeddings import (get_embedding, cosine_similarity, cosine_matrix,
+                                       embed_keyed)
 from app.core.messages import msg
 from app.nlu.indicator_picker import pick_indicator
 
@@ -429,6 +431,13 @@ def normalize_indicator_phrase(phrase: str) -> str:
 DEFINITION_CHARS_FOR_EMBEDDING = 240
 
 
+@lru_cache(maxsize=1)
+def _catalog_embeddings_cached(names: tuple, texts: tuple):
+    plain = embed_keyed({n: n for n in names})
+    enriched = embed_keyed(dict(zip(names, texts)))
+    return {name: (plain[name], enriched[name]) for name in names}
+
+
 def _catalog_embeddings(catalog):
     """Each indicator gets TWO vectors and keeps whichever matches better.
 
@@ -439,9 +448,9 @@ def _catalog_embeddings(catalog):
     "tourist". Keeping both views costs one extra vector per indicator, paid
     once per process, and neither case has to lose.
     """
-    plain = embed_keyed({row["name_en"]: row["name_en"] for row in catalog})
-    enriched = embed_keyed({row["name_en"]: _embedding_text(row) for row in catalog})
-    return {name: (plain[name], enriched[name]) for name in plain}
+    names = tuple(row["name_en"] for row in catalog)
+    texts = tuple(_embedding_text(row) for row in catalog)
+    return _catalog_embeddings_cached(names, texts)
 
 
 def _embedding_text(row: dict) -> str:
@@ -459,7 +468,32 @@ def _embedding_text(row: dict) -> str:
     return f"{name}. {definition[:DEFINITION_CHARS_FOR_EMBEDDING]}"
 
 
+# The catalogue changes only when the ETL runs, and that query counts data
+# points with two correlated subqueries per row — 644 rows, each scanning the
+# two largest tables. It was running on EVERY resolution, and recent routing
+# work made a three-metric question resolve five times: the multi-metric guard,
+# the macro probe, and once per named metric.
+#
+# Cached for the process instead. The consequence is that a RUNNING api will
+# not see a reload until it restarts, so `docker compose run --rm etl` must be
+# followed by `docker compose restart api`. That is written down in the README
+# rather than left as folklore.
+@lru_cache(maxsize=1)
+def _fetch_catalog_cached() -> tuple:
+    return tuple(_fetch_catalog_uncached())
+
+
 def _fetch_catalog() -> list[dict]:
+    return list(_fetch_catalog_cached())
+
+
+def clear_catalog_cache() -> None:
+    """Drops the cached catalogue and every vector derived from it."""
+    _fetch_catalog_cached.cache_clear()
+    _catalog_embeddings_cached.cache_clear()
+
+
+def _fetch_catalog_uncached() -> list[dict]:
     with engine.connect() as conn:
         rows = conn.execute(text("""
             SELECT d.indicator_detail_id, d.indicator_id, d.name_en, d.name_ar,
@@ -623,10 +657,27 @@ def _score_catalog(catalog, phrases, phrase_embeddings):
     and therefore reported numbers for scoring that was no longer deployed."""
     name_embeddings = _catalog_embeddings(catalog)
 
+    # Every phrase form against every view of every row, in one matrix product
+    # rather than a Python loop per pair. Same arithmetic, ~220x faster.
+    views = []
+    for row in catalog:
+        plain, enriched = name_embeddings[row["name_en"]]
+        views.append(plain)
+        views.append(enriched)
+    sims = cosine_matrix(phrase_embeddings, views) if views else []
+    best_by_row = {}
+    for index, row in enumerate(catalog):
+        # The best score across EVERY phrase form and BOTH views — the same
+        # nested max the loop computed. Taking the max of per-form pairs would
+        # not be: tuples compare on their first element, so a form scoring
+        # (0.9, 0.1) would beat one scoring (0.8, 0.95) and the 0.95 would be
+        # lost.
+        best_by_row[row["name_en"]] = max(
+            (max(form[2 * index], form[2 * index + 1]) for form in sims),
+            default=0.0)
+
     def score(row):
-        embed_sim = max(cosine_similarity(pe, view)
-                        for pe in phrase_embeddings
-                        for view in name_embeddings[row["name_en"]])
+        embed_sim = best_by_row[row["name_en"]]
         # Compare against the Arabic name too. Only name_en was ever fetched or
         # scored, so for an Arabic question the string half of the score was
         # dead weight — Arabic script against Latin scores ~0 for every

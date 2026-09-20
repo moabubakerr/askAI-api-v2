@@ -31,8 +31,9 @@ COPY etl ./etl
 COPY scripts ./scripts
 COPY docker/run_etl.sh /usr/local/bin/run-etl
 COPY docker/index_articles.sh /usr/local/bin/index-articles
+COPY docker/index_indicators.sh /usr/local/bin/index-indicators
 
-RUN chmod +x /usr/local/bin/run-etl /usr/local/bin/index-articles \
+RUN chmod +x /usr/local/bin/run-etl /usr/local/bin/index-articles /usr/local/bin/index-indicators \
  && useradd --create-home --uid 10001 scai
 
 USER scai

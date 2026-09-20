@@ -334,6 +334,22 @@ CREATE INDEX idx_article_chunks_embedding ON article_chunks
     USING hnsw (embedding vector_cosine_ops);
 CREATE INDEX idx_article_chunks_language ON article_chunks(language);
 
+-- Catalogue vectors, so a restart does not re-embed 1,288 texts against a
+-- CPU-only embedding server before it can answer its first question.
+-- Keyed by the exact text embedded, because an indicator is embedded twice:
+-- once as its bare name and once as name-plus-definition.
+--
+-- `model` is not decoration. These vectors are only comparable with others
+-- from the SAME model, and swapping the model while stale rows remain would
+-- score a question against vectors from a different embedding space — wrong
+-- answers, silently. The loader writes it and the reader filters on it.
+CREATE TABLE indicator_embeddings (
+    text_key    TEXT PRIMARY KEY,
+    model       TEXT NOT NULL,
+    embedding   vector(1024)
+);
+CREATE INDEX idx_indicator_embeddings_model ON indicator_embeddings(model);
+
 -- Lexical fallback for exact names and acronyms ("Tawteen", "ICV"), which
 -- embeddings match poorly — a rare token carries little semantic signal.
 CREATE INDEX idx_article_chunks_fts ON article_chunks
