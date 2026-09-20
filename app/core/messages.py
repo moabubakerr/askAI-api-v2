@@ -253,6 +253,31 @@ _MESSAGES = {
         "ar": ("لم أجد مؤشرات تطابق \"{query}\". جرّب اسم قطاع مثل السياحة أو الصناعة "
                 "التحويلية أو التعليم، أو اسأل \"ماذا يمكنك أن تفعل؟\" للقائمة الكاملة."),
     },
+    # A calculation the user has done and wants confirmed, where the two
+    # figures are measured over different populations.
+    "derived_different_bases": {
+        "en": ("No — those two figures cannot be multiplied together. \"{a}\" is "
+                "measured over {base_a}, while \"{b}\" counts {base_b}. Those are "
+                "different populations, so the result would assume something the "
+                "data does not say. I can give you either figure on its own, or "
+                "the indicator that measures what you are after if SCAI publishes "
+                "one."),
+        "ar": ("لا — لا يمكن ضرب هذين الرقمين معاً. فـ\"{a}\" يُقاس على {base_a}، "
+                "بينما \"{b}\" يحصي {base_b}. وهما مجموعتان مختلفتان، لذا فإن الناتج "
+                "يفترض ما لا تقوله البيانات. يمكنني تقديم أي من الرقمين منفرداً، أو "
+                "المؤشر الذي يقيس ما تبحث عنه إن كان المجلس ينشره."),
+    },
+    "derived_not_supported": {
+        "en": ("I report figures as SCAI publishes them and don't combine indicators "
+                "to derive new ones, because the result depends on assumptions the "
+                "data does not state — most often that two figures cover the same "
+                "population or period. Ask me for either indicator on its own and "
+                "I'll give you the published value."),
+        "ar": ("أعرض الأرقام كما ينشرها المجلس ولا أجمع بين المؤشرات لاشتقاق أرقام "
+                "جديدة، لأن الناتج يعتمد على افتراضات لا تذكرها البيانات — غالباً أن "
+                "الرقمين يغطيان المجموعة أو الفترة نفسها. اسألني عن أي مؤشر منفرداً "
+                "وسأعطيك القيمة المنشورة."),
+    },
     # Asked to rank by performance with no group in play — either the question
     # named no sector, or it is a follow-up to a turn that was not a listing.
     "performance_needs_scope": {

@@ -168,6 +168,13 @@ def handle_message(user_message: str, conversation_context: str = "",
     # catalogue in order to ask the most natural question there is about an
     # economy. It is the same question as "how is Qatar's economy doing", which
     # already worked, and the difference between them was one word.
+    # Checked before the economy question, which is broader and would swallow
+    # "is the economy diversifying?" into a headline snapshot that does not
+    # mention hydrocarbons at all.
+    elif _proposes_derived_figure(user_message):
+        ctype = "denominator_check"
+    elif _asks_about_diversification(user_message):
+        ctype = "diversification_overview"
     elif _asks_about_the_economy(user_message):
         ctype = "macro_overview"
     elif _asks_for_direction_split(user_message):
@@ -227,6 +234,10 @@ def handle_message(user_message: str, conversation_context: str = "",
             ctype = "direction_check"
         elif _asks_for_direction_split(user_message):
             ctype = "scope_direction"
+        elif _asks_about_diversification(user_message):
+            ctype = "diversification_overview"
+        elif _proposes_derived_figure(user_message):
+            ctype = "denominator_check"
 
     if ctype == "out_of_scope":
         payload = {"ok": False, "message": msg("out_of_scope", language)}
@@ -350,6 +361,15 @@ def handle_message(user_message: str, conversation_context: str = "",
         if ctype == "article_lookup":
             return _article_answer(user_message, intent, language, session_state)
 
+    if ctype == "denominator_check":
+        payload = {"ok": False, "message": _denominator_warning(user_message, language)}
+        return _finish(payload, language, session_state, [], question=user_message)
+
+    if ctype == "diversification_overview":
+        payload, citations = _diversification_overview(language)
+        return _finish(payload, language, session_state, citations,
+                        question=user_message)
+
     if ctype == "macro_overview":
         payload, citations = _macro_overview(language)
         if payload.get("ok") and wants_chart(user_message, ctype):
@@ -432,7 +452,14 @@ def handle_message(user_message: str, conversation_context: str = "",
         if from_message.kind != "unspecified":
             period = from_message
             session_state["last_period_expression"] = user_message
-    if ctype != "definition" and not resembles_catalogue_name(indicator_phrase or ""):
+    # Routes that have already been decided deterministically are not
+    # multi-metric questions, whatever punctuation they contain. "If
+    # non-hydrocarbon exports account for 38.6% of total exports, what share
+    # still comes from hydrocarbon exports?" split on its comma, answered the
+    # first half as a metric and reported the second half as an indicator that
+    # does not exist — reaching neither the complement route nor a refusal.
+    _SINGLE_SUBJECT = ("definition", "complement_share", "direction_check")
+    if ctype not in _SINGLE_SUBJECT and not resembles_catalogue_name(indicator_phrase or ""):
         parts = split_indicator_phrases(indicator_phrase or "")
         if len(parts) > 1:
             payload, citations = _indicator_snapshot(parts, language, period)
@@ -1830,6 +1857,131 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
 # The standard macro snapshot. An editorial list — refine it once SCAI says
 # which indicators they want surfaced as the headline set.
 HEADLINE_NAMES = ["Real GDP", "Inflation", "Trade Balance", "Government Revenues"]
+
+
+# "Is Qatar becoming less dependent on oil and gas?" is a real question about
+# this dataset and was refused, because no single indicator is named and the
+# macro snapshot answers a different one — GDP, inflation, trade balance and
+# government revenues say nothing about hydrocarbon dependence.
+#
+# The three that do are curated, the same way HEADLINE_NAMES is. They are the
+# level of non-hydrocarbon output, and the non-hydrocarbon share of each of the
+# two things Qatar earns from: exports and government revenue.
+DIVERSIFICATION_NAMES = [
+    "Non-Hydrocarbon Real GDP",
+    "Non-Hydrocarbon Exports (share of total exports)",
+    "Non-Hydrocarbon Government Revenues as Share of Government Revenues",
+]
+
+_DIVERSIFICATION = re.compile(
+    r"\bdiversif\w*\b"
+    r"|\b(less|reduc\w*|reducing|decreasing)\s+(its\s+)?depend\w*\b"
+    r"|\bdepend\w*\s+(on|upon)\s+(oil|gas|hydrocarbon\w*|energy)\b"
+    r"|\baway\s+from\s+(oil|gas|hydrocarbon\w*)\b"
+    r"|\bnon[-\s]?(oil|hydrocarbon)\s+econom\w*\b"
+    # Bare stems, no definite article: Arabic attaches prefixes, and requiring
+    # "الاعتماد" missed "هل يقل اعتماد قطر على النفط".
+    # Both verbal nouns: تنويع (diversifying something) and تنوع (being
+    # diversified). A question uses whichever fits its grammar.
+    r"|تنويع|تنوع|اعتماد\s+\w*\s*على\s+(النفط|الغاز)",
+    re.IGNORECASE)
+
+# An explicit comparison of two named things is answered as a comparison, not
+# as a curated snapshot. "Compare the diversification of exports with the
+# diversification of government revenues" names both sides and asks which is
+# higher; replacing that with a three-indicator overview answers a question
+# nobody asked.
+_COMPARES_TWO = re.compile(r"\bcompare[sd]?\b|\bwhich\s+is\s+more\b|مقارنة\b|\bقارن\b",
+                            re.IGNORECASE)
+
+
+# A calculation the user has already done and is asking us to confirm. The QC
+# workbook calls this the critical guardrail case, and it is: "126.6 thousand
+# economically active Qataris, 8% of employed Qataris work in the private
+# sector — does that mean about 10,100?" The arithmetic is fine and the answer
+# is still no, because the 8% is measured over EMPLOYED Qataris while the
+# 126.6k counts ECONOMICALLY ACTIVE ones, a population that also includes
+# people who are not employed.
+#
+# Refusing it as out-of-scope was safe but unhelpful: it neither confirmed nor
+# explained, so a reader could reasonably conclude the sum was right and the
+# system merely unwilling to say so.
+_PROPOSES_CALC = re.compile(
+    r"\bdoes\s+that\s+mean\b|\bso\s+that\s+means\b|\bthat\s+would\s+(mean|be)\b"
+    r"|\bwhich\s+implies\b|\bimplying\b|\btherefore\s+about\b|\bso\s+about\b"
+    r"|\bcan\s+i\s+(just\s+)?multiply\b|\bworks?\s+out\s+(to|at)\b"
+    r"|هل\s+يعني\s+ذلك|أي\s+أن\s+ذلك\s+يعني",
+    re.IGNORECASE)
+
+# The population or total a share is measured over, read from its own name.
+_MEASURED_OVER = re.compile(
+    r"(?:as\s+(?:a\s+)?(?:share|percentage|proportion)\s+of|out\s+of(?:\s+the)?"
+    r"|%\s*of|\bshare\s+of)\s+(?P<base>.+?)\s*\.?$",
+    re.IGNORECASE)
+
+
+def _measured_over(name: str) -> str:
+    """What this indicator is a share OF, or the indicator itself when it is a
+    level rather than a share."""
+    match = _MEASURED_OVER.search((name or "").strip())
+    return match.group("base").strip() if match else (name or "").strip()
+
+
+def _proposes_derived_figure(text: str) -> bool:
+    return bool(text and _PROPOSES_CALC.search(text))
+
+
+def _denominator_warning(user_message: str, language: str = "en"):
+    """Explains WHY two published figures cannot simply be multiplied.
+
+    Only says it when the catalogue supports it: both indicators have to
+    resolve, and the things they are measured over have to be different. That
+    difference is in their own names — "as Share of Total Qataris Employed"
+    against "Qatari Nationals (Economically Active)" — so this reports the
+    catalogue rather than reasoning about economics.
+    """
+    parts = split_indicator_phrases(user_message or "")
+    resolved = []
+    for part in parts:
+        if not has_identifying_content(part):
+            continue
+        res = resolve_indicator(part, language=language)
+        if res.status in ("resolved", "inactive") and res.match:
+            name = res.match.name_en.strip()
+            if name not in [r[0] for r in resolved]:
+                resolved.append((name, _measured_over(name)))
+        if len(resolved) == 2:
+            break
+    if len(resolved) < 2:
+        return msg("derived_not_supported", language)
+    (name_a, base_a), (name_b, base_b) = resolved[:2]
+    if base_a.lower() == base_b.lower():
+        return msg("derived_not_supported", language)
+    return msg("derived_different_bases", language,
+                a=name_a, base_a=base_a, b=name_b, base_b=base_b)
+
+
+def _asks_about_diversification(text: str) -> bool:
+    """Diversification away from hydrocarbons, as a subject in its own right.
+
+    Kept separate from the group snapshot, which needs a scope that matches a
+    catalogue name: "diversifying away from hydrocarbons" matches none, because
+    the type is called "Economic Diversification Targets" and the word in the
+    question is "diversifying".
+    """
+    if not text or not _DIVERSIFICATION.search(text):
+        return False
+    return not _COMPARES_TWO.search(text)
+
+
+def _diversification_overview(language="en"):
+    payload, citations = _indicator_snapshot(DIVERSIFICATION_NAMES, language=language)
+    if payload.get("ok"):
+        payload["facts"]["overview_kind"] = "diversification"
+        # Names that fail to resolve are a problem with the editorial list
+        # above, not something to report to a user who never named them.
+        payload["facts"].pop("not_found", None)
+    return payload, citations
 
 
 def _macro_overview(language="en"):
