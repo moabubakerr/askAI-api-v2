@@ -33,7 +33,8 @@ from app.resolvers.period_resolver import (parse_period_expression, parse_explic
                                             choose_granularity, parse_period_pair,
                                             parse_relative_pair, year_earlier_label,
                                             single_period_label, period_kind,
-                                            parse_same_period_pair, validate_period_labels)
+                                            parse_same_period_pair, validate_period_labels,
+                                            granularity_from_labels)
 from app.db import retriever
 from app.compute import engine as compute
 from app.compute.verifier import verify_numbers, render_template_fallback
@@ -692,7 +693,20 @@ def handle_message(user_message: str, conversation_context: str = "",
     published_detail_id = match.published_detail_id if match.is_published else None
     available_gran = retriever.get_available_granularities(published_detail_id, match.indicator_detail_id)
     explicit_gran = parse_explicit_frequency(intent.get("explicit_frequency"))
-    granularity = choose_granularity(explicit_gran, available_gran)
+    # A named period implies its own granularity, and it is stronger evidence
+    # than the default. Without this the finest series always won: "GDP for
+    # 2023" returned 170.55, which is Real GDP in 2023-Q4, while the published
+    # yearly row for 2023 reads 696.697 — a quarter reported as a year, wrong
+    # by a factor of four and entirely plausible-looking. "Compare 2023 to
+    # 2024" simply failed, because a quarterly series has no row called "2023".
+    #
+    # An explicitly stated frequency still wins over both: someone asking for
+    # "quarterly GDP in 2023" means quarters.
+    implied_gran = granularity_from_labels(period.raw or user_message)
+    if not explicit_gran and implied_gran in available_gran:
+        granularity = implied_gran
+    else:
+        granularity = choose_granularity(explicit_gran, available_gran)
 
     if granularity is None:
         # `wanted` is None when the user named no frequency, which rendered as

@@ -380,3 +380,28 @@ def validate_period_labels(labels, available: Optional[set] = None,
     if available is not None and not all(c in available for c in clean):
         return None              # names a period this indicator does not report
     return tuple(clean)
+
+
+# What KIND of period the question named, as a granularity. A year names a
+# yearly figure, a quarter a quarterly one.
+_LABEL_GRANULARITY = {"y": "yearly", "q": "quarterly", "m": "monthly"}
+
+
+def granularity_from_labels(expr: Optional[str]) -> Optional[str]:
+    """The granularity implied by the periods a question names.
+
+    Without this the finest available series always won, so "what is GDP for
+    2023" was answered 170.55 — Real GDP in 2023-Q4 — while the yearly row for
+    2023 reads 696.697. A quarter reported as if it were the year is wrong by a
+    factor of four and looks entirely plausible.
+
+    "Compare 2023 to 2024" failed outright for the same reason: the quarterly
+    series has no row labelled "2023", so both endpoints were missing.
+
+    Returns None when the question names no period, or names several kinds —
+    a mixed set is not evidence of anything and the usual rule should decide.
+    """
+    kinds = {period_kind(label) for label in scan_period_labels(expr)}
+    if len(kinds) != 1:
+        return None
+    return _LABEL_GRANULARITY.get(kinds.pop())
