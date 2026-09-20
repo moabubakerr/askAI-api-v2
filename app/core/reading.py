@@ -94,6 +94,13 @@ def _evidence_rows(facts: dict, citations: list[dict]) -> list[dict]:
         return [row(p.get("period_label"), p.get("actual")) for p in facts["series"]]
     if "ranked_periods" in facts:
         return [row(p.get("period_label"), p.get("actual")) for p in facts["ranked_periods"]]
+    if "ranked_indicators" in facts:
+        # Each row is a different indicator, so the unit and the target belong
+        # on the row rather than on the answer as a whole.
+        return [{**row(e.get("period_label"), e.get("actual"), e.get("target")),
+                 "indicator": e.get("indicator"), "unit": e.get("unit"),
+                 "attainment_percent": e.get("attainment_percent")}
+                for e in facts["ranked_indicators"]]
     for key in ("ranked", "rows"):
         if key in facts:
             return [{**row(e.get("period_label"), e.get("actual")), "country": e.get("country")}

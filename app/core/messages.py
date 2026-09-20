@@ -235,6 +235,16 @@ _MESSAGES = {
         "ar": ("لم أجد مؤشرات تطابق \"{query}\". جرّب اسم قطاع مثل السياحة أو الصناعة "
                 "التحويلية أو التعليم، أو اسأل \"ماذا يمكنك أن تفعل؟\" للقائمة الكاملة."),
     },
+    # Asked to rank by performance with no group in play — either the question
+    # named no sector, or it is a follow-up to a turn that was not a listing.
+    "performance_needs_scope": {
+        "en": ("Tell me which group to rank and I'll order it by progress against target — "
+                "a sector such as Education, Tourism or Manufacturing, or an indicator type "
+                "such as Economic Diversification Targets."),
+        "ar": ("أخبرني بالمجموعة التي تريد ترتيبها وسأرتّبها حسب التقدّم نحو المستهدف — "
+                "قطاع مثل التعليم أو السياحة أو الصناعة التحويلية، أو نوع مؤشر مثل "
+                "مستهدفات التنويع الاقتصادي."),
+    },
     # Replaces a bare "No indicator was mentioned." — technically true, useless
     # in practice, and what an unrecognised greeting used to be answered with.
     "no_indicator_in_question": {

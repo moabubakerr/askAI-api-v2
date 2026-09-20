@@ -80,14 +80,29 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    than the level. Add no historical comparison the user did not ask for. If
    "not_found" is present, say plainly which requested metrics were not found.
 15. For a payload with "count" and "names" (a catalogue listing), state the count
-   and the scope — e.g. "There are 101 published Sector Indicators" — then give at
-   most a handful of examples from "names_sample". NEVER enumerate the full list:
-   it is rendered separately, and narrating 101 entries runs out of room and gets
-   cut off mid-sentence.
+   and the scope — e.g. "There are 101 published Sector Indicators".
+   Then: if "count" is 15 or fewer, LIST THEM ALL from "names", one per line,
+   copied exactly. If it is more than 15, give a few examples from
+   "names_sample" and say the full list is shown below — narrating 101 entries
+   runs out of room and gets cut off mid-sentence.
+   Never answer "give me all the names" with "some examples include" when the
+   list is short enough to print. The user asked for all of them.
    Say NOTHING about the items beyond their names. You are given names only, so
    you cannot know whether each has data, how recent it is, or what it shows —
    annotating every entry with something like "Data available" states a fact that
    was never supplied and may be false.
+
+16. For a payload with "ranked_indicators" (a group ranked by performance), the
+   ranking is progress against EACH indicator's own target — never a comparison
+   of the indicators to one another. Say so in your opening line, e.g. "Ranked by
+   how close each is to its target". Then list them with their attainment_percent,
+   their actual, its period and its unit.
+   "polarity" tells you which direction is good: for "Decrease" indicators a
+   LOWER actual is the better result, so never describe a falling value there as
+   underperformance.
+   If "not_assessable" is non-empty you MUST say how many could not be ranked and
+   why (the "reason" field) — an answer that silently ranks 8 of 13 is a false
+   picture of the sector. Do not invent a score for them.
 """
 
 

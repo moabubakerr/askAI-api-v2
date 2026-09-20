@@ -263,3 +263,92 @@ def country_ranking(series_by_country: dict[str, list[dict]], period_label: Opti
         "countries_with_no_data": comparison.facts["countries_with_no_data"],
         "period_used": rows[0]["period_label"] if rows else None,
     })
+
+
+def _attainment(actual: float, target: float, polarity: str) -> Optional[float]:
+    """How far a reading has got toward its target, as a percentage.
+
+    Polarity decides the direction, and getting it backwards inverts the whole
+    ranking. For 'Decrease' indicators — cost per student, PISA rank — a SMALLER
+    number is the better outcome, so a rank of 48 against a target of 35 is
+    73% attained, not 137%.
+
+    Returns None rather than a number whenever the arithmetic would not mean
+    anything: a zero target, or a negative value on a scale where the ratio
+    stops being interpretable.
+    """
+    if actual is None or target is None:
+        return None
+    actual, target = float(actual), float(target)
+    if target == 0 or actual == 0:
+        return None
+    if actual < 0 or target < 0:
+        return None
+    ratio = target / actual if (polarity or "").strip().lower().startswith("decrease") \
+        else actual / target
+    return round(ratio * 100, 1)
+
+
+def scope_performance(entries: list[dict], best_first: bool = True,
+                       limit: Optional[int] = None) -> ComputeResult:
+    """Ranks the indicators of a sector by progress toward their own targets.
+
+    "Which of these are performing best?" cannot be answered by comparing the
+    values to each other. The Education Sector's thirteen indicators are a cost
+    in thousands of riyals, a students-per-teacher ratio, a PISA world rank and
+    ten percentages; sorting those against one another produces an ordering
+    that looks authoritative and means nothing. The only comparison the data
+    supports is each indicator against the target SCAI set for it, which is a
+    common scale by construction.
+
+    Indicators with no target are not ranked and not dropped — they are
+    returned separately, because "we cannot assess these five" is part of the
+    honest answer and silently showing eight of thirteen is not.
+    """
+    if not entries:
+        return ComputeResult(False, message="No published indicators were found for this group.")
+
+    ranked, unassessable = [], []
+    for e in entries:
+        # A target filed against the specific reading beats the indicator-level
+        # one: it is contemporaneous, where target_value is a standing goal
+        # that may sit years out.
+        target = e.get("period_target")
+        target_basis = "period"
+        if target is None:
+            target, target_basis = e.get("target_value"), "indicator"
+        score = _attainment(e.get("actual"), target, e.get("polarity_en"))
+        row = {
+            "indicator": (e.get("indicator") or "").strip(),
+            "actual": e.get("actual"),
+            "period_label": e.get("period_label"),
+            "unit": e.get("unit_en"),
+            "target": target,
+            "polarity": e.get("polarity_en"),
+        }
+        if score is None:
+            row["reason"] = ("no reading yet" if e.get("actual") is None
+                             else "no target set")
+            unassessable.append(row)
+        else:
+            ranked.append({**row, "attainment_percent": score,
+                            "target_basis": target_basis,
+                            "target_year": e.get("target_year")})
+
+    if not ranked:
+        return ComputeResult(False, message=(
+            "None of the indicators in this group have both a reading and a target, "
+            "so there is no basis for ranking them by performance."))
+
+    ranked.sort(key=lambda r: r["attainment_percent"], reverse=best_first)
+    shown = ranked[:limit] if limit else ranked
+    return ComputeResult(True, facts={
+        "ranked_indicators": shown,
+        "order": "best_first" if best_first else "worst_first",
+        "n_ranked": len(ranked),
+        "n_total": len(entries),
+        "not_assessable": unassessable,
+        # Spelled out because the Composer must say it: this is progress
+        # against each indicator's own target, not a comparison between them.
+        "basis": "percent of each indicator's own target attained, with polarity applied",
+    })

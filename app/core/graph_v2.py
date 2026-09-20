@@ -151,6 +151,12 @@ def handle_message(user_message: str, conversation_context: str = "",
     # tell which indicator you're asking about". The phrasing is recognisable
     # (a list/count request naming a real sector or indicator type), so it does
     # not need to depend on the model getting it right.
+    # "which are the best performing ones" after a sector listing. Pinned here
+    # for the same reason and checked BEFORE count_list, because the phrasings
+    # overlap ("what are the top performing indicators" is both a list request
+    # and a ranking) and the ranking is the more specific reading.
+    elif _asks_for_performance_ranking(user_message):
+        ctype = "scope_performance"
     elif _looks_like_catalog_request(user_message):
         ctype = "count_list"
     # Arabic script is unambiguous; the model's language field is a guess. An
@@ -205,6 +211,11 @@ def handle_message(user_message: str, conversation_context: str = "",
                                    record_id=r.get("record_id")) for r in rows]
         else:
             rows, citations = [], []
+        # Remember WHICH group was listed. "what are the most performing ones"
+        # is only answerable as a follow-up to this turn, and without the scope
+        # it has nothing to rank.
+        if kind:
+            session_state["last_catalog_scope"] = {"kind": kind, "scope": scope}
         names = [r.get("name_en") for r in rows]
         payload = {"ok": True, "facts": {
             "count": len(names),
@@ -221,6 +232,33 @@ def handle_message(user_message: str, conversation_context: str = "",
                                                       query=indicator_type_hint)}
         return _finish(payload, language, session_state, citations,
                         question=user_message)
+
+    if ctype == "scope_performance":
+        # The group can come from this message ("best performing education
+        # indicators") or, far more often, from the turn that just listed them.
+        kind, scope = _match_catalog_scope(user_message)
+        if not kind and session_state.get("last_catalog_scope"):
+            kind = session_state["last_catalog_scope"]["kind"]
+            scope = session_state["last_catalog_scope"]["scope"]
+        if not kind:
+            payload = {"ok": False, "message": msg("performance_needs_scope", language)}
+            return _finish(payload, language, session_state, [], question=user_message)
+
+        session_state["last_catalog_scope"] = {"kind": kind, "scope": scope}
+        entries = retriever.get_scope_performance(kind, scope)
+        # Each row is a different indicator with its own unit and precision, so
+        # the Format column has to be applied per row rather than once for the
+        # answer. Without this the ratio indicators print as "9.0 NA".
+        for e in entries:
+            e["unit_en"] = display_unit(e.get("unit_en"), e.get("format"))
+        result = compute.scope_performance(entries, best_first=not _asks_for_worst(user_message))
+        payload = {"ok": result.ok, "facts": {**result.facts, "scope": scope, "scope_kind": kind}} \
+            if result.ok else {"ok": False, "message": result.message}
+        citations = [Citation(indicator=e.get("indicator"), data_source=None,
+                               table="published_data_points", record_id=e.get("record_id"),
+                               period_label=e.get("period_label"))
+                     for e in entries if e.get("record_id")]
+        return _finish(payload, language, session_state, citations, question=user_message)
 
     if ctype == "article_lookup":
         # Articles are the fallback for what the catalogue cannot answer, not a
@@ -1022,6 +1060,39 @@ def _looks_like_catalog_request(text: str) -> bool:
     return kind is not None
 
 
+# "most preformed" is in here on purpose. This is a bilingual audience typing
+# into a chat box; a spelling that a reader understands instantly should not
+# decide whether the question gets answered.
+_PERFORMANCE_RANKING = re.compile(
+    r"\b(best|worst|top|strongest|weakest|highest|lowest|most|least)[\s-]*"
+    r"(performing|performer|performed|preforming|preformed|performance)\b"
+    r"|\b(performance|performing)\s+(ranking|ranked|comparison)\b"
+    r"|\bwhich\s+(ones?|indicators?)\s+(are\s+)?(doing|performing|preforming)\b"
+    r"|\brank\s+(them|these|the indicators)\b"
+    r"|\b(on|against)\s+track\b"
+    r"|أفضل\s*أداء|أسوأ\s*أداء|الأفضل\s*أداء|أداءً",
+    re.IGNORECASE)
+
+_WORST_FIRST = re.compile(
+    r"\b(worst|weakest|lowest|least|behind|lagging|underperform\w*)\b|أسوأ|متأخر",
+    re.IGNORECASE)
+
+
+def _asks_for_performance_ranking(text: str) -> bool:
+    """A request to rank a GROUP of indicators by how they are doing.
+
+    Distinct from period_ranking, which orders one indicator's own readings
+    over time. This orders different indicators against their own targets, and
+    it only means anything when a group is in play — which is why the handler
+    requires a sector or type, from this message or from the previous turn.
+    """
+    return bool(text and _PERFORMANCE_RANKING.search(text))
+
+
+def _asks_for_worst(text: str) -> bool:
+    return bool(text and _WORST_FIRST.search(text))
+
+
 def _match_catalog_scope(phrase: str):
     """Maps a question fragment onto a real indicator type or sector name.
 
@@ -1223,7 +1294,8 @@ def _macro_overview(language="en"):
 # greeting, a refusal, a definition or a catalogue listing gives the user a
 # button that reveals nothing they were not already shown.
 _READABLE_FACT_KEYS = {"actual", "series", "ranked", "rows", "ranked_periods",
-                       "overview", "high_value", "value_a", "value_start"}
+                       "overview", "high_value", "value_a", "value_start",
+                       "ranked_indicators"}
 
 
 def is_readable(payload: dict) -> bool:

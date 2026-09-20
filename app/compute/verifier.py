@@ -169,10 +169,39 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
         if facts.get("not_found"):
             lines.append("Not found in the approved data: " + ", ".join(facts["not_found"]) + ".")
         return "\n".join(lines)
+    if "ranked_indicators" in facts:
+        scope = facts.get("scope") or "this group"
+        order = "closest to target first" if facts.get("order") == "best_first" \
+            else "furthest from target first"
+        lines = [f"{scope}, ranked by progress against each indicator's own target "
+                 f"({order}):"]
+        for i, e in enumerate(facts["ranked_indicators"], 1):
+            value = f"{e.get('actual')} {e.get('unit') or ''}".strip()
+            lines.append(f"{i}. {e.get('indicator')} — {e.get('attainment_percent')}% of target "
+                         f"({value} in {e.get('period_label')}, target {e.get('target')})")
+        skipped = facts.get("not_assessable") or []
+        if skipped:
+            lines.append(f"{len(skipped)} of {facts.get('n_total')} could not be ranked: "
+                         + "; ".join(f"{e.get('indicator')} ({e.get('reason')})" for e in skipped)
+                         + ".")
+        return "\n".join(lines)
     if "count" in facts and "names" in facts:
         scope = facts.get("scope")
-        what = f"published {scope}s" if scope else "indicators"
+        # A sector is a container, a type is a label: "101 published Sector
+        # Indicators" is right, "13 published Education Sectors" is not.
+        if not scope:
+            what = "indicators"
+        elif facts.get("scope_kind") == "sector":
+            what = f"published indicators in the {scope}"
+        else:
+            what = f"published {scope}s"
         line = f"There are {facts['count']} {what} in the approved data."
+        # Short lists are printed in full. Answering "give me all the indicator
+        # names" for a 13-entry sector with "for example: ..." refuses the
+        # question that was asked; the truncation exists for the 101-entry
+        # types, not for every listing.
+        if facts["count"] <= 15:
+            return line + "\n" + "\n".join(f"- {n}" for n in facts["names"])
         sample = facts.get("names_sample") or facts["names"][:8]
         if sample:
             line += " For example: " + "; ".join(str(n) for n in sample) + "."

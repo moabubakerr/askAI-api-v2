@@ -365,3 +365,67 @@ def count_indicators_by_type(indicator_type_en: str) -> list[dict]:
             ORDER BY name_en
         """), {"t": f"%{indicator_type_en}%"}).fetchall()
     return [dict(r._mapping) for r in rows]
+
+
+# Latest actual per published indicator detail, with the target for that same
+# period. DISTINCT ON takes the newest row that HAS an actual, for the same
+# reason latest_value() does: many series carry target-only rows years ahead,
+# and ordering by date alone would report a 2030 target as a current reading.
+_SCOPE_PERFORMANCE_SQL = """
+WITH scoped AS ({scope_cte}),
+latest AS (
+    SELECT DISTINCT ON (p.published_indicator_detail_id)
+           p.published_indicator_detail_id AS detail_id,
+           p.period_label, p.period_date, p.granularity,
+           p.actual, p.target AS period_target,
+           p.published_data_point_id AS record_id
+    FROM published_data_points p
+    WHERE p.actual IS NOT NULL
+      AND (p.country_en IS NULL OR p.country_en = '' OR p.country_en = 'National / Overall')
+    ORDER BY p.published_indicator_detail_id, p.period_date DESC
+)
+SELECT i.name_en AS indicator, i.indicator_id AS indicator_record_id,
+       d.unit_en, d.format, d.polarity_en,
+       d.target_value, d.target_year, d.baseline_value, d.baseline_year,
+       l.period_label, l.actual, l.period_target, l.record_id
+FROM scoped s
+JOIN indicators i ON i.published_indicator_id = s.published_indicator_id
+JOIN indicator_details d ON d.indicator_id = i.indicator_id AND d.is_published = TRUE
+LEFT JOIN latest l ON l.detail_id = d.published_detail_id
+ORDER BY i.name_en
+"""
+
+_SCOPE_CTE = {
+    "sector": """
+        SELECT DISTINCT dd.published_indicator_id
+        FROM indicator_dashboards dd
+        JOIN sectors sec ON sec.sector_id = dd.entity_id
+                        AND dd.entity_classification_name = 'Sectors'
+        WHERE sec.name_en ILIKE :scope
+    """,
+    "type": """
+        SELECT DISTINCT published_indicator_id
+        FROM indicators
+        WHERE indicator_type_en ILIKE :scope AND is_published = TRUE
+    """,
+}
+
+
+def get_scope_performance(kind: str, scope: str) -> list[dict]:
+    """Every published indicator in a sector (or indicator type), with its most
+    recent reading, its target, and which DIRECTION counts as good.
+
+    The polarity is the point. Ranking a set of indicators on their raw values
+    would be meaningless — this sector alone mixes a cost in thousands of
+    riyals, a headcount ratio, a PISA rank and six percentages — and for two of
+    them (cost per student, PISA rank) a lower number is the better outcome.
+    Comparison is only defensible against each indicator's OWN target, which is
+    what this returns the pieces for.
+    """
+    cte = _SCOPE_CTE.get(kind)
+    if not cte:
+        return []
+    with engine.connect() as conn:
+        rows = conn.execute(text(_SCOPE_PERFORMANCE_SQL.format(scope_cte=cte)),
+                            {"scope": f"%{scope}%"}).fetchall()
+    return [dict(r._mapping) for r in rows]
