@@ -480,3 +480,56 @@ def direction_assessment(rows: list[dict], granularity: str,
             f"{'a decrease' if wants_lower else 'an increase'}."),
         "granularity": granularity,
     })
+
+
+def scope_snapshot(entries: list[dict]) -> ComputeResult:
+    """Current reading for every indicator in a group.
+
+    Deliberately shaped as an "overview", the same structure a multi-metric
+    question already produces, so the Composer rule, the template fallback and
+    the frontend all handle it without learning a fourth group shape. The only
+    difference is how the members were chosen: named by the user there, named
+    by belonging to a sector or an indicator type here.
+
+    Each line keeps its OWN period. These twelve report on different schedules
+    — 2026-Q1 next to 2023 — and forcing them onto one date would either drop
+    the fresher readings or imply a currency the data does not have.
+    """
+    if not entries:
+        return ComputeResult(False, message="No published indicators were found for this group.")
+
+    overview, missing = [], []
+    for e in entries:
+        if e.get("actual") is None:
+            missing.append({"indicator": (e.get("indicator") or "").strip(),
+                             "reason": "no reading published"})
+            continue
+        line = {
+            "indicator": (e.get("indicator") or "").strip(),
+            "actual": e.get("actual"),
+            "period_label": e.get("period_label"),
+            "unit": e.get("unit_en"),
+            "granularity": e.get("granularity"),
+            "polarity": e.get("polarity_en"),
+        }
+        if e.get("decimal_places") is not None:
+            line["decimal_places"] = e["decimal_places"]
+        change = preferred_change_field(e, e.get("granularity") or "")
+        if change is not None:
+            line["change_yoy_percent"] = round(float(change), 4)
+            line["change_kind"] = "percent"
+        else:
+            change = preferred_change_field(e, e.get("granularity") or "", as_points=True)
+            if change is not None:
+                line["change_yoy_pp"] = round(float(change), 4)
+                line["change_kind"] = "percentage_points"
+        overview.append(line)
+
+    if not overview:
+        return ComputeResult(False, message=(
+            "None of the indicators in this group have a published reading."))
+
+    facts = {"overview": overview, "n_total": len(entries)}
+    if missing:
+        facts["not_reported"] = missing
+    return ComputeResult(True, facts=facts)

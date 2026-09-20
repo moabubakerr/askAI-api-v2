@@ -171,6 +171,8 @@ def handle_message(user_message: str, conversation_context: str = "",
         ctype = "macro_overview"
     elif _asks_for_direction_split(user_message):
         ctype = "scope_direction"
+    elif _asks_for_group_snapshot(user_message):
+        ctype = "scope_snapshot"
     elif _asks_for_performance_ranking(user_message):
         ctype = "scope_performance"
     elif _looks_like_catalog_request(user_message):
@@ -249,7 +251,7 @@ def handle_message(user_message: str, conversation_context: str = "",
         return _finish(payload, language, session_state, citations,
                         question=user_message)
 
-    if ctype in ("scope_performance", "scope_direction"):
+    if ctype in ("scope_performance", "scope_direction", "scope_snapshot"):
         # The group can come from this message ("best performing education
         # indicators", "which national indicators are rising") or, far more
         # often, from the turn that just listed them.
@@ -278,7 +280,7 @@ def handle_message(user_message: str, conversation_context: str = "",
             payload = {"ok": False, "message": msg("performance_needs_scope", language)}
             return _finish(payload, language, session_state, [], question=user_message)
 
-    if ctype in ("scope_performance", "scope_direction"):
+    if ctype in ("scope_performance", "scope_direction", "scope_snapshot"):
         session_state["last_catalog_scope"] = {"kind": kind, "scope": scope}
         entries = retriever.get_scope_performance(kind, scope)
         # Each row is a different indicator with its own unit and precision, so
@@ -286,9 +288,14 @@ def handle_message(user_message: str, conversation_context: str = "",
         # answer. Without this the ratio indicators print as "9.0 NA".
         for e in entries:
             e["unit_en"] = display_unit(e.get("unit_en"), e.get("format"))
-        result = (compute.scope_direction(entries) if ctype == "scope_direction"
-                  else compute.scope_performance(
-                      entries, best_first=not _asks_for_worst(user_message)))
+            e["decimal_places"] = decimals_from_format(e.get("format"))
+        if ctype == "scope_snapshot":
+            result = compute.scope_snapshot(entries)
+        elif ctype == "scope_direction":
+            result = compute.scope_direction(entries)
+        else:
+            result = compute.scope_performance(
+                entries, best_first=not _asks_for_worst(user_message))
         payload = {"ok": result.ok, "facts": {**result.facts, "scope": scope, "scope_kind": kind}} \
             if result.ok else {"ok": False, "message": result.message}
         citations = [Citation(indicator=e.get("indicator"), data_source=None,
@@ -1294,6 +1301,34 @@ _DIRECTION_DOWN = re.compile(
     re.IGNORECASE)
 _DIRECTION_PLURAL = re.compile(
     r"\bindicators\b|\bmetrics\b|\bones\b|\bwhich\s+are\b|المؤشرات", re.IGNORECASE)
+
+
+# "Give me the latest snapshot of Qatar's economic diversification indicators."
+# Not a catalogue listing — that answers with names — and not a ranking. It
+# asks for the current READINGS of a named group, which nothing handled: the
+# whole phrase went to the resolver as if it named one indicator and was
+# refused, while the 12 published Economic Diversification Targets sat there
+# with a reading each.
+_GROUP_SNAPSHOT = re.compile(
+    r"\b(snapshot|overview|summary|latest|current|state|status|update|"
+    r"where\s+(do|does|are)|how\s+are)\b"
+    r"|لمحة|نظرة\s*عامة|آخر\s*(الأرقام|البيانات)|ملخص",
+    re.IGNORECASE)
+
+
+def _asks_for_group_snapshot(text: str) -> bool:
+    """Current readings for every indicator in a named group.
+
+    Requires the plural — a group is being asked about, not a metric — and a
+    scope that matches a real sector or indicator type, so "what is the latest
+    inflation figure" stays a single-indicator question.
+    """
+    if not text or not _GROUP_SNAPSHOT.search(text):
+        return False
+    if not _DIRECTION_PLURAL.search(text):
+        return False
+    kind, _ = _match_catalog_scope(text)
+    return kind is not None
 
 
 def _asks_for_direction_split(text: str) -> bool:
