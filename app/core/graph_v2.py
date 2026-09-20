@@ -370,6 +370,22 @@ def handle_message(user_message: str, conversation_context: str = "",
         return _finish(payload, language, session_state, citations,
                         question=user_message)
 
+    # The macro snapshot answers "how is the economy doing". It was also
+    # answering "how is Qatar doing on competitiveness?", because the model
+    # routes any broad-sounding "how is X doing" to it and this branch returns
+    # before an indicator is ever resolved — so the question named a published
+    # indicator, and got four unrelated ones.
+    #
+    # Our own detector is authoritative for whether a question is about the
+    # economy at large. Where it disagrees with the model, a confidently
+    # resolved indicator wins: the question named something specific.
+    if ctype == "macro_overview" and not _asks_about_the_economy(user_message):
+        probe = resolve_indicator(user_message, require_data=True, language=language)
+        if (probe.status == "resolved" and probe.match
+                and probe.match.confidence >= CONFIDENT_MATCH):
+            ctype = "latest_value"
+            intent["indicator_phrase"] = intent.get("indicator_phrase") or user_message
+
     if ctype == "macro_overview":
         payload, citations = _macro_overview(language)
         if payload.get("ok") and wants_chart(user_message, ctype):
