@@ -257,6 +257,22 @@ INDICATOR_ALIASES = {
     "تنويع الصادرات": "Non-Hydrocarbon Exports (share of total exports)",
     "تنويع الإيرادات": "Non-Hydrocarbon Government Revenues as Share of Government Revenues",
 
+    # "exports" alone was ambiguous between Export Cost and four different
+    # "Sector Exports" details, none of which is what anyone means by Qatar's
+    # exports. The headline series is Total Exports (Goods and Services).
+    "exports": "Total Exports (Goods and Services)",
+    "total exports": "Total Exports (Goods and Services)",
+    "qatar exports": "Total Exports (Goods and Services)",
+    "الصادرات": "Total Exports (Goods and Services)",
+
+    # The catalogue calls it "World Competitiveness Index Rank"; nobody asks
+    # for it by that name.
+    "competitiveness": "World Competitiveness Index Rank",
+    "global competitiveness": "World Competitiveness Index Rank",
+    "competitiveness ranking": "World Competitiveness Index Rank",
+    "how competitive": "World Competitiveness Index Rank",
+    "التنافسية": "World Competitiveness Index Rank",
+
     "non-oil exports": "Non-Hydrocarbon Exports (share of total exports)",
     "non oil exports": "Non-Hydrocarbon Exports (share of total exports)",
     "nonoil exports": "Non-Hydrocarbon Exports (share of total exports)",

@@ -212,7 +212,7 @@ _T = {
     "indicators_word": {"en": "indicators", "ar": "مؤشراً"},
     "in_the_sector": {"en": "published indicators in the {scope}",
                        "ar": "مؤشراً منشوراً في {scope}"},
-    "published_type": {"en": "published {scope}s", "ar": "من {scope} المنشورة"},
+    "published_type": {"en": "published {scope}", "ar": "من {scope} المنشورة"},
     "there_are": {"en": "There are {n} {what} in the approved data.",
                    "ar": "يوجد {n} {what} في البيانات المعتمدة."},
     "for_example": {"en": " For example: {names}.", "ar": " على سبيل المثال: {names}."},
@@ -268,6 +268,10 @@ _T = {
     "component_note": {
         "en": " — this is the \"{part}\" component, one of {n} published under this indicator; no combined total is published.",
         "ar": " — هذا هو مكوّن \"{part}\"، أحد {n} مكوّنات منشورة تحت هذا المؤشر؛ ولا يُنشر إجمالي مجمّع.",
+    },
+    "rank_from": {
+        "en": " It was {prev} in {prevper}.",
+        "ar": " وكان {prev} في {prevper}.",
     },
     "not_ranked": {
         "en": "{n} of {total} could not be ranked: ",
@@ -353,6 +357,9 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                    per=facts["period_label"])
         if facts.get("target") is not None:
             line += _t("target_was", language, val=fmt(facts["target"]))
+        if facts.get("previous_value") is not None:
+            line += _t("rank_from", language, prev=fmt(facts["previous_value"]),
+                        prevper=facts.get("previous_period"))
         return line
     if "growth_rate_percent" in facts:
         return _t("growth", language, ind=indicator, v0=fmt(facts.get("value_start")),
@@ -431,7 +438,10 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
         elif facts.get("scope_kind") == "sector":
             what = _t("in_the_sector", language, scope=scope)
         else:
-            what = _t("published_type", language, scope=scope)
+            # Pluralise only when the name is not already plural. "Economic
+            # Diversification Targets" + "s" printed "Targetss".
+            plural = scope if scope.rstrip().endswith("s") else f"{scope}s"
+            what = _t("published_type", language, scope=plural)
         line = _t("there_are", language, n=facts["count"], what=what)
         # The names are rendered in full beside this text, so enumerating them
         # here prints them twice. But answering "give me all the names" with

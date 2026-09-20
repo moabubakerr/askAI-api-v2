@@ -177,7 +177,7 @@ def handle_message(user_message: str, conversation_context: str = "",
         ctype = "diversification_overview"
     elif _asks_about_the_economy(user_message):
         ctype = "macro_overview"
-    elif _asks_for_direction_split(user_message):
+    elif _asks_for_direction_split(user_message) or _asks_what_to_watch(user_message):
         ctype = "scope_direction"
     elif _asks_for_group_snapshot(user_message):
         ctype = "scope_snapshot"
@@ -932,6 +932,18 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         if result.ok:
             row = _find_row_by_period(rows, result.facts.get("period_label"))
             used = [row] if row else []
+            # A position on its own says very little. "Qatar ranked 11th" is a
+            # fact; "11th, from 9th the year before" is the answer to how it is
+            # doing, and the reading before is published, not derived. Only for
+            # rankings, where a bare ordinal is least informative and no
+            # period-on-period figure is ever published.
+            if compute._is_rank(unit):
+                actuals = [r for r in rows if r.get("actual") is not None]
+                if row in actuals and actuals.index(row) > 0:
+                    previous = actuals[actuals.index(row) - 1]
+                    result.facts["previous_value"] = previous["actual"]
+                    result.facts["previous_period"] = previous["period_label"]
+                    used.append(previous)
         return _wrap(result, unit, indicator_name=indicator_name, decimals=decimals), citations_for_rows(used, indicator_name, data_source_en)
 
     if ctype == "period_ranking":
@@ -1420,6 +1432,34 @@ def _asks_for_group_snapshot(text: str) -> bool:
     if not text or not _GROUP_SNAPSHOT.search(text):
         return False
     if not _DIRECTION_PLURAL.search(text):
+        return False
+    kind, _ = _match_catalog_scope(text)
+    return kind is not None
+
+
+# "Based only on the national indicators available, what are the three main
+# economic signals a senior decision-maker should watch?" was answered with a
+# list of twelve indicator NAMES. It matched the catalogue-listing rule — "what
+# are the" plus "indicators" plus a scope that resolves — and a listing answers
+# with names, which is the one thing this question is not asking for.
+#
+# It is asking which way things are moving. That is the direction split, over
+# the same group it named.
+_ASKS_WHAT_TO_WATCH = re.compile(
+    r"\b(signals?|watch|watching|keep\s+an\s+eye|pay\s+attention|matters?\s+most"
+    r"|most\s+important|main|key|headline)\b",
+    re.IGNORECASE)
+
+
+def _asks_what_to_watch(text: str) -> bool:
+    """A question about which indicators are telling us something, not about
+    what the indicators are called.
+
+    Requires a group to be in play, the same as the listing rule it overrides,
+    so "what are the key indicators in Tourism" is still answerable and simply
+    answers with movement rather than with names.
+    """
+    if not text or not _ASKS_WHAT_TO_WATCH.search(text):
         return False
     kind, _ = _match_catalog_scope(text)
     return kind is not None
