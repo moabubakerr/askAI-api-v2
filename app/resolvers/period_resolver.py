@@ -341,3 +341,42 @@ def parse_relative_pair(expr: Optional[str]) -> Optional[str]:
     if _REL_PREV_YEAR.search(expr):
         return "prev_year"
     return None
+
+
+# A label the data could actually use. Anything else is a model invention.
+_CANONICAL_LABEL = re.compile(r"^\d{4}(-Q[1-4]|-(0[1-9]|1[0-2]))?$")
+
+
+def validate_period_labels(labels, available: Optional[set] = None,
+                            want: int = 2) -> Optional[tuple]:
+    """Accepts the intent agent's canonical period labels, or rejects them.
+
+    This is the guard that makes an LLM fallback safe to use for periods at
+    all. A wrong period is the one error class nothing downstream can catch:
+    the numeric verifier confirms every figure traces to the data, and a figure
+    for the wrong quarter does trace to the data. It passes every check and
+    reads as a normal answer — which is exactly how "Q4 2025 vs one year
+    earlier" once came back as 2024-Q1 vs 2024-Q4.
+
+    So the model's output is never used as given. It must be well formed, the
+    right count, the same kind of period on both sides, and — when `available`
+    is supplied — actually present in the series being read. A label that fails
+    any of those is discarded and the caller falls back to refusing, which is
+    the outcome the user can see and correct.
+    """
+    if not labels or not isinstance(labels, (list, tuple)):
+        return None
+    clean = []
+    for label in labels:
+        text = str(label).strip().upper().replace("_", "-")
+        if not _CANONICAL_LABEL.match(text):
+            return None          # malformed: reject the whole set, not just this one
+        if text not in clean:
+            clean.append(text)
+    if len(clean) != want:
+        return None
+    if len({period_kind(c) for c in clean}) > 1:
+        return None              # "2024 and Q1 2025" is not like-for-like
+    if available is not None and not all(c in available for c in clean):
+        return None              # names a period this indicator does not report
+    return tuple(clean)

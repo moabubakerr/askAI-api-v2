@@ -32,7 +32,7 @@ from app.resolvers.period_resolver import (parse_period_expression, parse_explic
                                             choose_granularity, parse_period_pair,
                                             parse_relative_pair, year_earlier_label,
                                             single_period_label, period_kind,
-                                            parse_same_period_pair)
+                                            parse_same_period_pair, validate_period_labels)
 from app.db import retriever
 from app.compute import engine as compute
 from app.compute.verifier import verify_numbers, render_template_fallback
@@ -893,6 +893,23 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
                 pair = tuple(sorted((prior, named)))
                 relative = "carried_forward"
 
+        # Last resort: the intent agent's canonical labels, for a phrasing the
+        # deterministic parser does not recognise. Never used as given — a
+        # wrong period is the one error nothing downstream catches, because a
+        # figure for the wrong quarter still traces to the data and passes the
+        # numeric verifier. validate_period_labels requires it to be well
+        # formed, like-for-like, and ACTUALLY PRESENT in this indicator's
+        # series; anything else falls through to the refusal below, which the
+        # user can see and correct.
+        if not pair and intent.get("period_labels"):
+            all_rows = retriever.get_series(match.indicator_detail_id, published_detail_id,
+                                             granularity, country_en=single_country)
+            available = {r["period_label"] for r in all_rows if r.get("actual") is not None}
+            checked = validate_period_labels(intent["period_labels"], available=available)
+            if checked:
+                rows, pair = all_rows, tuple(sorted(checked))
+                relative = "model_labels"
+
         if pair:
             label_a, label_b = pair
             if not relative:
@@ -920,6 +937,28 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         if result.ok:
             used = [r for r in (_find_row_by_period(rows, result.facts.get("period_a")),
                                  _find_row_by_period(rows, result.facts.get("period_b"))) if r]
+            # Say WHICH two periods were compared, whenever the question did not
+            # spell them out. A wrong period reads exactly like a right one —
+            # the figure is real either way — so the only defence a reader has
+            # is seeing what was actually compared. This is what would have made
+            # "2024-Q1 vs 2024-Q4" obvious the moment it appeared.
+            if relative:
+                result.facts["periods_interpreted_as"] = f"{label_a} and {label_b}"
+            # Where the deterministic parser and the model disagree, record it.
+            # The parser wins — that ordering is the whole design — but it can
+            # be confidently wrong on a phrasing it only partly recognises:
+            # "الربع الافتتاحي من 2026 مقابل ما يقابله في 2025" scans as the
+            # bare years 2026 and 2025, losing the quarter, and never reaches
+            # the fallback. Flagged rather than acted on, so the size of that
+            # gap can be measured before anything is changed on a hunch. The
+            # leading underscore keeps it out of the Composer's payload.
+            model_pair = validate_period_labels(intent.get("period_labels"))
+            if model_pair and tuple(sorted(model_pair)) != tuple(sorted((label_a, label_b))):
+                result.facts["_period_disagreement"] = {
+                    "resolved": [label_a, label_b],
+                    "model_said": list(model_pair),
+                    "source": relative or "deterministic",
+                }
         return _wrap(result, unit, indicator_name=indicator_name, decimals=decimals), citations_for_rows(used, indicator_name, data_source_en)
 
     # Anything that reached here named an indicator, resolved it, and has rows.

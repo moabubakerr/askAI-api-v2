@@ -134,6 +134,12 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    all, use polarity; if polarity is absent, just say it rose or fell.
    If "no_comparison" is non-empty, say how many had no year-on-year figure and
    why. Do not count them as unchanged.
+
+19. If the payload carries "periods_interpreted_as", the question did not spell
+   its periods out and they were worked out. SAY which two were used, in your
+   first sentence — "comparing Q1 2026 with Q1 2025". A figure for the wrong
+   period reads exactly like a figure for the right one, so naming them is the
+   only way a reader can tell. Never omit it as redundant.
 """
 
 
@@ -146,8 +152,21 @@ def _public(facts_payload: dict) -> dict:
     confidence level is below the usual threshold*", which then appeared
     alongside the real disclosure that _finish appends deterministically. The
     model should describe the data, never the machinery that produced it.
+
+    Applied at every level, not just the top. The convention is "a leading
+    underscore means internal", and a reader of that convention will put a
+    diagnostic wherever it belongs — _period_disagreement sits inside "facts",
+    beside the values it is about — and reasonably expect it to be stripped.
+    A rule that only holds at the top level is a trap for the next person.
     """
-    return {k: v for k, v in facts_payload.items() if not k.startswith("_")}
+    def strip(value):
+        if isinstance(value, dict):
+            return {k: strip(v) for k, v in value.items() if not str(k).startswith("_")}
+        if isinstance(value, list):
+            return [strip(v) for v in value]
+        return value
+
+    return strip(facts_payload)
 
 
 def compose_answer(facts_payload: dict, language: str = "en", question: str = "") -> str:

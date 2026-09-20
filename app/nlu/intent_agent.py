@@ -44,6 +44,7 @@ Output ONLY JSON with this exact shape:
   "countries_mentioned": ["<country name as the user wrote it>", ...] or [],
   "country_group_mentioned": "<e.g. 'GCC' if a group was named, else null>",
   "period_expression": "<the user's own words for any period/range/'lately'/'last N years', or null>",
+  "period_labels": ["<canonical period label>", ...] or [],
   "explicit_frequency": "monthly" | "quarterly" | "yearly" | null,
   "growth_method_hint": "CAGR" | "simple" | null,
   "extremum": "max" | "min" | null,
@@ -53,6 +54,18 @@ Output ONLY JSON with this exact shape:
 }}
 
 Rules:
+- "period_labels" is the SAME periods as period_expression, written in the
+  canonical form the data uses: "2025" for a year, "2025-Q4" for a quarter,
+  "2025-04" for a month. Two entries for a comparison, in the order the user
+  wrote them; one for a single period; [] when no period is named.
+  Convert whatever the user wrote, however they wrote it: "the same quarter of
+  2025" alongside "Q1 2026" is ["2026-Q1", "2025-Q1"]; "الربع الأول 2026" is
+  ["2026-Q1"]; "May 2025" is ["2025-05"].
+  Leave it [] for anything RELATIVE that has no fixed date — "lately", "last 3
+  years", "this year", "the previous quarter", "recently". Those are resolved
+  against the data, not the calendar, and a date you pick for them will be the
+  wrong one. Never guess a year that was not stated, and never fill this in
+  from what you think the current date is — you do not know it.
 - Use "multi_indicator" when the user names SEVERAL metrics in one question:
   "Show GDP growth, inflation, and government revenues", "give me inflation and
   the trade balance". Put ALL of them in indicator_phrase exactly as the user
@@ -157,6 +170,7 @@ def extract_intent(user_message: str, conversation_context: str = "") -> dict:
             "countries_mentioned": [],
             "country_group_mentioned": None,
             "period_expression": None,
+            "period_labels": [],
             "explicit_frequency": None,
             "growth_method_hint": None,
             "extremum": None,
