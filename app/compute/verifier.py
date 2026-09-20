@@ -283,6 +283,10 @@ _T = {
         "en": " The published series runs from {a} to {b}.",
         "ar": " وتمتد السلسلة المنشورة من {a} إلى {b}.",
     },
+    "premise_corrected": {
+        "en": " (The question said {stated}%; the published figure is {actual}%.)",
+        "ar": " (ذكر السؤال {stated}%؛ والرقم المنشور هو {actual}%.)",
+    },
     "not_ranked": {
         "en": "{n} of {total} could not be ranked: ",
         "ar": "تعذّر ترتيب {n} من {total}: ",
@@ -333,10 +337,14 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
 
     if "complement_share" in facts:
         key = "complement" if facts.get("complement_of") else "remainder_unnamed"
-        return _t(key, language, other=facts.get("complement_of") or "",
+        line = _t(key, language, other=facts.get("complement_of") or "",
                    pct=facts["complement_share"], ind=facts["reported_share_of"],
                    share=facts["reported_share"], per=facts.get("period_label"),
                    derivation=facts["derivation"])
+        if facts.get("stated_in_question") is not None:
+            line += _t("premise_corrected", language,
+                        stated=facts["stated_in_question"], actual=facts["reported_share"])
+        return line
     if "assessment" in facts:
         verdict = _t({"improving": "improving", "deteriorating": "deteriorating",
                        "unchanged": "unchanged_word"}[facts["assessment"]], language)

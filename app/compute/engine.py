@@ -710,11 +710,28 @@ def complement_of_share(actual, indicator_name: str, question: str) -> ComputeRe
         return ComputeResult(False, message=(
             "This reading is not a percentage between 0 and 100, so a remaining "
             "share cannot be derived from it."))
-    return ComputeResult(True, facts={
+
+    # A figure the question ASSERTS, which may not be the published one. "If
+    # non-hydrocarbon exports account for 40%..." was answered 61.411% from the
+    # published 38.589% — the right number, and it never said the premise was
+    # wrong. Correcting a premise silently is how a reader walks away still
+    # believing it.
+    stated = None
+    for text in re.findall(r"(?<![\w.])(\d+(?:\.\d+)?)\s*%", question or ""):
+        value = float(text)
+        places = len(text.split(".")[1]) if "." in text else 0
+        if round(share, places) != value:
+            stated = value
+            break
+
+    facts = {
         "reported_share": round(share, 4),
         "reported_share_of": indicator_name.strip(),
         "complement_share": round(100 - share, 4),
         "complement_of": f"{match.group('term')} {match.group('noun')}",
         "derivation": f"100 - {round(share, 4)} = {round(100 - share, 4)}",
         "unit": "%",
-    })
+    }
+    if stated is not None:
+        facts["stated_in_question"] = stated
+    return ComputeResult(True, facts=facts)

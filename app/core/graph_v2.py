@@ -397,6 +397,18 @@ def handle_message(user_message: str, conversation_context: str = "",
 
     # --- everything below needs an indicator resolved first ---
     indicator_phrase = intent.get("indicator_phrase")
+    # A complement question names TWO things: the indicator that exists and the
+    # side that does not. Which one the model extracts decides whether the
+    # question works at all — "...account for 40%..." gave "non-hydrocarbon
+    # exports" and was answered, "...account for 66%..." gave "share of
+    # hydrocarbon exports", which is not in the catalogue by design, and was
+    # refused. Same question, different wording of a number.
+    #
+    # The whole message is used instead. It contains the published indicator's
+    # own wording, and the complement rule downstream is what decides whether
+    # the other side can be derived.
+    if _asks_for_complement_share(user_message):
+        indicator_phrase = user_message
     if not indicator_phrase and intent.get("is_followup") and session_state.get("last_indicator_name"):
         indicator_phrase = session_state["last_indicator_name"]
     if not indicator_phrase and session_state.get("last_metrics")             and not has_identifying_content(user_message):
