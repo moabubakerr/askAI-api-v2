@@ -31,7 +31,8 @@ from app.resolvers.country_resolver import resolve_countries
 from app.resolvers.period_resolver import (parse_period_expression, parse_explicit_frequency,
                                             choose_granularity, parse_period_pair,
                                             parse_relative_pair, year_earlier_label,
-                                            single_period_label, period_kind)
+                                            single_period_label, period_kind,
+                                            parse_same_period_pair)
 from app.db import retriever
 from app.compute import engine as compute
 from app.compute.verifier import verify_numbers, render_template_fallback
@@ -845,7 +846,12 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         # had already been narrowed to ONE period by the single-quarter branch
         # of the period parser — so "between Q1 2025 and Q4 2025" returned one
         # row and the answer was "could not find two distinct periods".
-        pair = parse_period_pair(period.raw)
+        # "...the same quarter of 2025" writes its second period as a bare
+        # year, borrowing the quarter from the first. Checked alongside the
+        # explicit pair because parse_period_pair reads it literally, as a
+        # quarter next to a year, and declines the mixed granularity.
+        pair = (parse_period_pair(period.raw)
+                or parse_same_period_pair(period.raw or user_message))
         # A comparison stated relative to now — "this year and the year before
         # it", "compared with the previous year" — names no date for the token
         # scanner to find, so it was answered "I need two specific periods to

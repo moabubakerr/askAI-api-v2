@@ -53,12 +53,35 @@ def parse_explicit_frequency(explicit_frequency: Optional[str]) -> Optional[str]
 
 # Every way a single period is written in these questions, in canonical
 # period_label form: 'YYYY', 'YYYY-Q#', 'YYYY-MM'.
+# Arabic ordinals for quarters, and Arabic month names. Without these the
+# Arabic half of the product had no period parsing at all: "الربع الأول 2026"
+# scanned as the bare year 2026, so a question about one quarter was answered
+# about the whole year, silently.
+_AR_QUARTERS = {"الأول": 1, "الاول": 1, "الثاني": 2, "الثالث": 3, "الرابع": 4,
+                "أول": 1, "اول": 1, "ثاني": 2, "ثالث": 3, "رابع": 4}
+_AR_MONTHS = {
+    "يناير": 1, "كانون الثاني": 1, "فبراير": 2, "شباط": 2, "مارس": 3, "آذار": 3,
+    "أبريل": 4, "إبريل": 4, "ابريل": 4, "نيسان": 4, "مايو": 5, "أيار": 5,
+    "يونيو": 6, "يونيه": 6, "حزيران": 6, "يوليو": 7, "يوليه": 7, "تموز": 7,
+    "أغسطس": 8, "اغسطس": 8, "آب": 8, "سبتمبر": 9, "أيلول": 9,
+    "أكتوبر": 10, "اكتوبر": 10, "تشرين الأول": 10, "نوفمبر": 11, "تشرين الثاني": 11,
+    "ديسمبر": 12, "كانون الأول": 12,
+}
+
+# Longest first, so "تشرين الأول" is not matched as "تشرين" plus a stray ordinal.
+_AR_Q_ALT = "|".join(sorted(map(re.escape, _AR_QUARTERS), key=len, reverse=True))
+_AR_M_ALT = "|".join(sorted(map(re.escape, _AR_MONTHS), key=len, reverse=True))
+
 _PERIOD_TOKEN = re.compile(
     r"(?P<q1>\d{4})[\s-]*q(?P<q1n>[1-4])"          # 2025-Q1 / 2025 q1
     r"|q(?P<q2n>[1-4])[\s-]*(?P<q2>\d{4})"          # Q1 2025 / Q1-2025
     r"|(?P<m1>\d{4})-(?P<m1n>0[1-9]|1[0-2])"         # 2025-05
     r"|(?P<mname>january|february|march|april|may|june|july|august|september|"
     r"october|november|december)\s+(?P<my>\d{4})"    # May 2025
+    # الربع الأول 2026 / الربع الأول من عام 2026
+    r"|الربع\s+(?P<arq>" + _AR_Q_ALT + r")(?:\s+(?:من|في|لعام|لسنة|عام|سنة))*\s*(?P<ary>\d{4})"
+    # مايو 2025 / أيار 2025
+    r"|(?P<armname>" + _AR_M_ALT + r")\s+(?:من\s+)?(?:عام\s+|سنة\s+)?(?P<army>\d{4})"
     r"|(?P<y>\d{4})",                                 # 2025
     re.IGNORECASE,
 )
@@ -83,6 +106,10 @@ def scan_period_labels(expr: Optional[str]) -> list[str]:
             label = f"{m.group('m1')}-{m.group('m1n')}"
         elif m.group("mname"):
             label = f"{m.group('my')}-{_MONTH_NAMES[m.group('mname')]:02d}"
+        elif m.group("arq"):
+            label = f"{m.group('ary')}-Q{_AR_QUARTERS[m.group('arq')]}"
+        elif m.group("armname"):
+            label = f"{m.group('army')}-{_AR_MONTHS[m.group('armname')]:02d}"
         else:
             label = m.group("y")
         if label not in found:
@@ -99,6 +126,38 @@ def single_period_label(expr: Optional[str]) -> Optional[str]:
     """
     found = scan_period_labels(expr)
     return found[0] if len(found) == 1 else None
+
+
+# No \b before the Arabic: word boundaries do not behave on Arabic script, and
+# the word arrives prefixed ("بنفس الربع"), so an anchored match never fired.
+_SAME_PERIOD = re.compile(
+    r"\bsame\s+(quarter|month|period)\b|نفس\s*ال?(ربع|شهر|فترة)",
+    re.IGNORECASE)
+
+
+def parse_same_period_pair(expr: Optional[str]):
+    """"Q1 2026 compared with the same quarter of 2025" -> ('2025-Q1', '2026-Q1').
+
+    The phrase names two periods but writes the second one as a bare year,
+    borrowing its quarter from the first. parse_period_pair saw '2026-Q1' and
+    '2025', called them mixed granularities — which they are, read literally —
+    and declined, so the question was answered "I need two specific periods to
+    compare" when it had given both.
+
+    With no year named ("the same quarter a year earlier") it steps back one
+    year from the quarter that was named.
+    """
+    if not expr or not _SAME_PERIOD.search(expr):
+        return None
+    labels = scan_period_labels(expr)
+    anchor = next((l for l in labels if period_kind(l) in ("q", "m")), None)
+    if not anchor:
+        return None
+    year = next((l for l in labels if period_kind(l) == "y"), None)
+    other = f"{year}-{anchor.split('-', 1)[1]}" if year else year_earlier_label(anchor)
+    if not other or other == anchor:
+        return None
+    return tuple(sorted((anchor, other)))
 
 
 def parse_period_pair(expr: Optional[str]):
@@ -178,28 +237,17 @@ def parse_period_expression(expr: Optional[str]) -> PeriodResolution:
     if m:
         return PeriodResolution(kind="last_n_years", n_years=int(m.group(1)), raw=expr)
 
-    # "YYYY-MM" or a named month + year, e.g. "May 2025"
-    m = re.search(r"(\d{4})-(\d{2})", text_l)
-    if m:
-        y, mo = int(m.group(1)), int(m.group(2))
-        return PeriodResolution(kind="single_month", start_date=date(y, mo, 1),
-                                 end_date=_end_of_month(y, mo), raw=expr)
-
-    for name, num in _MONTH_NAMES.items():
-        m = re.search(rf"{name}\s+(\d{{4}})", text_l)
-        if m:
-            y = int(m.group(1))
-            return PeriodResolution(kind="single_month", start_date=date(y, num, 1),
-                                     end_date=_end_of_month(y, num), raw=expr)
-
-    # "Q1 2025" / "2025-Q1"
-    m = re.search(r"q(\d)\s*(\d{4})", text_l) or re.search(r"(\d{4})[\s-]*q(\d)", text_l)
-    if m:
-        groups = m.groups()
-        year, q = (int(groups[1]), int(groups[0])) if len(groups[0]) == 1 else (int(groups[0]), int(groups[1]))
-        month = {1: 1, 2: 4, 3: 7, 4: 10}[q]
-        return PeriodResolution(kind="single_quarter", start_date=date(year, month, 1),
-                                 end_date=_end_of_month(year, month + 2), raw=expr)
+    # ONE named period — month or quarter — from the same scanner the pair
+    # parser uses. This was three separate English-only regexes duplicating
+    # that scanner, so an Arabic quarter fell past all of them to the bare-year
+    # branch at the bottom: "الربع الأول 2026" was answered about the whole of
+    # 2026, with nothing in the answer to show the quarter had been dropped.
+    labels = scan_period_labels(expr)
+    if len(labels) == 1 and period_kind(labels[0]) in ("q", "m"):
+        start, end = label_bounds(labels[0])
+        return PeriodResolution(
+            kind="single_quarter" if period_kind(labels[0]) == "q" else "single_month",
+            start_date=start, end_date=end, raw=expr)
 
     # "between 2022 and 2025" / "2022 to 2025" / "from 2022 to 2025"
     m = re.search(r"(\d{4}).{0,10}(?:to|and|-)\s*(\d{4})", text_l)
