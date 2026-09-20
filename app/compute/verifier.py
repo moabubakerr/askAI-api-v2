@@ -239,6 +239,21 @@ _T = {
         "en": "SCAI records the desired direction for this indicator as an increase.",
         "ar": "يسجّل المجلس الاتجاه المرغوب لهذا المؤشر على أنه ارتفاع.",
     },
+    "places": {"en": "places", "ar": "مراكز"},
+    "rank_assessment": {
+        "en": ("{ind} was {val} in {per}, {dir} from {prev} in {prevper} — a move of "
+                "{amount} {kind}, {verdict}. {basis}"),
+        "ar": ("بلغ {ind} {val} في {per}، {dir} من {prev} في {prevper} — بتغير قدره "
+                "{amount} {kind}، {verdict}. {basis}"),
+    },
+    "rank_leader": {
+        "en": "{country} had the {extremum} {ind} in {per}, at {val}.",
+        "ar": "سجّلت {country} {extremum} {ind} في {per}، بقيمة {val}.",
+    },
+    "lowest": {"en": "lowest", "ar": "أدنى"},
+    "highest": {"en": "highest", "ar": "أعلى"},
+    "no_data_for": {"en": "No approved data for: {names}.",
+                     "ar": "لا تتوفر بيانات معتمدة لـ: {names}."},
     "not_ranked": {
         "en": "{n} of {total} could not be ranked: ",
         "ar": "تعذّر ترتيب {n} من {total}: ",
@@ -296,9 +311,22 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
     if "assessment" in facts:
         verdict = _t({"improving": "improving", "deteriorating": "deteriorating",
                        "unchanged": "unchanged_word"}[facts["assessment"]], language)
-        kind = _t("pp" if facts.get("change_kind") == "percentage_points" else "pct_sign",
-                   language)
+        kind = _t({"percentage_points": "pp", "places": "places"}.get(
+            facts.get("change_kind"), "pct_sign"), language)
         direction = _t({"up": "up", "down": "down"}.get(facts.get("direction"), "flat"), language)
+        # A rank move is stated as a move BETWEEN POSITIONS, never as a
+        # percentage. "9th to 11th" is two places; "22.2% worse" is a
+        # percentage of an ordinal, which means nothing.
+        if facts.get("change_kind") == "places" and facts.get("previous_value") is not None:
+            return _t("rank_assessment", language, ind=indicator,
+                       val=fmt(facts.get("actual")), per=facts.get("period_label"),
+                       dir=direction, prev=fmt(facts.get("previous_value")),
+                       prevper=facts.get("previous_period"),
+                       amount=abs(facts.get("change", 0)), kind=_t("places", language),
+                       verdict=verdict,
+                       basis=_t(f"desired_{facts.get('desired_direction', 'increase')}",
+                                 language) if facts.get("desired_direction")
+                       else facts.get("assessment_basis", "")).strip()
         return _t("assessment", language, ind=indicator, val=fmt(facts.get("actual")),
                    per=facts.get("period_label"), dir=direction,
                    amount=abs(facts.get("change", 0)), kind=kind, verdict=verdict,
@@ -401,6 +429,20 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                         hip=facts["highest_period"], lo=fmt(facts.get("lowest_value")),
                         lop=facts.get("lowest_period"))
         return line
+    if "ranked" in facts and facts.get("leader"):
+        leader = facts["leader"]
+        lines = [_t("rank_leader", language, country=leader.get("country"),
+                     extremum=_t(facts.get("extremum", "lowest"), language),
+                     ind=indicator, per=leader.get("period_label"),
+                     val=f"{trim_zeros(leader.get('actual'))} {unit}".strip())]
+        for i, row in enumerate(facts["ranked"], 1):
+            lines.append(f"{i}. {row.get('country')}: "
+                         f"{trim_zeros(row.get('actual'))} {unit}".strip()
+                         + f" ({row.get('period_label')})")
+        if facts.get("countries_with_no_data"):
+            lines.append(_t("no_data_for", language,
+                             names=", ".join(facts["countries_with_no_data"])))
+        return "\n".join(lines)
     if "increasing" in facts and "declining" in facts:
         scope = facts.get("scope") or _t("these_indicators", language)
         lines = [_t("vs_year_earlier", language, scope=scope)]

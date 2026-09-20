@@ -189,6 +189,12 @@ def handle_message(user_message: str, conversation_context: str = "",
         session_state["last_period_expression"] = intent["period_expression"]
     if intent.get("explicit_frequency"):
         session_state["last_explicit_frequency"] = intent["explicit_frequency"]
+    # Which end of a ranking was asked for, so "what about in 2022" keeps it.
+    # Without this the follow-up relied on the default happening to match.
+    if intent.get("extremum"):
+        session_state["last_extremum"] = intent["extremum"]
+    elif intent.get("is_followup") and session_state.get("last_extremum"):
+        intent["extremum"] = session_state["last_extremum"]
     if intent.get("countries_mentioned"):
         session_state["last_countries"] = list(intent["countries_mentioned"])
     if intent.get("country_group_mentioned"):
@@ -849,7 +855,9 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         for gran in [g for g in ("monthly", "quarterly", "yearly") if g in available]:
             candidate_rows = retriever.get_series(match.indicator_detail_id, published_detail_id,
                                                    gran, country_en=single_country)
-            candidate = compute.direction_assessment(candidate_rows, gran, match.polarity_en)
+            candidate = compute.direction_assessment(
+                candidate_rows, gran, match.polarity_en, unit=unit,
+                period_label=single_period_label(period.raw or user_message))
             result = result or candidate
             if candidate.ok:
                 result, rows, granularity = candidate, candidate_rows, gran

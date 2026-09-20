@@ -263,6 +263,13 @@ def country_ranking(series_by_country: dict[str, list[dict]], period_label: Opti
         "ranked": rows,
         "countries_with_no_data": comparison.facts["countries_with_no_data"],
         "period_used": rows[0]["period_label"] if rows else None,
+        # WHICH END answers the question. The list was sorted correctly and
+        # carried no statement of what the sort meant, so a follow-up to "which
+        # country had the LOWEST inflation" was written up as "Qatar had the
+        # highest" — the right table under the wrong sentence. The first row is
+        # the answer; say so rather than leaving it to be inferred.
+        "extremum": "lowest" if ascending else "highest",
+        "leader": rows[0] if rows else None,
     })
 
 
@@ -430,8 +437,13 @@ def scope_direction(entries: list[dict]) -> ComputeResult:
     })
 
 
+def _is_rank(unit: Optional[str]) -> bool:
+    return (unit or "").strip().lower() in ("rank", "ranking", "المرتبة")
+
+
 def direction_assessment(rows: list[dict], granularity: str,
-                          polarity: Optional[str]) -> ComputeResult:
+                          polarity: Optional[str], unit: Optional[str] = None,
+                          period_label: Optional[str] = None) -> ComputeResult:
     """Is this indicator getting better or worse? Decided from polarity, not opinion.
 
     "Improving" is a judgement everywhere else in this system and forbidden to
@@ -448,17 +460,42 @@ def direction_assessment(rows: list[dict], granularity: str,
     actuals = [r for r in rows if r.get("actual") is not None]
     if not actuals:
         return ComputeResult(False, message="No approved data points were found for this indicator.")
-    latest = actuals[-1]
+    # The period the question named, when it named one. "Did competitiveness
+    # improve in 2026" is about 2026 against 2025, not about whatever the
+    # series happens to end at.
+    latest = next((r for r in actuals if r.get("period_label") == period_label), None)         if period_label else None
+    latest = latest or actuals[-1]
 
+    change_basis = "published"
     change = preferred_change_field(latest, granularity, as_points=True)
     change_kind = "percentage_points"
     if change is None:
         change = preferred_change_field(latest, granularity)
         change_kind = "percent"
+
+    # Nothing published. Fall back to the reading before this one, which is a
+    # subtraction between two published figures — the same operation
+    # period_to_period_change already performs, not a new claim.
+    #
+    # This is the only way ranks are answerable at all: not one of the ten rank
+    # indicators publishes a single period-on-period figure, so every "has the
+    # ranking improved?" was refused about a series that plainly shows it.
+    previous = None
+    if change is None:
+        index = actuals.index(latest)
+        if index > 0:
+            previous = actuals[index - 1]
+            change = float(latest["actual"]) - float(previous["actual"])
+            # Rank movement is counted in PLACES. Calling 9th -> 11th a
+            # "22.2% deterioration" is the misleading rank language this must
+            # not produce: the gap between 9th and 11th is two places, and a
+            # percentage of an ordinal position means nothing.
+            change_kind = "places" if _is_rank(unit) else "absolute"
+            change_basis = "computed_from_series"
     if change is None:
         return ComputeResult(False, message=(
-            "No published period-on-period change is available for this indicator, "
-            "so its direction of travel cannot be stated from the approved data."))
+            "Only one reading is published for this indicator, so there is nothing "
+            "to compare it against and its direction of travel cannot be stated."))
 
     change = round(float(change), 4)
     wants_lower = (polarity or "").strip().lower().startswith("decrease")
@@ -472,6 +509,8 @@ def direction_assessment(rows: list[dict], granularity: str,
     return ComputeResult(True, facts={
         "actual": latest["actual"],
         "period_label": latest["period_label"],
+        "previous_value": previous["actual"] if previous else None,
+        "previous_period": previous["period_label"] if previous else None,
         "change": change,
         "change_kind": change_kind,
         "direction": "down" if change < 0 else "up" if change > 0 else "flat",
@@ -482,6 +521,8 @@ def direction_assessment(rows: list[dict], granularity: str,
         # written by whatever renders the answer, in the reader's language.
         "desired_direction": "decrease" if wants_lower else "increase",
         "granularity": granularity,
+        "change_basis": change_basis,
+        "unit": unit,
     })
 
 
