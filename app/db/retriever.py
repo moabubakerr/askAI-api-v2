@@ -406,6 +406,15 @@ latest AS (
 )
 SELECT i.name_en AS indicator, i.indicator_id AS indicator_record_id,
        d.unit_en, d.unit_ar, d.format, d.polarity_en,
+       -- What the DETAIL is called, and how many the indicator has. IsMain is
+       -- not always the headline: Workforce (Economically Active) has four
+       -- details and its main one is "High Skilled Blue Collar", a single
+       -- component reported under the parent's name as though it were the
+       -- total. 0.593054m was being shown as Qatar's workforce; the four
+       -- components sum to 2.240506m.
+       d.name_en AS detail_name,
+       (SELECT COUNT(*) FROM indicator_details sd
+         WHERE sd.indicator_id = i.indicator_id AND sd.is_published) AS sibling_count,
        d.target_value, d.target_year, d.baseline_value, d.baseline_year,
        l.period_label, l.actual, l.period_target, l.record_id, l.granularity,
        l.monthly_yoy_percent, l.quarterly_yoy_percent, l.yearly_yoy_percent,

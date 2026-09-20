@@ -265,6 +265,10 @@ _T = {
         "ar": (" القراءتان من فترتين مختلفتين ({periods})، لذا تُعامل هذه المقارنة "
                 "كمؤشر اتجاه لا كمقارنة متطابقة الفترة."),
     },
+    "component_note": {
+        "en": " — this is the \"{part}\" component, one of {n} published under this indicator; no combined total is published.",
+        "ar": " — هذا هو مكوّن \"{part}\"، أحد {n} مكوّنات منشورة تحت هذا المؤشر؛ ولا يُنشر إجمالي مجمّع.",
+    },
     "not_ranked": {
         "en": "{n} of {total} could not be ranked: ",
         "ar": "تعذّر ترتيب {n} من {total}: ",
@@ -388,6 +392,9 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                             per=e.get("previous_period"))
             if e.get("change_yoy_percent") is not None:
                 line += _t("yoy", language, pct=e["change_yoy_percent"])
+            if e.get("component_name"):
+                line += _t("component_note", language, part=e["component_name"],
+                            n=e.get("component_of_total"))
             lines.append(line)
         if facts.get("ranked_by_level"):
             ordered = facts["ranked_by_level"]

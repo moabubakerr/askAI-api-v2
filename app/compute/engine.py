@@ -401,6 +401,10 @@ def scope_direction(entries: list[dict]) -> ComputeResult:
             "unit": e.get("unit_en"),
             "polarity": e.get("polarity_en"),
         }
+        component = component_label(e)
+        if component:
+            row["component_name"] = component
+            row["component_of_total"] = e.get("sibling_count")
         if change is None:
             row["reason_code"] = ("no_reading" if e.get("actual") is None
                                    else "no_yoy_published")
@@ -526,6 +530,33 @@ def direction_assessment(rows: list[dict], granularity: str,
     })
 
 
+def component_label(entry: dict) -> Optional[str]:
+    """The detail's own name, when reporting it under the indicator's name
+    would misdescribe it.
+
+    IsMain is meant to pick the headline reading, and for 175 of the 189
+    published indicators it does. For fourteen it picks one row out of several,
+    and for seven of those the row is a plain component: Workforce
+    (Economically Active) -> "High Skilled Blue Collar", Minimum Reserves of
+    Strategic Commodities -> "Onions", Self-Sufficiency for Strategic
+    Commodities -> "Milk/Dairy". Printing 0.593054m under "Workforce
+    (Economically Active)" states that Qatar's workforce is 0.59 million when
+    the four published components sum to 2.24 million.
+
+    Where the detail is named "Total ..." it IS the headline and nothing is
+    added — that covers the other seven.
+    """
+    detail = (entry.get("detail_name") or "").strip()
+    indicator = (entry.get("indicator") or "").strip()
+    if not detail or (entry.get("sibling_count") or 1) <= 1:
+        return None
+    if detail.lower() == indicator.lower():
+        return None
+    if "total" in detail.lower():
+        return None
+    return detail
+
+
 def scope_snapshot(entries: list[dict]) -> ComputeResult:
     """Current reading for every indicator in a group.
 
@@ -556,6 +587,10 @@ def scope_snapshot(entries: list[dict]) -> ComputeResult:
             "granularity": e.get("granularity"),
             "polarity": e.get("polarity_en"),
         }
+        component = component_label(e)
+        if component:
+            line["component_name"] = component
+            line["component_of_total"] = e.get("sibling_count")
         if e.get("decimal_places") is not None:
             line["decimal_places"] = e["decimal_places"]
         change = preferred_change_field(e, e.get("granularity") or "")

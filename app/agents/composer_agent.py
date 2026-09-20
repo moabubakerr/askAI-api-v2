@@ -108,6 +108,11 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    "periods_differ" is true you MUST say the readings are from different
    periods and that this is a directional comparison, not a matched-period one;
    omitting that claims a precision the figures do not have.
+   "component_name" means the reading is ONE named component of the indicator,
+   not its total — "High Skilled Blue Collar" out of the four published under
+   Workforce (Economically Active). Say which component it is and that no
+   combined total is published. Reporting it under the indicator's name alone
+   states a total that does not exist.
    "change_ranking" orders the lines by movement, most negative first. Use it
    to answer "which fell the most" / "which grew fastest" — never order the
    figures yourself. It covers only the lines that HAVE a change; if some do

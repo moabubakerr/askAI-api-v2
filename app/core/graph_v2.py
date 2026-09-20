@@ -213,6 +213,21 @@ def handle_message(user_message: str, conversation_context: str = "",
         return _finish(payload, language, session_state, citations,
                         question=user_message)
 
+    # Rescue before refusing. Several deterministic routes are decided further
+    # down, once an indicator has resolved — and this return fires first, so
+    # anything the intent agent called out_of_scope never reached them.
+    # "If non-hydrocarbon exports account for 38.6%, what share still comes
+    # from hydrocarbon exports?" reads like a puzzle rather than a data
+    # question, the model classified it out_of_scope, and the complement route
+    # built for exactly that question was unreachable.
+    if ctype == "out_of_scope":
+        if _asks_for_complement_share(user_message):
+            ctype = "complement_share"
+        elif _asks_if_improving(user_message):
+            ctype = "direction_check"
+        elif _asks_for_direction_split(user_message):
+            ctype = "scope_direction"
+
     if ctype == "out_of_scope":
         payload = {"ok": False, "message": msg("out_of_scope", language)}
         return _finish(payload, language, session_state, [],
@@ -451,7 +466,8 @@ def handle_message(user_message: str, conversation_context: str = "",
     # and 3.94 — the figure the user quoted picks one outright, and asking them
     # to choose again ignores what they already said.
     if resolution.status == "ambiguous" and resolution.candidates:
-        picked = _disambiguate_by_quoted_value(resolution.candidates, user_message)
+        picked = (_disambiguate_by_quoted_value(resolution.candidates, user_message)
+                  or _disambiguate_by_asked_unit(resolution.candidates, user_message))
         if picked:
             resolution = ResolutionResult(picked, "resolved", [])
 
@@ -1594,6 +1610,41 @@ def _asks_if_improving(text: str) -> bool:
 
 # A figure the user quoted back at us, e.g. "the 13.4% share of ...".
 _QUOTED_FIGURE = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s*%")
+
+
+# "how much ... was generated" asks for an AMOUNT; "what share/percentage"
+# asks for a proportion. The catalogue holds both for the same subject — three
+# non-hydrocarbon government revenue indicators, one in riyals and two as
+# shares — so the wording separates them without troubling the user.
+_ASKS_AMOUNT = re.compile(
+    r"\bhow much\b|\bhow many\b|\bwas generated\b|\bwas raised\b|\bwas collected\b"
+    r"|\bvalue of\b|\bamount of\b|\btotal\b|كم\s|قيمة|مبلغ",
+    re.IGNORECASE)
+_ASKS_SHARE = re.compile(
+    r"\bshare\b|\bpercent\w*\b|\bproportion\b|\bas a %\b|%|نسبة|حصة",
+    re.IGNORECASE)
+
+
+def _disambiguate_by_asked_unit(candidates, user_message: str):
+    """Picks between candidates that differ by what they MEASURE.
+
+    "How much non-hydrocarbon government revenue was generated in Q4 2025"
+    offered three indicators: one in riyals and two expressed as shares. The
+    question asks how much, so only the amount can answer it — and asking the
+    user to choose between a figure and two percentages, when they have already
+    said which they want, is the system not reading the question.
+
+    Decides only when exactly one candidate is left.
+    """
+    text = user_message or ""
+    wants_amount = bool(_ASKS_AMOUNT.search(text)) and not _ASKS_SHARE.search(text)
+    wants_share = bool(_ASKS_SHARE.search(text)) and not _ASKS_AMOUNT.search(text)
+    if not (wants_amount or wants_share):
+        return None
+    shares = [c for c in candidates if (c.unit_en or "").strip() == "%"]
+    amounts = [c for c in candidates if (c.unit_en or "").strip() != "%"]
+    wanted = amounts if wants_amount else shares
+    return wanted[0] if len(wanted) == 1 else None
 
 
 def _disambiguate_by_quoted_value(candidates, user_message: str):

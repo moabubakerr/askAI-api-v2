@@ -240,6 +240,23 @@ INDICATOR_ALIASES = {
     # Nothing bridged the two, so "How much of Qatar's exports are non-oil?"
     # was refused as an indicator that does not exist — while the indicator
     # sat there, published, with the answer in it.
+    # "diversification of X" is how the strategy documents say it; the
+    # catalogue says "Non-Hydrocarbon X as a share of total X". Nothing bridged
+    # them, so "compare the diversification of exports with the diversification
+    # of government revenues" matched neither side.
+    "diversification of exports": "Non-Hydrocarbon Exports (share of total exports)",
+    "export diversification": "Non-Hydrocarbon Exports (share of total exports)",
+    "diversification of government revenues":
+        "Non-Hydrocarbon Government Revenues as Share of Government Revenues",
+    "diversification of government revenue":
+        "Non-Hydrocarbon Government Revenues as Share of Government Revenues",
+    "revenue diversification":
+        "Non-Hydrocarbon Government Revenues as Share of Government Revenues",
+    "fiscal diversification":
+        "Non-Hydrocarbon Government Revenues as Share of Government Revenues",
+    "تنويع الصادرات": "Non-Hydrocarbon Exports (share of total exports)",
+    "تنويع الإيرادات": "Non-Hydrocarbon Government Revenues as Share of Government Revenues",
+
     "non-oil exports": "Non-Hydrocarbon Exports (share of total exports)",
     "non oil exports": "Non-Hydrocarbon Exports (share of total exports)",
     "nonoil exports": "Non-Hydrocarbon Exports (share of total exports)",
