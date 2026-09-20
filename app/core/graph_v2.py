@@ -1457,7 +1457,7 @@ def _macro_overview(language="en"):
 
     Delegates to _indicator_snapshot rather than repeating it. This function
     used to be its own older copy of the same loop, and had drifted: it read
-    unit_en raw, so Real GDP printed as "185.17 QAR" instead of "185.17 QAR bn"
+    unit_en raw, so Real GDP printed as "185.17 QAR" instead of "185.17 billion QAR"
     while the prose beside it said "QAR 185.2 billion"; and it carried no
     period-on-period change at all, so "how is the economy doing right now?"
     could only list four levels and call that an answer.

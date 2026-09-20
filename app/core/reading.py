@@ -27,6 +27,7 @@ from typing import Optional
 from app.core.graph_v2 import handle_message
 from app.agents.reader_agent import read_plainly
 from app.compute.verifier import verify_numbers
+from app.compute.formatting import trim_zeros
 from app.db import retriever
 
 
@@ -55,7 +56,7 @@ def humanize_period(period_label: Optional[str]) -> Optional[str]:
 def _format_value(value, unit: Optional[str]) -> str:
     if value is None:
         return "—"
-    text = str(value)
+    text = trim_zeros(value)
     return f"{text} {unit}".strip() if unit else text
 
 

@@ -11,6 +11,8 @@ payload (see render_template_fallback), which has no LLM in the loop at all.
 import re
 from decimal import Decimal
 
+from app.compute.formatting import trim_zeros
+
 
 # The lookbehind stops a hyphen being read as a minus sign when it follows a
 # word character, which made period labels parse asymmetrically: the payload's
@@ -129,7 +131,10 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
     # answer, not a debug view — the previous version looked like the system had
     # broken even though the data behind it was correct.
     def fmt(value):
-        return f"{value} {unit}".strip() if value is not None else "—"
+        # trim_zeros, not rounding: Decimal('3.680000') printed "a change of
+        # 3.680000 QAR" — six decimals of apparent precision on a figure that
+        # has two. Padding only; the digits themselves are untouched.
+        return f"{trim_zeros(value)} {unit}".strip() if value is not None else "—"
 
     if "actual" in facts and "period_label" in facts:
         line = f"{indicator} was {fmt(facts['actual'])} in {facts['period_label']}."
@@ -164,13 +169,13 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                 lines.append(f"{e.get('indicator')}: {e['change_yoy_percent']}% YoY "
                              f"({e.get('period_label')})")
             else:
-                shown = f"{value} {unit}".strip() if value is not None else "no reading"
+                shown = f"{trim_zeros(value)} {unit}".strip() if value is not None else "no reading"
                 line = f"{e.get('indicator')}: {shown} ({e.get('period_label')})"
                 # The movement, not just the level. "How is the economy doing"
                 # answered with four current values is a list of readings, not
                 # an answer — the direction is the question.
                 if e.get("previous_value") is not None:
-                    line += (f", from {e['previous_value']} {unit}".rstrip()
+                    line += (f", from {trim_zeros(e['previous_value'])} {unit}".rstrip()
                              + f" in {e.get('previous_period')}")
                 if e.get("change_yoy_percent") is not None:
                     line += f" ({e['change_yoy_percent']}% YoY)"
@@ -188,7 +193,7 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                 continue
             lines.append(f"\n{label} ({len(group)}):")
             for e in group:
-                value = f"{e.get('actual')} {e.get('unit') or ''}".strip()
+                value = f"{trim_zeros(e.get('actual'))} {e.get('unit') or ''}".strip()
                 lines.append(f"- {e.get('indicator')}: {e.get('change_yoy_percent')}% "
                              f"({value} in {e.get('period_label')})")
         skipped = facts.get("no_comparison") or []
@@ -205,7 +210,7 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
         lines = [f"{scope}, ranked by progress against each indicator's own target "
                  f"({order}):"]
         for i, e in enumerate(facts["ranked_indicators"], 1):
-            value = f"{e.get('actual')} {e.get('unit') or ''}".strip()
+            value = f"{trim_zeros(e.get('actual'))} {e.get('unit') or ''}".strip()
             lines.append(f"{i}. {e.get('indicator')} — {e.get('attainment_percent')}% of target "
                          f"({value} in {e.get('period_label')}, target {e.get('target')})")
         skipped = facts.get("not_assessable") or []
