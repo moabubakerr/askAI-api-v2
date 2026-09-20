@@ -135,6 +135,10 @@ def handle_message(user_message: str, conversation_context: str = "",
     # earlier indicator AND period instead of only the indicator.
     intent = carry_forward(intent, session_state, user_message)
     ctype = intent.get("computation_type", "out_of_scope")
+    # Set when "which performed best?" is redirected onto a country ranking, so
+    # the direction comes from the indicator's polarity rather than from a
+    # superlative the user never used.
+    performance_followup = False
 
     # Greetings are decided here, not by the model. It routed "اهلا" and
     # "كيف حالك" to general_chat but sent "سلام" and "سلام علبكم" down the data
@@ -240,10 +244,25 @@ def handle_message(user_message: str, conversation_context: str = "",
         if not kind and session_state.get("last_catalog_scope"):
             kind = session_state["last_catalog_scope"]["kind"]
             scope = session_state["last_catalog_scope"]["scope"]
-        if not kind:
+        # No group of indicators in play, but the previous turn ranked a set of
+        # COUNTRIES on one indicator. "Which is the best performing one?" then
+        # means best on that indicator, and the answer is already sitting in the
+        # previous turn — asking it again as a fresh question is how this came
+        # back "No indicator matches 'most preformed one'".
+        if not kind and session_state.get("last_indicator_name"):
+            ctype = "country_ranking"
+            intent["indicator_phrase"] = (intent.get("indicator_phrase")
+                                           or session_state["last_indicator_name"])
+            # Which end of the ranking is "best" is not the user's to state and
+            # not ours to assume — polarity_en says it, and for Inflation it
+            # says Decrease, so best performing is the LOWEST. Resolved below,
+            # once the indicator is.
+            performance_followup = True
+        elif not kind:
             payload = {"ok": False, "message": msg("performance_needs_scope", language)}
             return _finish(payload, language, session_state, [], question=user_message)
 
+    if ctype == "scope_performance":
         session_state["last_catalog_scope"] = {"kind": kind, "scope": scope}
         entries = retriever.get_scope_performance(kind, scope)
         # Each row is a different indicator with its own unit and precision, so
@@ -564,7 +583,9 @@ def handle_message(user_message: str, conversation_context: str = "",
     countries_res = resolve_countries(intent.get("countries_mentioned", []), intent.get("country_group_mentioned"))
 
     payload, citations = _dispatch_computation(ctype, intent, match, published_detail_id, granularity,
-                                                period, countries_res, language)
+                                                period, countries_res, language,
+                                                performance_followup=performance_followup,
+                                                user_message=user_message)
 
     # Flag a shaky resolution so _finish can disclose it. The threshold sits
     # above MIN_CONFIDENCE (0.55) deliberately: clearing the bar to answer at
@@ -583,7 +604,8 @@ def handle_message(user_message: str, conversation_context: str = "",
 
 
 def _dispatch_computation(ctype, intent, match, published_detail_id, granularity, period,
-                           countries_res, language="en"):
+                           countries_res, language="en", performance_followup=False,
+                           user_message=""):
     # Unit AND scale, both of which live in the catalogue: unit_en says "QAR",
     # Format says "bn0.0". Reading only the first printed "185.17 QAR" beside
     # prose that said "QAR 185.2 billion".
@@ -666,6 +688,19 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         # HIGHEST x" was answered with the lowest. extremum is exactly the field
         # the intent agent fills for that distinction.
         ascending = intent.get("extremum") != "max"
+        # "Which performed best?" names no extremum, so the line above would
+        # default it to ascending and call that an answer by luck. The
+        # indicator decides: Inflation is polarity Decrease, so best is lowest;
+        # for an Increase indicator like Real GDP best is highest. Getting this
+        # from the data rather than the wording is the whole point — nobody
+        # should have to phrase it as "lowest" to be understood.
+        if performance_followup:
+            decreasing = (match.polarity_en or "").strip().lower().startswith("decrease")
+            ascending = decreasing if not _asks_for_worst(user_message) else not decreasing
+            note_direction = ("Ranked best-performing first — for {ind}, "
+                              "a {dir} figure is the better outcome.").format(
+                ind=indicator_name.strip(), dir="lower" if decreasing else "higher")
+            note = f"{note} {note_direction}" if note else note_direction
         result = (compute.country_ranking(series_by_country, period_label, ascending=ascending)
                   if ctype == "country_ranking"
                   else compute.country_comparison(series_by_country, period_label))
