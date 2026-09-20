@@ -180,6 +180,14 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                 if e.get("change_yoy_percent") is not None:
                     line += f" ({e['change_yoy_percent']}% YoY)"
                 lines.append(line)
+        if facts.get("change_ranking"):
+            ordered = facts["change_ranking"]
+            lines.append("Largest decline: " + ", then ".join(
+                f"{e['indicator']} ({e['change_yoy_percent']}%)" for e in ordered) + ".")
+        for e in facts.get("no_data_in_period") or []:
+            covers = (f" Its published series runs from {e['covers_from']} to {e['covers_to']}."
+                      if e.get("covers_from") else "")
+            lines.append(f"{e['indicator']} has no reading in the period asked about.{covers}")
         if facts.get("not_found"):
             lines.append("Not found in the approved data: " + ", ".join(facts["not_found"]) + ".")
         return "\n".join(lines)

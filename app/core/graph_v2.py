@@ -406,7 +406,16 @@ def handle_message(user_message: str, conversation_context: str = "",
         parts = split_indicator_phrases(indicator_phrase or "")
         if len(parts) > 1:
             payload, citations = _indicator_snapshot(parts, language, period)
-            if payload.get("ok") and len(payload["facts"]["overview"]) > 1:
+            # One line is still the answer to a three-metric question when the
+            # other two have nothing for the period asked about. This required
+            # more than one and therefore THREW AWAY a correct partial answer:
+            # "exports, government revenues and the trade balance in Q1 2026"
+            # has Q1 2026 for government revenues only, so the snapshot was
+            # discarded, the whole sentence was sent to the resolver as if it
+            # named one indicator, it matched Trade Balance, and the reply was
+            # a flat refusal — hiding the figure the question could be answered
+            # with and never mentioning the other two.
+            if payload.get("ok") and payload["facts"]["overview"]:
                 if wants_chart(user_message, "macro_overview"):
                     payload["chart"] = build_chart_spec("macro_overview", payload["facts"],
                                                          "Economic Snapshot", None, None)
@@ -1417,7 +1426,7 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
     and nothing historical is added — a comparison the user did not ask for is
     a comparison the user did not ask for.
     """
-    facts, citations, missing = [], [], []
+    facts, citations, missing, out_of_range = [], [], [], []
     for phrase in phrases:
         res = resolve_indicator(phrase, language=language)
         if res.status not in ("resolved", "inactive") or not res.match:
@@ -1440,9 +1449,19 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
             rows = _apply_last_n_years(rows, period)
         latest = compute.latest_value(rows)
         if not latest.ok:
-            # Named, resolved, but nothing in the window asked for — distinct
-            # from "no such indicator", and reported separately below.
-            missing.append(phrase)
+            # Named and resolved, but nothing in the window asked for. The
+            # comment here used to say this was "reported separately below" and
+            # it was not — it went into the same list as a phrase that matched
+            # no indicator at all. Those are different facts and the difference
+            # matters: "Trade Balance has no Q1 2026 reading, its series ends at
+            # 2025-Q4" is useful, "Trade Balance was not found" is wrong.
+            covers = retriever.get_series(match.indicator_detail_id, published_id, gran)
+            out_of_range.append({
+                "indicator": match.name_en.strip(),
+                "asked_as": phrase,
+                "covers_from": covers[0]["period_label"] if covers else None,
+                "covers_to": covers[-1]["period_label"] if covers else None,
+            })
             continue
         row = _find_row_by_period(rows, latest.facts.get("period_label"))
         entry = {"indicator": match.name_en.strip(),
@@ -1484,6 +1503,20 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
                                                  period=asked_period)}, []
         return {"ok": False, "message": msg("no_overview", language)}, []
     payload = {"ok": True, "facts": {"overview": facts}}
+    # Ranking by movement, so "which experienced the largest decline?" can be
+    # answered without the Composer ordering figures itself — the exact class
+    # of work the QC report found it getting wrong (F-009). Only over the lines
+    # that actually have a change; the ones that do not are reported, never
+    # ranked as though they were flat.
+    changed = [e for e in facts if e.get("change_yoy_percent") is not None]
+    if len(changed) > 1:
+        payload["facts"]["change_ranking"] = [
+            {"indicator": e["indicator"], "change_yoy_percent": e["change_yoy_percent"],
+             "period_label": e.get("period_label")}
+            for e in sorted(changed, key=lambda e: e["change_yoy_percent"])
+        ]
+    if out_of_range:
+        payload["facts"]["no_data_in_period"] = out_of_range
     if missing:
         # Named but not found — said out loud rather than quietly dropped from
         # a list the user can see is short.

@@ -81,6 +81,18 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    than the level. Add no historical comparison the user did not ask for,
    EXCEPT as rule 17 requires. If "not_found" is present, say plainly which
    requested metrics were not found.
+   "no_data_in_period" is DIFFERENT from "not_found" and must not be described
+   as the metric being unavailable or unknown. Those indicators exist and were
+   found; they have no reading in the period asked about. Say so with the range
+   they do cover: "Trade Balance (Goods & Services) has no Q1 2026 reading —
+   its published series runs to 2025-Q4." Never omit them: a question about
+   three metrics answered about one, with no mention of the other two, reads as
+   though only one was asked for.
+   "change_ranking" orders the lines by movement, most negative first. Use it
+   to answer "which fell the most" / "which grew fastest" — never order the
+   figures yourself. It covers only the lines that HAVE a change; if some do
+   not, say which are being ranked rather than implying the ranking covers
+   everything asked about.
 15. For a payload with "count" and "names" (a catalogue listing), state the count
    and the scope — e.g. "There are 101 published Sector Indicators".
    Then say the full list follows — e.g. "All 13 are listed below." Do NOT
