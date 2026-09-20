@@ -621,6 +621,11 @@ def handle_message(user_message: str, conversation_context: str = "",
     # did not address the question asked.
     if _asks_if_improving(user_message) and ctype not in ("definition", "count_list"):
         ctype = "direction_check"
+    # Checked after the indicator resolves, because whether this is answerable
+    # depends on WHICH indicator it is, not on the wording. The wording only
+    # gets it as far as being considered.
+    if _asks_for_complement_share(user_message) and ctype not in ("definition", "count_list"):
+        ctype = "complement_share"
 
     countries_res = resolve_countries(intent.get("countries_mentioned", []), intent.get("country_group_mentioned"))
 
@@ -810,6 +815,26 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
             if (latest_dated and asked_start and asked_start > latest_dated) or                _asks_for_forecast(user_message):
                 message += msg("future_period_suffix", language)
             return {"ok": False, "message": message}, []
+
+    if ctype == "complement_share":
+        rows = retriever.get_series(match.indicator_detail_id, published_detail_id,
+                                     granularity, country_en=single_country)
+        latest = compute.latest_value(rows)
+        result = compute.complement_of_share(
+            latest.facts.get("actual") if latest.ok else None,
+            indicator_name, user_message)
+        if not result.ok:
+            # Not a two-way share, or the question did not ask for the other
+            # side after all. Fall back to simply reporting the indicator,
+            # which is a better answer than a refusal about a derivation the
+            # user may not have meant to ask for.
+            used = [_find_row_by_period(rows, latest.facts.get("period_label"))] if latest.ok else []
+            return (_wrap(latest, unit, indicator_name=indicator_name, decimals=decimals),
+                    citations_for_rows([r for r in used if r], indicator_name, data_source_en))
+        result.facts["period_label"] = latest.facts.get("period_label")
+        used = [_find_row_by_period(rows, latest.facts.get("period_label"))]
+        return ({"ok": True, "facts": {**result.facts, "indicator": indicator_name.strip()}},
+                citations_for_rows([r for r in used if r], indicator_name, data_source_en))
 
     if ctype == "direction_check":
         # Whichever granularity actually PUBLISHES a change, finest first.
@@ -1482,6 +1507,27 @@ _IMPROVING = re.compile(
     r"better\s+or\s+worse|on\s+the\s+right\s+track|healthier)\b"
     r"|يتحسن|تتحسن|يتدهور|تتدهور|يسوء|نحو\s+الأفضل",
     re.IGNORECASE)
+
+
+_COMPLEMENT_ASK = re.compile(
+    r"\bwhat\s+share\s+(still\s+)?(comes|come|is)\b"
+    r"|\b(the\s+)?(rest|remainder|remaining|balance)\b"
+    r"|\bthe\s+other\s+(share|portion|part)\b"
+    r"|\bmakes?\s+up\s+the\s+rest\b"
+    r"|\bhow\s+much\s+(is\s+)?left\b"
+    r"|\bالباقي|\bالمتبقي|النسبة\s*المتبقية",
+    re.IGNORECASE)
+
+
+def _asks_for_complement_share(text: str) -> bool:
+    """"...what share still comes from hydrocarbon exports?"
+
+    A derived figure, which this system does not normally produce. It is
+    allowed here because it is one subtraction over a share whose whole is
+    split in two, checked in compute.complement_of_share — which refuses for
+    every indicator that is not that shape, and only one in the catalogue is.
+    """
+    return bool(text and _COMPLEMENT_ASK.search(text))
 
 
 def _asks_if_improving(text: str) -> bool:

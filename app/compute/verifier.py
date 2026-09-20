@@ -136,6 +136,12 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
         # has two. Padding only; the digits themselves are untouched.
         return f"{trim_zeros(value)} {unit}".strip() if value is not None else "—"
 
+    if "complement_share" in facts:
+        return (f"{facts['complement_of']} account for approximately "
+                f"{facts['complement_share']}% of the total. "
+                f"{facts['reported_share_of']} was {facts['reported_share']}% in "
+                f"{facts.get('period_label')}, so the remainder is "
+                f"{facts['derivation']}.")
     if "assessment" in facts:
         word = {"improving": "an improvement", "deteriorating": "a deterioration",
                 "unchanged": "no change"}[facts["assessment"]]

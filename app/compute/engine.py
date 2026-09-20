@@ -11,6 +11,7 @@ either read directly from the database or produced by one of these
 functions — the Composer agent is only allowed to restate these results
 in prose, never recompute them.
 """
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -533,3 +534,67 @@ def scope_snapshot(entries: list[dict]) -> ComputeResult:
     if missing:
         facts["not_reported"] = missing
     return ComputeResult(True, facts=facts)
+
+
+# "Non-Hydrocarbon Exports (share of total exports)" — a share whose whole is
+# split into exactly two named parts, one of which is the negation of the
+# other. Only then is 100 - x the other part.
+#
+# The guard is the whole point. Half the percentage indicators in the catalogue
+# look superficially similar and have no meaningful complement:
+#   Public Debt as a Percentage of GDP (%)   -> 59.4% of GDP is "not debt"?
+#   FDI stock (share of GDP)                 -> same
+#   Non-Hydrocarbon Govt Revenue as Share of Non-Hydrocarbon GDP
+#                                            -> the DENOMINATOR is negated too,
+#                                               so the complement is not a
+#                                               hydrocarbon anything
+# so the pattern requires a "non-" numerator, an un-negated total, and the same
+# head noun on both sides.
+_COMPLEMENT_NAME = re.compile(
+    r"^non[-\s]?(?P<term>[A-Za-z]+)\s+(?P<noun>[A-Za-z]+)\s*"
+    r"\(?\s*(share of|as a (share|percentage) of)\s+(the\s+)?total\s+"
+    r"(?P<denom>[A-Za-z]+)\s*\)?\s*$",
+    re.IGNORECASE)
+
+
+def complement_of_share(actual, indicator_name: str, question: str) -> ComputeResult:
+    """The other side of a two-way share: 100 - 38.589 = 61.411.
+
+    Returns ok=False unless the indicator really is one half of a two-way
+    split AND the question asks for the other half by name. Refusing is the
+    correct outcome for every percentage that is not that shape, and most are
+    not.
+    """
+    match = _COMPLEMENT_NAME.match((indicator_name or "").strip())
+    if not match:
+        return ComputeResult(False, message=(
+            "This indicator is not a two-way share, so there is no remaining "
+            "share to report."))
+    term, noun, denom = (match.group("term").lower(), match.group("noun").lower(),
+                         match.group("denom").lower())
+    # The total must be the total of the SAME thing, and must not itself be
+    # negated — "share of total non-hydrocarbon GDP" is a different whole.
+    if denom.rstrip("s") != noun.rstrip("s"):
+        return ComputeResult(False, message=(
+            "This indicator's total is not the total of the same quantity, so a "
+            "remaining share cannot be derived from it."))
+    # The question has to name the other side, not merely mention the metric.
+    asked = re.search(rf"(?<!non-)(?<!non )\b{re.escape(term)}\b", question or "", re.IGNORECASE)
+    if not asked:
+        return ComputeResult(False, message="No complementary share was asked for.")
+    if actual is None:
+        return ComputeResult(False, message="No approved reading is available for this indicator.")
+
+    share = float(actual)
+    if not 0 <= share <= 100:
+        return ComputeResult(False, message=(
+            "This reading is not a percentage between 0 and 100, so a remaining "
+            "share cannot be derived from it."))
+    return ComputeResult(True, facts={
+        "reported_share": round(share, 4),
+        "reported_share_of": indicator_name.strip(),
+        "complement_share": round(100 - share, 4),
+        "complement_of": f"{match.group('term')} {match.group('noun')}",
+        "derivation": f"100 - {round(share, 4)} = {round(100 - share, 4)}",
+        "unit": "%",
+    })

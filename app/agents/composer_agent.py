@@ -167,6 +167,13 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    points" is not the same as "%"), and the verdict. Do not add caution the
    payload does not contain, and do not reverse it because the number moved in
    a direction that sounds bad.
+
+21. For a payload with "complement_share", the answer is the OTHER half of a
+   two-way share. Give it, then show the arithmetic from "derivation" and name
+   the reading it came from with its period. This is the one derived figure in
+   the system, and a reader should be able to see it was a subtraction from a
+   published number rather than take it on trust. "complement_of" names what
+   the remainder IS — say that, not "the rest".
 """
 
 
