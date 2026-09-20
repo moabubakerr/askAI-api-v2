@@ -479,6 +479,23 @@ def handle_message(user_message: str, conversation_context: str = "",
                         question=user_message)
 
     period = parse_period_expression(intent.get("period_expression"))
+    if period.kind == "unspecified":
+        # The model dropped the period. Read it from the question instead.
+        #
+        # This produced the worst failure yet: "What was inflation in May
+        # 2025?" came back "There is no approved data for inflation in May
+        # 2025" alongside April 2026's figure, while the identical question
+        # without its opening words returned 0.08365% for May 2025. The data
+        # was there the whole time; the filter was simply never applied, so the
+        # series ran to its end and the newest row was reported.
+        #
+        # Same shape as the indicator_phrase fallback: the question always
+        # carries what the model may or may not have extracted, and the parser
+        # is deterministic, so there is no reason to depend on the extraction.
+        from_message = parse_period_expression(user_message)
+        if from_message.kind != "unspecified":
+            period = from_message
+            session_state["last_period_expression"] = user_message
     countries_res = resolve_countries(intent.get("countries_mentioned", []), intent.get("country_group_mentioned"))
 
     payload, citations = _dispatch_computation(ctype, intent, match, published_detail_id, granularity,
