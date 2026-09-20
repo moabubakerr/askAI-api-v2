@@ -677,7 +677,8 @@ _COMPLEMENT_NAME = re.compile(
     re.IGNORECASE)
 
 
-def complement_of_share(actual, indicator_name: str, question: str) -> ComputeResult:
+def complement_of_share(actual, indicator_name: str, question: str,
+                         stated_source: Optional[str] = None) -> ComputeResult:
     """The other side of a two-way share: 100 - 38.589 = 61.411.
 
     Returns ok=False unless the indicator really is one half of a two-way
@@ -716,8 +717,14 @@ def complement_of_share(actual, indicator_name: str, question: str) -> ComputeRe
     # published 38.589% — the right number, and it never said the premise was
     # wrong. Correcting a premise silently is how a reader walks away still
     # believing it.
+    # Read from the CURRENT message, which may not be the question that
+    # established the complement: a follow-up carries the earlier wording
+    # forward so "what about if it was X" still counts as asking for the other
+    # side, and taking the premise from that wording would report the PREVIOUS
+    # turn's figure as a disagreement with this turn's reading.
     stated = None
-    for text in re.findall(r"(?<![\w.])(\d+(?:\.\d+)?)\s*%", question or ""):
+    for text in re.findall(r"(?<![\w.])(\d+(?:\.\d+)?)\s*%",
+                            (stated_source if stated_source is not None else question) or ""):
         value = float(text)
         places = len(text.split(".")[1]) if "." in text else 0
         if round(share, places) != value:

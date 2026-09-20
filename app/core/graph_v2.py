@@ -409,6 +409,14 @@ def handle_message(user_message: str, conversation_context: str = "",
     # the other side can be derived.
     if _asks_for_complement_share(user_message):
         indicator_phrase = user_message
+    # A bare "what about if it was X" continues the previous computation on the
+    # previous indicator. Without this it named neither, and a complement
+    # question became a latest-value lookup.
+    elif (_is_figure_followup(user_message)
+            and session_state.get("last_ctype") == "complement_share"
+            and session_state.get("last_indicator_name")):
+        indicator_phrase = session_state["last_indicator_name"]
+        ctype = "complement_share"
     if not indicator_phrase and intent.get("is_followup") and session_state.get("last_indicator_name"):
         indicator_phrase = session_state["last_indicator_name"]
     if not indicator_phrase and session_state.get("last_metrics")             and not has_identifying_content(user_message):
@@ -923,9 +931,17 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
                 "actual": anchored["actual"],
                 "target": anchored.get("target"),
             })
+        # complement_of_share requires the question to NAME the other side, and
+        # a follow-up does not repeat it — "what about if it was 29.44474" says
+        # only the figure. The question that established the complement is kept
+        # and used, so the follow-up continues the same computation instead of
+        # being told no complementary share was asked for.
+        asked_as = user_message
+        if _is_figure_followup(user_message) and session_state.get("last_complement_question"):
+            asked_as = session_state["last_complement_question"]
         result = compute.complement_of_share(
             latest.facts.get("actual") if latest.ok else None,
-            indicator_name, user_message)
+            indicator_name, asked_as, stated_source=user_message)
         if not result.ok:
             # Not a two-way share, or the question did not ask for the other
             # side after all. Fall back to simply reporting the indicator,
@@ -936,6 +952,10 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
                     citations_for_rows([r for r in used if r], indicator_name, data_source_en))
         result.facts["period_label"] = latest.facts.get("period_label")
         used = [_find_row_by_period(rows, latest.facts.get("period_label"))]
+        # So "what about if it was 29.44474" continues this computation rather
+        # than starting a different one.
+        session_state["last_ctype"] = "complement_share"
+        session_state["last_complement_question"] = asked_as
         return ({"ok": True, "facts": {**result.facts, "indicator": indicator_name.strip()}},
                 citations_for_rows([r for r in used if r], indicator_name, data_source_en))
 
@@ -1708,6 +1728,37 @@ _IMPROVING = re.compile(
     re.IGNORECASE)
 
 
+# "what about if it was 29.44474" — a follow-up that supplies only a new
+# figure. It names no indicator, asks for no share, and matches none of the
+# complement wording, so it fell through to a plain latest-value lookup and
+# answered about Q4 2025: the same question asked twice, answered two ways
+# depending on whether it opened a session or continued one.
+_FIGURE_FOLLOWUP = re.compile(
+    r"^\W*(what|how)\s+about\b|^\W*and\s+(if|for)\b|\bif\s+it\s+(was|were)\b"
+    r"|^\W*what\s+if\b|ماذا\s+(لو|عن)|وماذا\s+لو",
+    re.IGNORECASE)
+
+
+def _is_figure_followup(text: str) -> bool:
+    """A follow-up whose only new content is a number.
+
+    Deliberately narrow: it must open like a follow-up AND carry a figure AND
+    name nothing else identifiable, so "what about inflation in 2024" stays a
+    question about inflation rather than inheriting the previous computation.
+    """
+    if not text or not _FIGURE_FOLLOWUP.search(text):
+        return False
+    if not _QUOTED_ANY_FIGURE.search(text):
+        return False
+    return not has_identifying_content(text)
+
+
+# Any number, with or without a percent sign. _QUOTED_FIGURE requires the "%"
+# because it is reading a share out of a sentence; a bare follow-up often
+# drops it.
+_QUOTED_ANY_FIGURE = re.compile(r"(?<![\w.])\d+(?:\.\d+)?")
+
+
 _COMPLEMENT_ASK = re.compile(
     r"\bwhat\s+share\s+(still\s+)?(comes|come|is)\b"
     r"|\b(the\s+)?(rest|remainder|remaining|balance)\b"
@@ -1794,7 +1845,12 @@ def _row_matching_quoted_value(rows, user_message: str):
     matches nothing in particular — it would match several rows and is
     therefore ignored.
     """
-    quoted = [m for m in _QUOTED_FIGURE.findall(user_message or "")]
+    # Percent-signed figures first, since they are the unambiguous ones; then
+    # bare numbers, because a follow-up says "what about if it was 29.44474"
+    # without repeating the sign.
+    quoted = _QUOTED_FIGURE.findall(user_message or "")
+    quoted += [m for m in _QUOTED_ANY_FIGURE.findall(user_message or "")
+               if m not in quoted]
     actuals = [r for r in rows if r.get("actual") is not None]
     for text in quoted:
         value = float(text)
