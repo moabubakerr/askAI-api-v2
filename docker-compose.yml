@@ -81,6 +81,10 @@ services:
       # --- Database: read-only role. Never point this at ${POSTGRES_USER}.
       POSTGRES_DSN: postgresql://scai_ro:${SCAI_RO_PASSWORD:?set SCAI_RO_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-scai_indicators}
 
+      # --- Admin API. Unset, /admin/* returns 503 rather than serving message
+      # logs to anyone who can reach the port.
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "${API_PORT:-18000}:8000"

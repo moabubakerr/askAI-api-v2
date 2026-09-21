@@ -33,6 +33,17 @@ class Settings(BaseSettings):
     ALLOWED_SQL_SCHEMAS: list[str] = ["public"]
     READ_ONLY_DB_ROLE: bool = True
 
+    # --- Admin API ---
+    # /admin/* reads the message log, which contains whatever users typed.
+    # Left unset those routes refuse to serve: an empty key is a missing
+    # decision, not a decision to publish.
+    ADMIN_API_KEY: str = ""
+    # Rows per page by default, and the ceiling a caller may ask for. An
+    # unbounded list over a table that grows with every question is a slow
+    # query waiting to happen.
+    ADMIN_PAGE_SIZE: int = 50
+    ADMIN_MAX_PAGE_SIZE: int = 500
+
     # --- App ---
     APP_ENV: str = "on_prem"
     LOG_LEVEL: str = "INFO"

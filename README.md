@@ -221,6 +221,28 @@ docker compose run --rm etl        # one-shot data load
 docker compose run --rm etl index-articles     # chunk + embed the articles (needs TEI up)
 docker compose run --rm etl index-indicators   # embed the indicator catalogue (needs TEI up)
 docker compose restart api         # REQUIRED: the api caches the catalogue per process
+
+### Admin API
+
+`/admin/*` reads the message log, the ratings and the catalogue. It is closed
+until a key is set, because those logs contain whatever users typed:
+
+```bash
+# .env
+ADMIN_API_KEY=$(openssl rand -hex 32)
+```
+
+```bash
+curl -H "X-Admin-Key: $ADMIN_API_KEY" localhost:18000/admin/stats
+curl -H "X-Admin-Key: $ADMIN_API_KEY" "localhost:18000/admin/feedback?max_rating=2"
+curl -H "X-Admin-Key: $ADMIN_API_KEY" "localhost:18000/admin/messages?language=ar&answered=false"
+curl -H "X-Admin-Key: $ADMIN_API_KEY" "localhost:18000/admin/catalogue?q=GDP"
+```
+
+Unset, every admin route returns 503 rather than serving. The key is a shared
+secret: it says the caller is the dashboard, not who is using it. That is
+enough for a service-to-service call from an admin UI that does its own
+sign-in, and not enough as the only thing between a person and the logs.
 ```
 
 `index-articles` is separate from the data load on purpose: the load must work

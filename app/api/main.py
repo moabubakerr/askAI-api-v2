@@ -20,8 +20,10 @@ from app.core.conversation import conversations
 from app.core.messages import detect_language
 from app.db import feedback as feedback_store
 from app.db import message_log
+from app.api.admin import router as admin_router
 
 app = FastAPI(title="SCAI Economic Data Assistant", version="2.0.0")
+app.include_router(admin_router)
 
 
 class ChatRequest(BaseModel):
