@@ -180,15 +180,22 @@ class FeedbackRequest(BaseModel):
 
 
 class FeedbackResponse(BaseModel):
+    """Only the fields that mean something for this outcome.
+
+    A success carried "message": null and "comment_required": false, which are
+    answers to a question that was not asked — the caller has to read two
+    fields to learn nothing. Both are dropped unless they apply, so a success
+    is {ok, feedback_id} and a failure says what to do about it.
+    """
     ok: bool
     feedback_id: Optional[str] = None
     # Present when the rating was rejected, phrased for a reader rather than a
     # developer — the frontend can show it verbatim beside the comment box.
     message: Optional[str] = None
-    comment_required: bool = False
+    comment_required: Optional[bool] = None
 
 
-@app.post("/feedback", response_model=FeedbackResponse)
+@app.post("/feedback", response_model=FeedbackResponse, response_model_exclude_none=True)
 def feedback_endpoint(req: FeedbackRequest):
     try:
         rating, comment = feedback_store.validate(req.rating, req.comment)
