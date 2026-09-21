@@ -84,6 +84,10 @@ services:
       # --- Admin API. Unset, /admin/* returns 503 rather than serving message
       # logs to anyone who can reach the port.
       ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      # Placeholder. Change it in .env before exposing this service.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ADMIN123}
+      ADMIN_SESSION_HOURS: ${ADMIN_SESSION_HOURS:-8}
 
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:

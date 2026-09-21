@@ -232,6 +232,19 @@ until a key is set, because those logs contain whatever users typed:
 ADMIN_API_KEY=$(openssl rand -hex 32)
 ```
 
+Or sign in as the admin account:
+
+```bash
+TOKEN=$(curl -s -X POST localhost:18000/admin/login   -H 'Content-Type: application/json'   -d '{"username":"admin","password":"ADMIN123"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+
+curl -H "Authorization: Bearer $TOKEN" localhost:18000/admin/stats
+curl -X POST -H "Authorization: Bearer $TOKEN" localhost:18000/admin/logout
+```
+
+ADMIN_PASSWORD defaults to `ADMIN123`, which is published in this repository.
+Change it in `.env` before the service is reachable by anyone outside the team;
+the API logs a warning on every startup until you do.
+
 ```bash
 curl -H "X-Admin-Key: $ADMIN_API_KEY" localhost:18000/admin/stats
 curl -H "X-Admin-Key: $ADMIN_API_KEY" "localhost:18000/admin/feedback?max_rating=2"

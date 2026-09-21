@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     # Left unset those routes refuse to serve: an empty key is a missing
     # decision, not a decision to publish.
     ADMIN_API_KEY: str = ""
+    # Interactive login for the dashboard. One account for now; credentials
+    # live here rather than in source so changing them is a config change and
+    # not a deploy. ADMIN123 is a placeholder and must not survive contact with
+    # real users — see the note in app/api/admin_auth.py.
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD: str = "ADMIN123"
+    # How long a login lasts before the admin has to sign in again.
+    ADMIN_SESSION_HOURS: int = 8
     # Rows per page by default, and the ceiling a caller may ask for. An
     # unbounded list over a table that grows with every question is a slow
     # query waiting to happen.

@@ -21,9 +21,12 @@ from app.core.messages import detect_language
 from app.db import feedback as feedback_store
 from app.db import message_log
 from app.api.admin import router as admin_router
+from app.api.admin_auth import warn_if_default_password
 
 app = FastAPI(title="SCAI Economic Data Assistant", version="2.0.0")
 app.include_router(admin_router)
+# Says so on every startup if the placeholder password is still in place.
+warn_if_default_password()
 
 
 class ChatRequest(BaseModel):

@@ -1,16 +1,21 @@
 """
 /admin — read-only views over the message log, the feedback and the catalogue.
 
-Behind a key, and closed by default. These endpoints return whatever users
-typed into the chat, which is personal data under Qatar's PDPL; an unset key is
-a missing decision rather than a decision to publish, so the routes refuse to
-serve until one is configured. Set ADMIN_API_KEY and send it as X-Admin-Key.
+Closed by default. These endpoints return whatever users typed into the chat,
+which is personal data under Qatar's PDPL, so they refuse to serve until a
+credential is configured.
 
-This is a shared secret, not identity: it says the caller is the dashboard, not
-WHO is using the dashboard. Adequate for a service-to-service call from an
-admin UI that does its own sign-in; not adequate as the only thing between a
-person and the logs. If individual accountability is needed — who read what —
-this needs real auth in front of it.
+Two ways in, and the difference matters:
+
+  POST /admin/login  ->  Authorization: Bearer <token>   a person, signed in
+  X-Admin-Key: ...                                       a service, shared key
+
+The key is a shared secret and says nothing about who is holding it. A login
+session at least names an account, and today there is exactly one. Neither is
+individual accountability: if SCAI needs to know WHICH person read the logs,
+this needs real identity in front of it.
+
+See app/api/admin_auth.py for the session model and its limits.
 
 Every route is a SELECT. The app connects as scai_ro, which holds INSERT on two
 application tables and nothing else, so nothing here can change SCAI's data.
@@ -18,26 +23,56 @@ application tables and nothing else, so nothing here can change SCAI's data.
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from pydantic import BaseModel
 
-from app.core.config import settings
+from app.api.admin_auth import authenticate, require_admin, sessions
 from app.db import admin_queries
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-def require_admin(x_admin_key: Optional[str] = Header(default=None)) -> None:
-    """Refuses unless a key is configured AND matches.
+class LoginRequest(BaseModel):
+    username: str
+    password: str
 
-    503 when unconfigured, not 401: nothing the caller sends can fix it, and
-    saying "unauthorized" would send them looking for a credential that does
-    not exist yet.
+
+class LoginResponse(BaseModel):
+    ok: bool
+    token: Optional[str] = None
+    expires_at: Optional[float] = None
+    username: Optional[str] = None
+
+
+@router.post("/login", response_model=LoginResponse, response_model_exclude_none=True)
+def login(req: LoginRequest):
+    """Exchanges a username and password for a session token.
+
+    Send it back as `Authorization: Bearer <token>` on every other /admin call.
+    The same 401 and the same delay for a wrong username as for a wrong
+    password, so neither can be probed independently.
     """
-    if not settings.ADMIN_API_KEY:
-        raise HTTPException(
-            status_code=503,
-            detail="Admin API is disabled. Set ADMIN_API_KEY to enable it.")
-    if not x_admin_key or x_admin_key != settings.ADMIN_API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid or missing X-Admin-Key.")
+    session = authenticate(req.username, req.password)
+    if not session:
+        raise HTTPException(status_code=401, detail="Incorrect username or password.")
+    return LoginResponse(ok=True, **session)
+
+
+@router.post("/logout")
+def logout(authorization: Optional[str] = Header(default=None)):
+    """Ends this session.
+
+    Idempotent on purpose: logging out twice, or with a token that has already
+    expired, is a success. The caller wanted to be signed out and is.
+    """
+    token = authorization[7:].strip() if (authorization or "").lower().startswith("bearer ") else ""
+    return {"ok": True, "ended": sessions.revoke(token) if token else False}
+
+
+@router.get("/me", dependencies=[Depends(require_admin)])
+def whoami(caller: dict = Depends(require_admin)):
+    """Who the current credential belongs to. Lets a dashboard check on load
+    whether its stored token is still good, without fetching data to find out."""
+    return caller
 
 
 @router.get("/messages", dependencies=[Depends(require_admin)])
