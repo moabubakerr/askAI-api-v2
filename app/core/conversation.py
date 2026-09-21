@@ -81,13 +81,32 @@ class ConversationStore:
             self._evict()
             return dict(self._session(session_id)["state"])
 
-    def record(self, session_id: str, user_message: str, answer: str, state: dict) -> None:
+    def record(self, session_id: str, user_message: str, answer: str, state: dict,
+               message_id: Optional[str] = None) -> None:
         with self._lock:
             self._evict()
             session = self._session(session_id)
             session["turns"].append({"user": (user_message or "").strip()[:MAX_STORED_TEXT],
-                                      "assistant": (answer or "").strip()[:MAX_STORED_TEXT]})
+                                      "assistant": (answer or "").strip()[:MAX_STORED_TEXT],
+                                      "message_id": message_id})
             session["state"] = dict(state or {})
+
+    def find_turn(self, session_id: str, message_id: str) -> Optional[dict]:
+        """The exchange a message id refers to, if it is still in memory.
+
+        Used so a rating can be stored with the question and answer it is
+        about. Turns fall out of the window after twelve exchanges and sessions
+        after two hours of silence, so this returns None routinely — a rating
+        arriving without them is still recorded, just with less around it.
+        """
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            for turn in reversed(session["turns"]):
+                if turn.get("message_id") == message_id:
+                    return dict(turn)
+        return None
 
     def render_context(self, session_id: str, max_chars: int = MAX_CONTEXT_CHARS) -> str:
         """A plain transcript, newest turns prioritised.

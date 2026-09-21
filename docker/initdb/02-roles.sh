@@ -17,6 +17,15 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     GRANT USAGE ON SCHEMA public TO scai_ro;
     GRANT SELECT ON ALL TABLES IN SCHEMA public TO scai_ro;
     ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO scai_ro;
+
+    -- The single exception, granted on one table by name. The read-only rule
+    -- exists so the app cannot modify SCAI's data; user feedback is not SCAI's
+    -- data, and it has to be written by the process the user is talking to.
+    --
+    -- INSERT only: the app can record a rating and can never edit or delete
+    -- one, so the record of what users said is append-only from its side.
+    GRANT INSERT ON TABLE message_feedback TO scai_ro;
+    GRANT INSERT ON TABLE chat_messages TO scai_ro;
 EOSQL
 
-echo "02-roles.sh: scai_ro created (SELECT-only on schema public)"
+echo "02-roles.sh: scai_ro created (SELECT-only, plus INSERT on message_feedback and chat_messages)"

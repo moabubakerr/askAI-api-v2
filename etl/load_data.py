@@ -504,6 +504,32 @@ def main():
             " text_key TEXT PRIMARY KEY, model TEXT NOT NULL, embedding vector(1024))",
             "CREATE INDEX IF NOT EXISTS idx_indicator_embeddings_model"
             " ON indicator_embeddings(model)",
+            # Feedback is application data, so it is created here but NEVER
+            # truncated below: a data reload must not delete what users said.
+            "CREATE TABLE IF NOT EXISTS message_feedback ("
+            " feedback_id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT,"
+            " rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),"
+            " comment TEXT CHECK (rating > 2 OR (comment IS NOT NULL AND length(btrim(comment)) > 0)),"
+            " question TEXT, answer TEXT,"
+            " created_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+            "CREATE INDEX IF NOT EXISTS idx_message_feedback_rating"
+            " ON message_feedback(rating)",
+            "CREATE TABLE IF NOT EXISTS chat_messages ("
+            " message_id TEXT PRIMARY KEY, session_id TEXT NOT NULL,"
+            " asked_at TIMESTAMPTZ NOT NULL DEFAULT now(), endpoint TEXT NOT NULL,"
+            " language TEXT, question TEXT, answer TEXT, answered BOOLEAN,"
+            " answer_shape TEXT, indicator TEXT, period_label TEXT,"
+            " verified BOOLEAN, readable BOOLEAN, latency_ms INTEGER)",
+            "CREATE INDEX IF NOT EXISTS idx_chat_messages_session"
+            " ON chat_messages(session_id, asked_at)",
+            "CREATE INDEX IF NOT EXISTS idx_chat_messages_asked"
+            " ON chat_messages(asked_at DESC)",
+            # Tolerant of a database without the app role — a developer
+            # loading into a local Postgres has no scai_ro, and a failed GRANT
+            # would abort the whole transaction and the load with it.
+            "DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'scai_ro')"
+            " THEN GRANT INSERT ON TABLE message_feedback TO scai_ro;"
+            " GRANT INSERT ON TABLE chat_messages TO scai_ro; END IF; END $$",
         ]:
             conn.execute(text(ddl))
 

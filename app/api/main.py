@@ -7,13 +7,19 @@ nothing else; they are not required to replay the transcript on every request.
 Single-process and in-memory — see that module before running more than one
 replica.
 """
-from fastapi import FastAPI
+import time
+import uuid
+
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
 from app.core.graph_v2 import handle_message
 from app.core.reading import read_message
 from app.core.conversation import conversations
+from app.core.messages import detect_language
+from app.db import feedback as feedback_store
+from app.db import message_log
 
 app = FastAPI(title="SCAI Economic Data Assistant", version="2.0.0")
 
@@ -30,6 +36,10 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
+    # Identifies THIS answer, so a rating can name what it is about. Generated
+    # per response and recorded with the turn, which is how /feedback can store
+    # the question and answer alongside the score.
+    message_id: str = ""
     facts_payload: dict
     chart: Optional[dict] = None
     verified: bool = True
@@ -66,6 +76,14 @@ class ReadResponse(BaseModel):
     verified: bool = True
 
 
+def _language_of(message: str) -> str:
+    """What language the ANSWER will be in, which is decided by the question's
+    script. Recorded so the dashboard can show the two halves of the product
+    separately — an Arabic failure rate hidden inside an overall average is how
+    "the Arabic commentary is in English" went unnoticed."""
+    return detect_language(message)
+
+
 def _context_for(req: ChatRequest) -> str:
     """Server-kept transcript, unless the caller explicitly supplied one."""
     if req.conversation_context:
@@ -77,31 +95,48 @@ def _context_for(req: ChatRequest) -> str:
 def read_endpoint(req: ChatRequest):
     """"Read this for me" — the readings formatted for a person, rather than as
     one paragraph of prose. Takes the same request as /chat."""
+    started = time.perf_counter()
     result = read_message(
         user_message=req.message,
         conversation_context=_context_for(req),
         session_state=conversations.get_state(req.session_id),
     )
 
-    conversations.record(req.session_id, req.message,
-                          result.get("narration") or result.get("message") or "",
-                          result["session_state"])
+    message_id = str(uuid.uuid4())
+    answer_text = result.get("narration") or result.get("message") or ""
+    conversations.record(req.session_id, req.message, answer_text,
+                          result["session_state"], message_id=message_id)
+    message_log.log(message_id=message_id, session_id=req.session_id, endpoint="read",
+                     question=req.message, answer=answer_text,
+                     payload=result.get("facts_payload") or {},
+                     language=_language_of(req.message),
+                     readable=result.get("readable"),
+                     latency_ms=int((time.perf_counter() - started) * 1000))
     return ReadResponse(**{k: v for k, v in result.items() if k != "session_state"})
 
 
 @app.post("/chat", response_model=ChatResponse)
 def chat_endpoint(req: ChatRequest):
+    started = time.perf_counter()
     result = handle_message(
         user_message=req.message,
         conversation_context=_context_for(req),
         session_state=conversations.get_state(req.session_id),
     )
 
-    conversations.record(req.session_id, req.message, result["answer"], result["session_state"])
+    message_id = str(uuid.uuid4())
+    conversations.record(req.session_id, req.message, result["answer"],
+                          result["session_state"], message_id=message_id)
 
     payload = result["facts_payload"]
+    message_log.log(message_id=message_id, session_id=req.session_id, endpoint="chat",
+                     question=req.message, answer=result["answer"], payload=payload,
+                     language=_language_of(req.message),
+                     readable=result.get("readable", False),
+                     latency_ms=int((time.perf_counter() - started) * 1000))
     return ChatResponse(
         answer=result["answer"],
+        message_id=message_id,
         facts_payload=payload,
         chart=payload.get("chart"),
         verified="_verifier_rejected_numbers" not in payload,
@@ -128,6 +163,57 @@ def clear_session(session_id: str):
     it, a session id reused across unrelated topics carries the old indicator
     into the new one."""
     return {"session_id": session_id, "cleared": conversations.clear(session_id)}
+
+
+class FeedbackRequest(BaseModel):
+    """A rating for one answer.
+
+    A comment is REQUIRED at 2 or below. A low score with no explanation says
+    something is wrong and nothing about what, which is the least actionable
+    feedback there is — and the person who could tell us has already moved on
+    by the time anyone reads it.
+    """
+    message_id: str
+    rating: int
+    comment: Optional[str] = None
+    session_id: str = "default"
+
+
+class FeedbackResponse(BaseModel):
+    ok: bool
+    feedback_id: Optional[str] = None
+    # Present when the rating was rejected, phrased for a reader rather than a
+    # developer — the frontend can show it verbatim beside the comment box.
+    message: Optional[str] = None
+    comment_required: bool = False
+
+
+@app.post("/feedback", response_model=FeedbackResponse)
+def feedback_endpoint(req: FeedbackRequest):
+    try:
+        rating, comment = feedback_store.validate(req.rating, req.comment)
+    except feedback_store.FeedbackError as exc:
+        # 422, not 500: the caller can fix this, and the frontend needs to tell
+        # the user what to do rather than that something went wrong.
+        raise HTTPException(
+            status_code=422,
+            # True only when the rating itself was fine and the comment was the
+            # problem, so the frontend knows to open a comment box rather than
+            # ask for a different score.
+            detail={"ok": False, "message": str(exc),
+                     "comment_required":
+                         1 <= req.rating <= feedback_store.COMMENT_REQUIRED_AT_OR_BELOW},
+        )
+
+    # The exchange this rating is about, while it is still in memory. Evicted
+    # sessions simply record less; a rating is never refused for it.
+    turn = conversations.find_turn(req.session_id, req.message_id) or {}
+    feedback_id = feedback_store.record(
+        message_id=req.message_id, rating=rating, comment=comment,
+        session_id=req.session_id,
+        question=turn.get("user"), answer=turn.get("assistant"),
+    )
+    return FeedbackResponse(ok=True, feedback_id=feedback_id)
 
 
 @app.get("/sessions/stats")

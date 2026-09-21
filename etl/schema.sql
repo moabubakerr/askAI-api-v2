@@ -350,6 +350,90 @@ CREATE TABLE indicator_embeddings (
 );
 CREATE INDEX idx_indicator_embeddings_model ON indicator_embeddings(model);
 
+-- ============ Application data (not SCAI's) ============
+
+-- What a reader thought of an answer. The only table the app itself writes to,
+-- and the reason scai_ro is granted INSERT on this one table and nothing else:
+-- the read-only guarantee exists to stop the app modifying SCAI's data, and
+-- this is not SCAI's data.
+--
+-- The question and answer are copied in rather than referenced. The transcript
+-- lives in memory and is evicted after two hours, so a rating that only
+-- carried an id would be unreadable by the time anyone came to read it — and a
+-- rating you cannot tie to what was said is not feedback, it is a number.
+--
+-- Deliberately NOT truncated by the ETL: a data reload must not delete what
+-- users have told us.
+CREATE TABLE message_feedback (
+    feedback_id   TEXT PRIMARY KEY,
+    message_id    TEXT NOT NULL,
+    session_id    TEXT,
+    rating        SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    -- Required by the API when rating <= 2. Enforced here too, so the rule
+    -- survives a second caller that does not know about it.
+    comment       TEXT CHECK (rating > 2 OR (comment IS NOT NULL AND length(btrim(comment)) > 0)),
+    question      TEXT,
+    answer        TEXT,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_message_feedback_rating ON message_feedback(rating);
+CREATE INDEX idx_message_feedback_created ON message_feedback(created_at DESC);
+
+-- Every exchange, for the admin dashboard. Also application data, also never
+-- truncated by the ETL.
+--
+-- Written best-effort: a failure here must never cost the user their answer,
+-- so the logger swallows its own errors. That means this table can under-count
+-- and a dashboard should treat it as a log, not as a ledger.
+--
+-- `answer_shape` is derived from what the answer actually CONTAINS rather than
+-- from the route that produced it. The routing taxonomy has grown to twenty-odd
+-- computation types and keeps changing; what a reader received — a value, a
+-- series, a ranking, a refusal — does not.
+CREATE TABLE chat_messages (
+    message_id     TEXT PRIMARY KEY,
+    session_id     TEXT NOT NULL,
+    asked_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    endpoint       TEXT NOT NULL,            -- 'chat' | 'read'
+    language       TEXT,                     -- 'en' | 'ar'
+    question       TEXT,
+    answer         TEXT,
+    answered       BOOLEAN,                  -- false when the reply was a refusal
+    answer_shape   TEXT,
+    indicator      TEXT,                     -- the indicator the answer was about, if one
+    period_label   TEXT,
+    verified       BOOLEAN,                  -- the numeric verifier accepted the wording
+    readable       BOOLEAN,
+    latency_ms     INTEGER
+);
+CREATE INDEX idx_chat_messages_session ON chat_messages(session_id, asked_at);
+CREATE INDEX idx_chat_messages_asked ON chat_messages(asked_at DESC);
+CREATE INDEX idx_chat_messages_answered ON chat_messages(answered);
+
+-- Convenience for the dashboard. A session is not a table: it is whatever
+-- messages share a session_id, so deriving it avoids two sources of truth that
+-- can disagree.
+CREATE VIEW v_session_summary AS
+SELECT session_id,
+       min(asked_at)                                   AS started_at,
+       max(asked_at)                                   AS last_seen_at,
+       count(*)                                        AS messages,
+       count(*) FILTER (WHERE answered IS FALSE)       AS refusals,
+       count(DISTINCT language)                        AS languages_used,
+       max(language)                                   AS language,
+       round(avg(latency_ms))                          AS avg_latency_ms
+FROM chat_messages
+GROUP BY session_id;
+
+CREATE VIEW v_message_feedback AS
+SELECT f.feedback_id, f.message_id, f.session_id, f.rating, f.comment,
+       f.created_at,
+       coalesce(f.question, m.question)                AS question,
+       coalesce(f.answer, m.answer)                    AS answer,
+       m.answer_shape, m.indicator, m.language, m.answered, m.latency_ms
+FROM message_feedback f
+LEFT JOIN chat_messages m ON m.message_id = f.message_id;
+
 -- Lexical fallback for exact names and acronyms ("Tawteen", "ICV"), which
 -- embeddings match poorly — a rare token carries little semantic signal.
 CREATE INDEX idx_article_chunks_fts ON article_chunks
