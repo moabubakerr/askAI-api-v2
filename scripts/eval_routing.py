@@ -312,7 +312,8 @@ def main() -> int:
             ("_proposes_derived_figure", g._proposes_derived_figure, "denominator_check"),
             ("_asks_about_diversification", g._asks_about_diversification, "diversification_overview"),
             ("_asks_about_the_economy", g._asks_about_the_economy, "macro_overview"),
-            ("_asks_for_direction_split", g._asks_for_direction_split, "scope_direction"),
+            # _asks_for_direction_split was deleted after this audit reported it
+            # matching none of the 90 questions.
             ("_asks_what_to_watch", g._asks_what_to_watch, "scope_direction"),
             ("_asks_for_group_snapshot", g._asks_for_group_snapshot, "scope_snapshot"),
             ("_asks_for_performance_ranking", g._asks_for_performance_ranking, "scope_performance"),

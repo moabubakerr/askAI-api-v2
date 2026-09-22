@@ -183,15 +183,30 @@ def decide_route(user_message: str, intent: dict, session_state: dict) -> tuple[
     # mention hydrocarbons at all.
     elif _proposes_derived_figure(user_message):
         ctype = "denominator_check"
+    # Checked BEFORE diversification. "Give me the latest snapshot of Qatar's
+    # economic diversification indicators" is the question _GROUP_SNAPSHOT was
+    # written for, and it never once reached it: the diversification pattern
+    # sits earlier in this chain and matches the same sentence, so a request for
+    # twelve readings was answered with the hydrocarbon overview instead. The
+    # routing eval caught it as a pattern overriding a model that was right.
+    #
+    # Safe in this order because a group snapshot needs a plural AND a scope
+    # matching a real sector or indicator type; "is the economy diversifying?"
+    # has neither and still reaches diversification below.
+    elif _asks_for_group_snapshot(user_message):
+        ctype = "scope_snapshot"
+        scope_pinned = True
     elif _asks_about_diversification(user_message):
         ctype = "diversification_overview"
     elif _asks_about_the_economy(user_message):
         ctype = "macro_overview"
-    elif _asks_for_direction_split(user_message) or _asks_what_to_watch(user_message):
+    # _asks_for_direction_split used to sit here. It matched none of the 90
+    # questions in the eval — including the six the model routes to
+    # scope_direction unaided — because it demanded an up-word AND a down-word
+    # AND a plural, and "which ones got better and which got worse" has none of
+    # the three. It was not a net; it was a pattern that could not fire.
+    elif _asks_what_to_watch(user_message):
         ctype = "scope_direction"
-        scope_pinned = True
-    elif _asks_for_group_snapshot(user_message):
-        ctype = "scope_snapshot"
         scope_pinned = True
     elif _asks_for_performance_ranking(user_message):
         ctype = "scope_performance"
@@ -224,8 +239,6 @@ def decide_route(user_message: str, intent: dict, session_state: dict) -> tuple[
             ctype = "complement_share"
         elif _asks_if_improving(user_message):
             ctype = "direction_check"
-        elif _asks_for_direction_split(user_message):
-            ctype = "scope_direction"
         elif _asks_about_diversification(user_message):
             ctype = "diversification_overview"
         elif _proposes_derived_figure(user_message):
@@ -1609,16 +1622,13 @@ def _clean_limit(value) -> Optional[int]:
     return n if 1 <= n <= 50 else None
 
 
-# A group split by direction of travel: which are up, which are down. Both
-# halves must appear, so "which indicators are increasing?" alone still counts
-# but "is inflation increasing?" — one named indicator — does not.
-_DIRECTION_UP = re.compile(
-    r"\b(increas\w*|rising|rise|risen|up|grow\w*|improv\w*|higher)\b|ارتفع\w*|ترتفع|تزايد|زيادة",
-    re.IGNORECASE)
-_DIRECTION_DOWN = re.compile(
-    r"\b(declin\w*|decreas\w*|falling|fall\w*|down|drop\w*|shrink\w*|worsen\w*|lower)\b"
-    r"|انخفض\w*|تنخفض|تراجع|هبوط",
-    re.IGNORECASE)
+# _DIRECTION_UP and _DIRECTION_DOWN stood here, feeding a direction-split
+# detector that required an up-word AND a down-word AND a plural. Across the 90
+# questions in scripts/eval_routing.py it fired on none of them — not on the six
+# the intent agent routes to scope_direction unaided, and not on "which ones got
+# better and which got worse", which satisfies none of its three conditions.
+# The model reads the question; three patterns that never matched were not the
+# thing making that work.
 _DIRECTION_PLURAL = re.compile(
     r"\bindicators\b|\bmetrics\b|\bones\b|\bwhich\s+are\b|المؤشرات", re.IGNORECASE)
 
@@ -1677,25 +1687,6 @@ def _asks_what_to_watch(text: str) -> bool:
         return False
     kind, _ = _match_catalog_scope(text)
     return kind is not None
-
-
-def _asks_for_direction_split(text: str) -> bool:
-    """"Which of these are increasing and which are declining?"
-
-    Distinct from a two-period comparison of ONE indicator, which is what this
-    was being read as — it asked the user to name two periods, then sent the
-    whole sentence to the indicator resolver once they did. It is one question
-    about a whole group, and each member's year-on-year change answers it.
-
-    Both directions are required. A question with only one ("which indicators
-    are rising?") still qualifies via the plural, but "is inflation rising?"
-    names a single indicator and must stay a single-indicator question.
-    """
-    if not text:
-        return False
-    if not (_DIRECTION_UP.search(text) and _DIRECTION_DOWN.search(text)):
-        return False
-    return bool(_DIRECTION_PLURAL.search(text))
 
 
 # The economy as a whole, rather than any one indicator in it. Deliberately

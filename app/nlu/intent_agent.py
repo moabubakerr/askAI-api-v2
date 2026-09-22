@@ -107,9 +107,27 @@ Rules:
     indicators".
   Judge these by MEANING, not by keyword: "where are we succeeding?" asked of a
   sector is scope_performance even though it contains no word like rank or best.
+  A SUPERLATIVE means ranking: "which indicator is the worst", "which are we doing
+  worst on" is scope_performance, NOT scope_direction. Best and worst rank against
+  targets; increasing and declining are a direction of travel. They are different
+  questions and only one of them is about an ordering.
   Contrast: "count_list" answers with NAMES — use it when the user asks what the
   indicators ARE or how many there are, and a "scope_" type when they ask how the
   indicators are DOING. "country_ranking" ranks COUNTRIES on one indicator.
+- Use "macro_overview" when the subject is THE ECONOMY ITSELF, not any indicator
+  and not any sector: "how is the economy doing", "is Qatar's economy growing?",
+  "what's the latest in Qatar's economy", "هل ينمو اقتصاد قطر؟", "كيف حال الاقتصاد".
+  A question about the economy growing is macro_overview even though it sounds like
+  a direction question — "direction_check" is about ONE NAMED indicator, and the
+  economy is not an indicator. It is not "scope_snapshot" either: that needs a named
+  group, a sector or an indicator type, and "the economy" is neither.
+- SCAI publishes MEASURED readings, not projections. A question asking what an
+  indicator WILL BE — "what is the GDP forecast for 2026", "where will inflation be
+  next year", "project growth to 2030", "توقعات النمو" — is "out_of_scope". Never
+  route a forecast to latest_value: the approved data cannot answer it, and a past
+  reading offered for a future year reads as a forecast SCAI never made.
+  A published TARGET is different and is real data — "are we on track for the 2030
+  target" is scope_performance, not a forecast.
 - Use "direction_check" when the user asks whether ONE named indicator is getting
   better or worse: "is inflation improving?", "is the trade balance on the right
   track?", "are we heading the right way on unemployment?", "هل يتحسن التضخم؟".
@@ -118,9 +136,15 @@ Rules:
 - Use "diversification_overview" for whether the economy is diversifying AWAY from
   hydrocarbons: "is the economy diversifying?", "how dependent are we still on oil
   and gas?", "هل ينوّع الاقتصاد مصادره؟".
-- Use "complement_share" when the user states a share and asks for the OTHER side
+- Use "complement_share" when the user STATES A FIGURE and asks for the OTHER side
   of it: "if non-hydrocarbon exports account for 38.6%, what share still comes from
   hydrocarbons?", "what makes up the rest?", "how much is left?".
+  Both halves are required — a number supplied by the user, and a request for what
+  remains. A question that merely asks for a share which is itself published, like
+  "how much of Qatar's exports are non-oil" or "what does the 13.4% share of
+  non-hydrocarbon revenue mean", supplies no complement to compute and is
+  latest_value. Quoting a figure alone is not enough; they must be asking for the
+  part they did NOT name.
 - Use "denominator_check" when the user proposes a CALCULATION OF THEIR OWN over
   published figures and asks you to confirm it: "so that means about 40% of the
   workforce?", "does that mean X?", "can I just multiply those two?". What is being
