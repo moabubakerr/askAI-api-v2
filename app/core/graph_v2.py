@@ -132,23 +132,26 @@ def _capabilities_answer(language: str) -> tuple[dict, list[Citation]]:
     return payload, citations
 
 
-def handle_message(user_message: str, conversation_context: str = "",
-                    session_state: Optional[SessionState] = None) -> dict:
-    session_state = dict(session_state or {})
-    intent = extract_intent(user_message, conversation_context)
-    # A follow-up states only what changed. Inherit the rest from the previous
-    # turn before anything is resolved, so "and for Saudi Arabia?" keeps the
-    # earlier indicator AND period instead of only the indicator.
-    intent = carry_forward(intent, session_state, user_message)
+def decide_route(user_message: str, intent: dict, session_state: dict) -> tuple[str, bool]:
+    """Which computation the question gets, and whether a pattern here decided it.
+
+    Split out of handle_message so it can be measured. The intent agent proposes
+    a type and the patterns below override it, which means a routing regression
+    is invisible until a user reports one — and two did. Nothing can be said
+    about how often the model is right, or whether a prompt change made it
+    worse, while the decision is buried in the middle of a 2,300-line function.
+    scripts/eval_routing.py calls this directly.
+
+    A pure move: same order, same conditions, same precedence. The rescue block
+    comes along because it is routing too — it reads only the message and the
+    proposed type, and the returns it used to sit behind (general_chat,
+    capabilities) are never out_of_scope, so running it here changes nothing.
+
+    Returns (ctype, scope_pinned). scope_pinned says a pattern chose a group
+    route, which the caller trusts more than the model choosing one: a pattern
+    fires on wording only a group question has.
+    """
     ctype = intent.get("computation_type", "out_of_scope")
-    # Set when "which performed best?" is redirected onto a country ranking, so
-    # the direction comes from the indicator's polarity rather than from a
-    # superlative the user never used.
-    performance_followup = False
-    # Whether a group route was decided HERE rather than by the intent agent.
-    # The two are trusted differently: a pattern below fires on wording that
-    # only a group question has, while the model is reading meaning and will
-    # sometimes offer a group type for a question about one indicator.
     scope_pinned = False
 
     # Greetings are decided here, not by the model. It routed "اهلا" and
@@ -208,6 +211,42 @@ def handle_message(user_message: str, conversation_context: str = "",
         ctype = "scope_performance"
     elif _looks_like_catalog_request(user_message):
         ctype = "count_list"
+
+    # Rescue before refusing. Several deterministic routes are decided further
+    # down, once an indicator has resolved — and this return fires first, so
+    # anything the intent agent called out_of_scope never reached them.
+    # "If non-hydrocarbon exports account for 38.6%, what share still comes
+    # from hydrocarbon exports?" reads like a puzzle rather than a data
+    # question, the model classified it out_of_scope, and the complement route
+    # built for exactly that question was unreachable.
+    if ctype == "out_of_scope":
+        if _asks_for_complement_share(user_message):
+            ctype = "complement_share"
+        elif _asks_if_improving(user_message):
+            ctype = "direction_check"
+        elif _asks_for_direction_split(user_message):
+            ctype = "scope_direction"
+        elif _asks_about_diversification(user_message):
+            ctype = "diversification_overview"
+        elif _proposes_derived_figure(user_message):
+            ctype = "denominator_check"
+
+    return ctype, scope_pinned
+
+def handle_message(user_message: str, conversation_context: str = "",
+                    session_state: Optional[SessionState] = None) -> dict:
+    session_state = dict(session_state or {})
+    intent = extract_intent(user_message, conversation_context)
+    # A follow-up states only what changed. Inherit the rest from the previous
+    # turn before anything is resolved, so "and for Saudi Arabia?" keeps the
+    # earlier indicator AND period instead of only the indicator.
+    intent = carry_forward(intent, session_state, user_message)
+    # Set when "which performed best?" is redirected onto a country ranking, so
+    # the direction comes from the indicator's polarity rather than from a
+    # superlative the user never used.
+    performance_followup = False
+
+    ctype, scope_pinned = decide_route(user_message, intent, session_state)
     # Arabic script is unambiguous; the model's language field is a guess. An
     # Arabic greeting was being answered in English, which is the product simply
     # not working in one of its two languages.
@@ -243,24 +282,6 @@ def handle_message(user_message: str, conversation_context: str = "",
         return _finish(payload, language, session_state, citations,
                         question=user_message)
 
-    # Rescue before refusing. Several deterministic routes are decided further
-    # down, once an indicator has resolved — and this return fires first, so
-    # anything the intent agent called out_of_scope never reached them.
-    # "If non-hydrocarbon exports account for 38.6%, what share still comes
-    # from hydrocarbon exports?" reads like a puzzle rather than a data
-    # question, the model classified it out_of_scope, and the complement route
-    # built for exactly that question was unreachable.
-    if ctype == "out_of_scope":
-        if _asks_for_complement_share(user_message):
-            ctype = "complement_share"
-        elif _asks_if_improving(user_message):
-            ctype = "direction_check"
-        elif _asks_for_direction_split(user_message):
-            ctype = "scope_direction"
-        elif _asks_about_diversification(user_message):
-            ctype = "diversification_overview"
-        elif _proposes_derived_figure(user_message):
-            ctype = "denominator_check"
 
     if ctype == "out_of_scope":
         payload = {"ok": False, "message": msg("out_of_scope", language)}
