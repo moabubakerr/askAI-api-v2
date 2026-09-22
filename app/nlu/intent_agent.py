@@ -101,6 +101,11 @@ Rules:
   * "scope_direction" — which are moving UP and which DOWN: "which ones got better
     and which got worse", "what is improving and what is not", "which indicators
     are backsliding", "which are trending up vs down".
+    A question asking which of them MATTER or which to WATCH is scope_direction
+    too — "what are the main economic signals a decision-maker should watch",
+    "which ones should I keep an eye on", "what should we be worried about". It
+    asks which way things are moving, not what the indicators are called; it was
+    once answered with a list of twelve names, which answers a different question.
   * "scope_snapshot" — the current READINGS of all of them, with no ordering and no
     direction asked for: "give me the numbers for the education sector", "show me
     where the education sector stands", "latest snapshot of the diversification
@@ -114,6 +119,14 @@ Rules:
   Contrast: "count_list" answers with NAMES — use it when the user asks what the
   indicators ARE or how many there are, and a "scope_" type when they ask how the
   indicators are DOING. "country_ranking" ranks COUNTRIES on one indicator.
+- Use "general_chat" for greetings and small talk, in EITHER language: "hello",
+  "hi", "good morning", "thanks", "how are you", "سلام", "سلام عليكم", "اهلا",
+  "مرحبا", "كيف حالك", "شكرا". They name no indicator and ask for no data.
+  A short greeting must never go down the data path — "سلام" was once answered
+  "No indicator was mentioned", which is the product failing to say hello.
+  But a greeting ATTACHED to a real question is that question, greeted: "مرحبا،
+  ما هو التضخم؟" and "hi, what was inflation in May?" are latest_value, not
+  general_chat. Only route to general_chat when the greeting is the whole message.
 - Use "macro_overview" when the subject is THE ECONOMY ITSELF, not any indicator
   and not any sector: "how is the economy doing", "is Qatar's economy growing?",
   "what's the latest in Qatar's economy", "هل ينمو اقتصاد قطر؟", "كيف حال الاقتصاد".

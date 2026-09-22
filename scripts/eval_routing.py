@@ -147,7 +147,18 @@ CASES = [
     ("what is the weather in Doha", "out_of_scope", "", {}, ""),
 
     # --- Arabic ----------------------------------------------------------------
+    # The greetings is_greeting existed for. The model sent these down the data
+    # path once and they were answered "No indicator was mentioned"; only
+    # "hello" and "سلام عليكم" were tested when that pattern was deleted, which
+    # is not the same set. "سلام علبكم" is the misspelling a real user typed.
     ("سلام عليكم", "general_chat", "", {}, ""),
+    ("سلام", "general_chat", "", {}, ""),
+    ("سلام علبكم", "general_chat", "", {}, ""),
+    ("اهلا", "general_chat", "", {}, ""),
+    ("كيف حالك", "general_chat", "", {}, ""),
+    # A greeting attached to a real question is the question, not small talk.
+    ("hi, what was inflation in May 2025?", "latest_value", "", {}, ""),
+    ("مرحبا، ما هو التضخم؟", "latest_value", "", {}, ""),
     ("ما هو التضخم في 2025", "latest_value", "", {}, ""),
     ("هل يتحسن التضخم؟", "direction_check", "", {}, ""),
     ("كم عدد المؤشرات في قطاع التعليم", "count_list", "", {}, ""),
