@@ -24,7 +24,7 @@ from typing import TypedDict, Optional
 
 from app.nlu.intent_agent import extract_intent
 from app.core.conversation import carry_forward
-from app.core.messages import msg, detect_language, is_greeting, answers_in_language
+from app.core.messages import msg, detect_language, answers_in_language
 from app.resolvers.indicator_resolver import (resolve_indicator, has_usable_definition,
                                                ResolutionResult,
                                                resembles_catalogue_name, has_identifying_content)
@@ -154,78 +154,34 @@ def decide_route(user_message: str, intent: dict, session_state: dict) -> tuple[
     ctype = intent.get("computation_type", "out_of_scope")
     scope_pinned = False
 
-    # Greetings are decided here, not by the model. It routed "اهلا" and
-    # "كيف حالك" to general_chat but sent "سلام" and "سلام علبكم" down the data
-    # path, where they hit indicator resolution and were answered "No indicator
-    # was mentioned." A closed set of short phrases does not need a model, and
-    # this way the behaviour is the same every time.
-    if is_greeting(user_message):
-        ctype = "general_chat"
-
-    # Catalogue questions are pinned here too. "List the indicators in Sectors"
-    # worked, then broke when the intent prompt grew two more types — count_list
-    # was the only type with no explicit rule and lost to the newer ones, so the
-    # question fell through to indicator resolution and was answered "I couldn't
-    # tell which indicator you're asking about". The phrasing is recognisable
-    # (a list/count request naming a real sector or indicator type), so it does
-    # not need to depend on the model getting it right.
-    # "which are the best performing ones" after a sector listing. Pinned here
-    # for the same reason and checked BEFORE count_list, because the phrasings
-    # overlap ("what are the top performing indicators" is both a list request
-    # and a ranking) and the ranking is the more specific reading.
-    # "Is Qatar's economy growing?" was sent to indicator resolution and refused
-    # with "name the metric more plainly" — asking the user to already know the
-    # catalogue in order to ask the most natural question there is about an
-    # economy. It is the same question as "how is Qatar's economy doing", which
-    # already worked, and the difference between them was one word.
-    # Checked before the economy question, which is broader and would swallow
-    # "is the economy diversifying?" into a headline snapshot that does not
-    # mention hydrocarbons at all.
-    elif _proposes_derived_figure(user_message):
-        ctype = "denominator_check"
-    # Checked BEFORE diversification. "Give me the latest snapshot of Qatar's
-    # economic diversification indicators" is the question _GROUP_SNAPSHOT was
-    # written for, and it never once reached it: the diversification pattern
-    # sits earlier in this chain and matches the same sentence, so a request for
-    # twelve readings was answered with the hydrocarbon overview instead. The
-    # routing eval caught it as a pattern overriding a model that was right.
+    # The model decides. Every pattern that used to override it here is gone,
+    # and the eval is why: across 90 questions the eight of them rescued five
+    # cases and broke one, while the intent agent routed 79 unaided. Each has a
+    # rule in the prompt now, stated as a distinction rather than as the
+    # vocabulary the pattern was matching on.
     #
-    # Safe in this order because a group snapshot needs a plural AND a scope
-    # matching a real sector or indicator type; "is the economy diversifying?"
-    # has neither and still reaches diversification below.
-    elif _asks_for_group_snapshot(user_message):
-        ctype = "scope_snapshot"
-        scope_pinned = True
-    elif _asks_about_diversification(user_message):
-        ctype = "diversification_overview"
-    elif _asks_about_the_economy(user_message):
-        ctype = "macro_overview"
-    # _asks_for_direction_split used to sit here. It matched none of the 90
-    # questions in the eval — including the six the model routes to
-    # scope_direction unaided — because it demanded an up-word AND a down-word
-    # AND a plural, and "which ones got better and which got worse" has none of
-    # the three. It was not a net; it was a pattern that could not fire.
-    elif _asks_what_to_watch(user_message):
-        ctype = "scope_direction"
-        scope_pinned = True
-    elif _asks_for_performance_ranking(user_message):
-        ctype = "scope_performance"
-        scope_pinned = True
-    # "just give me top 3" — a request to shorten the list already on screen.
-    # It names nothing, so every route below it refuses; the group it is about
-    # is the one the previous turn listed or ranked. The intent agent is what
-    # recognises it, having been told that a bare limit request names no metric;
-    # the conditions here are the ones it cannot see — that a group is in play,
-    # and that this message did not name a different one.
-    # Always the performance ranking: "top 3" asks for an ORDER, and progress
-    # against each indicator's own target is the only order this group has. A
-    # direction split or a snapshot has no first and last to take three of.
-    elif (_clean_limit(intent.get("limit")) and intent.get("is_followup")
+    # Two things stayed, because neither is a pattern second-guessing a model
+    # that answered:
+    #
+    #   - the limit follow-up, which needs session state. "just give me top 3"
+    #     names no group, and which group it means is not in the message at all.
+    #   - the out_of_scope rescue below, which fires ONLY when the model has
+    #     already given up. It cannot override a routed answer, so it costs
+    #     nothing to keep and catches the case where the model refuses a
+    #     question one of these types can answer.
+    #
+    # Greetings are the one deletion with a named risk: the model sent "سلام"
+    # and "سلام علبكم" down the data path once, and only "hello" and
+    # "سلام عليكم" are in the eval. If greetings regress, is_greeting is the
+    # first thing to put back.
+    if (_clean_limit(intent.get("limit")) and intent.get("is_followup")
             and session_state.get("last_catalog_scope")
             and not _match_catalog_scope(user_message)[0]):
+        # Always the performance ranking: "top 3" asks for an ORDER, and
+        # progress against each indicator's own target is the only order this
+        # group has. A direction split or a snapshot has no first and last to
+        # take three of.
         ctype = "scope_performance"
-    elif _looks_like_catalog_request(user_message):
-        ctype = "count_list"
 
     # Rescue before refusing. Several deterministic routes are decided further
     # down, once an indicator has resolved — and this return fires first, so
@@ -243,6 +199,31 @@ def decide_route(user_message: str, intent: dict, session_state: dict) -> tuple[
             ctype = "diversification_overview"
         elif _proposes_derived_figure(user_message):
             ctype = "denominator_check"
+
+    # The intent agent can now route to the group family itself, which is the
+    # only way "which are ahead of target" reaches a ranking — no pattern here
+    # contains that wording, and nothing else would have. The cost of letting it
+    # route is that it also offers a group type for questions about ONE
+    # indicator: "is inflation rising?" is a direction question and reads like a
+    # direction split.
+    #
+    # A group type with no group named in the message and none under discussion,
+    # over wording that resolves confidently to a single published indicator, is
+    # that mistake. The indicator wins — the same test macro_overview and
+    # article_lookup already apply below, for the same reason.
+    if (ctype in ("scope_performance", "scope_direction", "scope_snapshot")
+            and not scope_pinned
+            and not session_state.get("last_catalog_scope")
+            and not _match_catalog_scope(user_message)[0]):
+        probe = resolve_indicator(user_message, require_data=True,
+                                   language=detect_language(user_message, intent.get('language')))
+        if (probe.status == "resolved" and probe.match
+                and probe.match.confidence >= CONFIDENT_MATCH):
+            # Direction asked of one indicator is direction_check, which answers
+            # it. Falling back to latest_value there would print a number at
+            # someone who asked which way it was going.
+            ctype = "latest_value" if ctype == "scope_snapshot" else "direction_check"
+            intent["indicator_phrase"] = intent.get("indicator_phrase") or user_message
 
     return ctype, scope_pinned
 
@@ -341,29 +322,6 @@ def handle_message(user_message: str, conversation_context: str = "",
         return _finish(payload, language, session_state, citations,
                         question=user_message)
 
-    # The intent agent can now route to the group family itself, which is the
-    # only way "which are ahead of target" reaches a ranking — no pattern here
-    # contains that wording, and nothing else would have. The cost of letting it
-    # route is that it also offers a group type for questions about ONE
-    # indicator: "is inflation rising?" is a direction question and reads like a
-    # direction split.
-    #
-    # A group type with no group named in the message and none under discussion,
-    # over wording that resolves confidently to a single published indicator, is
-    # that mistake. The indicator wins — the same test macro_overview and
-    # article_lookup already apply below, for the same reason.
-    if (ctype in ("scope_performance", "scope_direction", "scope_snapshot")
-            and not scope_pinned
-            and not session_state.get("last_catalog_scope")
-            and not _match_catalog_scope(user_message)[0]):
-        probe = resolve_indicator(user_message, require_data=True, language=language)
-        if (probe.status == "resolved" and probe.match
-                and probe.match.confidence >= CONFIDENT_MATCH):
-            # Direction asked of one indicator is direction_check, which answers
-            # it. Falling back to latest_value there would print a number at
-            # someone who asked which way it was going.
-            ctype = "latest_value" if ctype == "scope_snapshot" else "direction_check"
-            intent["indicator_phrase"] = intent.get("indicator_phrase") or user_message
 
     if ctype in ("scope_performance", "scope_direction", "scope_snapshot"):
         # The group can come from this message ("best performing education
@@ -1511,54 +1469,6 @@ _CATALOG_STOPWORDS = {
     "for", "show", "what", "are", "there", "is", "please", "and", "names", "name",
     "indicator", "indicators", "under", "within", "tell", "about", "which",
 }
-
-
-_CATALOG_REQUEST = re.compile(
-    r"\b(list|how many|give me all|show all|show me all|name all|what are the|"
-    r"names? of|all the)\b", re.IGNORECASE)
-
-
-def _looks_like_catalog_request(text: str) -> bool:
-    """A list/count request that names a real sector or indicator type.
-
-    Both halves are required. "List the indicators in Sectors" qualifies;
-    "list Qatar's quarterly GDP values" does not, because "GDP values" matches
-    no sector or type — that one is a period ranking and must stay one.
-    """
-    if not text or not _CATALOG_REQUEST.search(text):
-        return False
-    if not re.search(r"\bindicator", text, re.IGNORECASE):
-        return False
-    kind, _ = _match_catalog_scope(text)
-    return kind is not None
-
-
-# "most preformed" is in here on purpose. This is a bilingual audience typing
-# into a chat box; a spelling that a reader understands instantly should not
-# decide whether the question gets answered.
-#
-# The superlative comes on EITHER side of the verb, because English puts it on
-# either side and the user does not know which one we parse. "which one is the
-# most preformed" was answered and "which one preformed the best" was refused —
-# the same question, one word order apart, and the refusal told the user to
-# "name the metric more plainly" about a question that names no metric by
-# design.
-_PERFORMANCE_RANKING = re.compile(
-    r"\b(best|worst|top|strongest|weakest|highest|lowest|most|least)[\s-]*"
-    r"(performing|performer|performed|preforming|preformed|performance)\b"
-    r"|\b(perform\w*|preform\w*|do|does|doing|did)\s+(the\s+)?"
-    r"(best|worst|better|worse|strongest|weakest)\b"
-    r"|\b(performance|performing)\s+(ranking|ranked|comparison)\b"
-    r"|\bwhich\s+(ones?|indicators?)\s+(are\s+)?(doing|performing|preforming)\b"
-    # "which one is the best" / "which indicator is the worst", with no
-    # performance word at all. Only ever reaches a ranking when a group is in
-    # play, so it cannot swallow a question that names something of its own.
-    r"|\bwhich\s+(ones?|indicators?)\b[^?.!]{0,40}\b(best|worst)\b"
-    r"|\brank\s+(them|these|the indicators)\b"
-    r"|\b(on|against)\s+track\b"
-    r"|أفضل\s*أداء|أسوأ\s*أداء|الأفضل\s*أداء|أداءً",
-    re.IGNORECASE)
-
 _WORST_FIRST = re.compile(
     r"\b(worst|weakest|lowest|least|bottom|behind|lagging|furthest|"
     r"underperform\w*)\b|أسوأ|أدنى|متأخر",
@@ -1567,19 +1477,6 @@ _WORST_FIRST = re.compile(
 _BEST_FIRST = re.compile(
     r"\b(best|top|strongest|highest|leading|closest|most)\b|أفضل|أعلى",
     re.IGNORECASE)
-
-
-def _asks_for_performance_ranking(text: str) -> bool:
-    """A request to rank a GROUP of indicators by how they are doing.
-
-    Distinct from period_ranking, which orders one indicator's own readings
-    over time. This orders different indicators against their own targets, and
-    it only means anything when a group is in play — which is why the handler
-    requires a sector or type, from this message or from the previous turn.
-    """
-    return bool(text and _PERFORMANCE_RANKING.search(text))
-
-
 def _asks_for_worst(text: str) -> bool:
     return bool(text and _WORST_FIRST.search(text))
 
@@ -1620,73 +1517,6 @@ def _clean_limit(value) -> Optional[int]:
     except (TypeError, ValueError):
         return None
     return n if 1 <= n <= 50 else None
-
-
-# _DIRECTION_UP and _DIRECTION_DOWN stood here, feeding a direction-split
-# detector that required an up-word AND a down-word AND a plural. Across the 90
-# questions in scripts/eval_routing.py it fired on none of them — not on the six
-# the intent agent routes to scope_direction unaided, and not on "which ones got
-# better and which got worse", which satisfies none of its three conditions.
-# The model reads the question; three patterns that never matched were not the
-# thing making that work.
-_DIRECTION_PLURAL = re.compile(
-    r"\bindicators\b|\bmetrics\b|\bones\b|\bwhich\s+are\b|المؤشرات", re.IGNORECASE)
-
-
-# "Give me the latest snapshot of Qatar's economic diversification indicators."
-# Not a catalogue listing — that answers with names — and not a ranking. It
-# asks for the current READINGS of a named group, which nothing handled: the
-# whole phrase went to the resolver as if it named one indicator and was
-# refused, while the 12 published Economic Diversification Targets sat there
-# with a reading each.
-_GROUP_SNAPSHOT = re.compile(
-    r"\b(snapshot|overview|summary|latest|current|state|status|update|"
-    r"where\s+(do|does|are)|how\s+are)\b"
-    r"|لمحة|نظرة\s*عامة|آخر\s*(الأرقام|البيانات)|ملخص",
-    re.IGNORECASE)
-
-
-def _asks_for_group_snapshot(text: str) -> bool:
-    """Current readings for every indicator in a named group.
-
-    Requires the plural — a group is being asked about, not a metric — and a
-    scope that matches a real sector or indicator type, so "what is the latest
-    inflation figure" stays a single-indicator question.
-    """
-    if not text or not _GROUP_SNAPSHOT.search(text):
-        return False
-    if not _DIRECTION_PLURAL.search(text):
-        return False
-    kind, _ = _match_catalog_scope(text)
-    return kind is not None
-
-
-# "Based only on the national indicators available, what are the three main
-# economic signals a senior decision-maker should watch?" was answered with a
-# list of twelve indicator NAMES. It matched the catalogue-listing rule — "what
-# are the" plus "indicators" plus a scope that resolves — and a listing answers
-# with names, which is the one thing this question is not asking for.
-#
-# It is asking which way things are moving. That is the direction split, over
-# the same group it named.
-_ASKS_WHAT_TO_WATCH = re.compile(
-    r"\b(signals?|watch|watching|keep\s+an\s+eye|pay\s+attention|matters?\s+most"
-    r"|most\s+important|main|key|headline)\b",
-    re.IGNORECASE)
-
-
-def _asks_what_to_watch(text: str) -> bool:
-    """A question about which indicators are telling us something, not about
-    what the indicators are called.
-
-    Requires a group to be in play, the same as the listing rule it overrides,
-    so "what are the key indicators in Tourism" is still answerable and simply
-    answers with movement rather than with names.
-    """
-    if not text or not _ASKS_WHAT_TO_WATCH.search(text):
-        return False
-    kind, _ = _match_catalog_scope(text)
-    return kind is not None
 
 
 # The economy as a whole, rather than any one indicator in it. Deliberately

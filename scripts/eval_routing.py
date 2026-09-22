@@ -24,31 +24,34 @@ Run:
     # no database handy: measure only what the model proposes
     docker compose exec api python scripts/eval_routing.py --intent-only
 
+This is now the only thing protecting routing. The patterns that used to
+override the intent agent are deleted — the run that justified deleting them
+scored the model at 79/90 on its own while the eight of them rescued five cases
+and broke one, and each rescue became a rule in the prompt instead. Nothing else
+will notice if a prompt edit undoes that.
+
 Read the output like this:
 
-  MODEL   is what the intent agent proposed, on its own.
-  ROUTED  is what the application uses, after decide_route's patterns.
+  MODEL   what the intent agent proposed, on its own.
+  ROUTED  what the application uses.
 
-  The gap between those two columns is the whole argument about how much of the
-  routing the model should own:
+  They are now the SAME for almost every question, because decide_route no
+  longer second-guesses a routed answer. The three places they can still differ
+  all act on a question the model did not settle:
 
-  - MODEL wrong, ROUTED right  -> a pattern is carrying that route. Removing the
-    pattern would break it. This is the count_list situation.
-  - MODEL right, ROUTED wrong  -> a pattern is OVERRIDING the model incorrectly.
-    That pattern is now doing harm and should be narrowed or dropped.
-  - both wrong                 -> the prompt needs a rule, or a Contrast line
-    against whichever type it lost to. The MODEL column tells you which.
-  - both right                 -> the pattern may be redundant. Worth deleting
-    only if the model gets it right consistently, so re-run before believing it.
+  - the limit follow-up  ("just give me top 3" names no group; which group it
+    means is in the session, not the message)
+  - the out_of_scope rescue, which fires only where the model gave up
+  - the single-indicator guard, which stops a group type being applied to a
+    question that resolves to one published indicator
 
-A case marked (guarded) is one where handle_message applies a further check
-after routing — a group type over a message that resolves to a single indicator
-falls back to that indicator. Those are expected to be corrected downstream, so
-a ROUTED value of scope_* there is not necessarily a bug.
+  So a failing row is a PROMPT problem, nearly always. The MODEL column names
+  the type it lost to, and the fix is a Contrast line against that type — not a
+  new pattern. Adding a pattern here is how this code got to nine of them.
 
-LIMIT reports whether the model extracted a count from the question. The top-N
-follow-ups depend on it entirely; if that column is empty for them, the model is
-not filling the field and those questions will refuse.
+LIM and ORD are the count and the ranking end the model read out of the
+question. "show me the worst 5 instead" must show LIM 5 and ORD worst. An empty
+LIM on a top-N follow-up means that question will refuse.
 """
 import argparse
 import sys
@@ -93,6 +96,13 @@ CASES = [
     ("what is improving and what is not in the education sector", "scope_direction", "", {}, ""),
     ("which education indicators are backsliding", "scope_direction", "", {}, ""),
     ("which ones are moving the wrong way", "scope_direction", LISTED, EDU, ""),
+    # _asks_what_to_watch's motivating question. It was missing from this set,
+    # which is why that pattern audited as "no match — delete": the audit could
+    # not see the one input it existed for. The pattern is gone now, so this is
+    # the only thing standing between the model and a regression on it.
+    ("Based only on the national indicators available, what are the three main "
+     "economic signals a senior decision-maker should watch?",
+     ("scope_direction", "scope_performance", "scope_snapshot"), "", {}, ""),
     ("give me the numbers for the education sector", "scope_snapshot", "", {}, ""),
     ("show me where the education sector stands", "scope_snapshot", "", {}, ""),
     ("what do the education indicators say", "scope_snapshot", "", {}, ""),
@@ -241,7 +251,7 @@ def main() -> int:
         from app.core.graph_v2 import decide_route
 
     print(f"router model: {args.model}   cases: {len(CASES)}   types: {len(COMPUTATION_TYPES)}\n")
-    header = f"{'':2} {'MODEL':<24} {'ROUTED':<24} {'EXPECTED':<24} {'LIM':<4} QUESTION"
+    header = f"{'':2} {'MODEL':<24} {'ROUTED':<24} {'EXPECTED':<24} {'LIM':<4}{'ORD':<6} QUESTION"
     print(header)
     print("-" * len(header))
 
@@ -256,6 +266,7 @@ def main() -> int:
         model_ctype = intent.get("computation_type")
         model_says.append(model_ctype)
         limit = intent.get("limit")
+        order = intent.get("order")
         if decide_route:
             routed, _pinned = decide_route(question, dict(intent), dict(state))
         else:
@@ -281,7 +292,7 @@ def main() -> int:
         mark = "ok" if r_ok else ("~~" if note == "guarded" else "XX")
         exp = expected if isinstance(expected, str) else "|".join(expected)
         print(f"{mark:2} {str(model_ctype):<24} {str(routed):<24} {exp:<24} "
-              f"{str(limit or ''):<4} {question[:44]}")
+              f"{str(limit or ''):<4}{str(order or ''):<6} {question[:44]}")
 
     n = len(CASES)
     print(f"\n{'='*70}")
@@ -297,55 +308,12 @@ def main() -> int:
         print(f"\npatterns BROKE {len(broken)} case(s) the model got right:")
         for q, m, r, e in broken:
             print(f"   {q[:50]:<52} pattern forced {r}, wanted {e}")
-    # --- which patterns are still carrying anything --------------------------
-    #
-    # decide_route's chain has precedence, so "this pattern matched" is not the
-    # same as "this pattern decided". What can be said exactly, and is what the
-    # deletion question turns on, is: of the questions this pattern matches, how
-    # many did the model already route correctly on its own? A pattern that
-    # matches nothing, or only ever agrees with a model that was already right,
-    # is not protecting anything.
-    if decide_route:
-        from app.core import graph_v2 as g
-        PATTERNS = [
-            ("is_greeting", g.is_greeting, "general_chat"),
-            ("_proposes_derived_figure", g._proposes_derived_figure, "denominator_check"),
-            ("_asks_about_diversification", g._asks_about_diversification, "diversification_overview"),
-            ("_asks_about_the_economy", g._asks_about_the_economy, "macro_overview"),
-            # _asks_for_direction_split was deleted after this audit reported it
-            # matching none of the 90 questions.
-            ("_asks_what_to_watch", g._asks_what_to_watch, "scope_direction"),
-            ("_asks_for_group_snapshot", g._asks_for_group_snapshot, "scope_snapshot"),
-            ("_asks_for_performance_ranking", g._asks_for_performance_ranking, "scope_performance"),
-            ("_looks_like_catalog_request", g._looks_like_catalog_request, "count_list"),
-        ]
-        print(f"\n{'='*70}\npattern audit — what each one is still doing\n")
-        print(f"{'PATTERN':<32}{'MATCHES':>8}{'AGREES':>8}{'RESCUES':>8}{'HARMS':>7}  VERDICT")
-        for name, fn, forces in PATTERNS:
-            matched = agrees = rescues = harms = 0
-            for (question, expected, _c, _s, _n), model_ctype in zip(CASES, model_says):
-                try:
-                    hit = bool(fn(question))
-                except Exception:
-                    hit = False
-                if not hit:
-                    continue
-                matched += 1
-                if model_ctype == forces:
-                    agrees += 1
-                elif _ok(forces, expected):
-                    rescues += 1
-                elif _ok(model_ctype, expected):
-                    harms += 1
-            verdict = ("no match — delete" if matched == 0
-                       else "HARMS — fix or drop" if harms
-                       else "load-bearing" if rescues
-                       else "redundant here")
-            print(f"{name:<32}{matched:>8}{agrees:>8}{rescues:>8}{harms:>7}  {verdict}")
-        print("\n  MATCHES  questions this pattern fires on")
-        print("  AGREES   ...where the model said the same thing anyway")
-        print("  RESCUES  ...where the model was wrong and this pattern is right")
-        print("  HARMS    ...where the model was RIGHT and this pattern overrides it")
+    # The pattern audit that used to print here has been retired: it existed to
+    # decide which overriding patterns to delete, and they are deleted. What it
+    # measured is now visible in the two columns above — decide_route no longer
+    # overrides a routed answer at all, so MODEL and ROUTED differ only where
+    # the limit branch, the out_of_scope rescue or the single-indicator guard
+    # acted, and each of those fires on a question the model did not settle.
 
     print(f"\nstill wrong after routing: {len(misroutes)}")
     for q, m, r, e, note in misroutes:
