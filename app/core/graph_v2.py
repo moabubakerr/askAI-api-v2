@@ -323,6 +323,33 @@ def handle_message(user_message: str, conversation_context: str = "",
                         question=user_message)
 
 
+    # Parsed HERE, above every route that reads it, rather than part-way down.
+    # It already sat too low once: "Show GDP growth, inflation, and government
+    # revenues for the year 2023" returned each indicator's latest reading
+    # because the period was parsed after the snapshot had answered. The same
+    # omission was still live for the scope_* family below, which sits higher
+    # still — "the national indicators 3 years ago" was answered with today's
+    # twelve readings. A value every branch depends on belongs before the first
+    # branch, not before the second.
+    period = parse_period_expression(intent.get("period_expression"))
+    if period.kind == "unspecified":
+        # The model dropped the period. Read it from the question instead.
+        #
+        # This produced the worst failure yet: "What was inflation in May
+        # 2025?" came back "There is no approved data for inflation in May
+        # 2025" alongside April 2026's figure, while the identical question
+        # without its opening words returned 0.08365% for May 2025. The data
+        # was there the whole time; the filter was simply never applied, so the
+        # series ran to its end and the newest row was reported.
+        #
+        # Same shape as the indicator_phrase fallback: the question always
+        # carries what the model may or may not have extracted, and the parser
+        # is deterministic, so there is no reason to depend on the extraction.
+        from_message = parse_period_expression(user_message)
+        if from_message.kind != "unspecified":
+            period = from_message
+            session_state["last_period_expression"] = user_message
+
     if ctype in ("scope_performance", "scope_direction", "scope_snapshot"):
         # The group can come from this message ("best performing education
         # indicators", "which national indicators are rising") or, far more
@@ -354,7 +381,15 @@ def handle_message(user_message: str, conversation_context: str = "",
 
     if ctype in ("scope_performance", "scope_direction", "scope_snapshot"):
         session_state["last_catalog_scope"] = {"kind": kind, "scope": scope}
-        entries = retriever.get_scope_performance(kind, scope)
+        # The period the question asked for, which this family used to drop on
+        # the floor. "What about 3 years ago" then re-ran the same query and
+        # returned the same twelve current readings, and the answer described
+        # them as three years old.
+        scope_start = getattr(period, "start_date", None)
+        scope_end = getattr(period, "end_date", None)
+        entries = retriever.get_scope_performance(kind, scope,
+                                                   start_date=scope_start,
+                                                   end_date=scope_end)
         # Each row is a different indicator with its own unit and precision, so
         # the Format column has to be applied per row rather than once for the
         # answer. Without this the ratio indicators print as "9.0 NA".
@@ -394,6 +429,18 @@ def handle_message(user_message: str, conversation_context: str = "",
         payload = {"ok": result.ok,
                    "facts": {**_round_facts(result.facts), "scope": scope, "scope_kind": kind}} \
             if result.ok else {"ok": False, "message": result.message}
+        # Which window these readings come from, stated in the payload so the
+        # answer can say it and so the Composer has a true period to name
+        # instead of the one it read in the question. Where the group is empty
+        # BECAUSE of the window, that is a different fact from the group not
+        # existing, and the two were coming back as the same message.
+        if period is not None and getattr(period, "kind", "unspecified") != "unspecified":
+            asked_period = getattr(period, "raw", None) or intent.get("period_expression")
+            if payload.get("ok"):
+                payload["facts"]["as_of"] = asked_period
+            elif not entries:
+                payload = {"ok": False, "message": msg("none_in_period", language,
+                                                        period=asked_period)}
         citations = [Citation(indicator=e.get("indicator"), data_source=None,
                                table="published_data_points", record_id=e.get("record_id"),
                                period_label=e.get("period_label"))
@@ -529,27 +576,11 @@ def handle_message(user_message: str, conversation_context: str = "",
     # Resolved BEFORE the multi-metric split, not after: the snapshot needs it.
     # "Show GDP growth, inflation, and government revenues for the year 2023"
     # returned each indicator's latest reading — 2025-Q4, 2026-04, 2026-Q1 —
-    # because the period was parsed forty lines further down, long after the
-    # snapshot had already answered. Asking for any one of the three on its own
-    # honoured 2023 correctly, which is what made the omission visible.
-    period = parse_period_expression(intent.get("period_expression"))
-    if period.kind == "unspecified":
-        # The model dropped the period. Read it from the question instead.
-        #
-        # This produced the worst failure yet: "What was inflation in May
-        # 2025?" came back "There is no approved data for inflation in May
-        # 2025" alongside April 2026's figure, while the identical question
-        # without its opening words returned 0.08365% for May 2025. The data
-        # was there the whole time; the filter was simply never applied, so the
-        # series ran to its end and the newest row was reported.
-        #
-        # Same shape as the indicator_phrase fallback: the question always
-        # carries what the model may or may not have extracted, and the parser
-        # is deterministic, so there is no reason to depend on the extraction.
-        from_message = parse_period_expression(user_message)
-        if from_message.kind != "unspecified":
-            period = from_message
-            session_state["last_period_expression"] = user_message
+    # because the period was parsed below this point, long after the snapshot
+    # had already answered. Asking for any one of the three on its own honoured
+    # 2023 correctly, which is what made the omission visible. The parse now
+    # sits above the scope_* routes as well, which had the same defect for the
+    # same reason; see the comment there.
     # Routes that have already been decided deterministically are not
     # multi-metric questions, whatever punctuation they contain. "If
     # non-hydrocarbon exports account for 38.6% of total exports, what share
@@ -2284,23 +2315,24 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
     # Sources footer: always appended deterministically, never left to the
     # LLM's discretion. Only skipped when there's genuinely nothing to cite
     # (greetings, or a refusal where no data was retrieved at all).
-    # Low-confidence match disclosure. Appended structurally, for the same
-    # reason as the Sources footer: an instruction the Composer might drop on
-    # some phrasing is not a guarantee.
     #
-    # The case this exists for: "What percentage of Qatar's energy is generated
-    # by solar?" resolved to "Share of Qatari Teachers" — the lexical overlap
-    # between "percentage of Qatar's..." and "Share of Qatari..." was enough to
-    # clear MIN_CONFIDENCE — and answered with its 2030 target of 50%. Nothing
-    # in the reply signalled that the indicator was not what was asked about.
-    # This does not stop a wrong match; it stops a wrong match reading as a
-    # confident one.
-    weak = payload.pop("_low_confidence_match", None)
-    if weak:
-        answer = (f"{answer}\n\nI matched your question to \"{weak['indicator']}\" "
-                  f"(approximate match). If that isn't the indicator you meant, "
-                  f"please name it exactly.")
-
+    # A weak match used to add a trailer here — "I matched your question to
+    # "..." (approximate match)". Removed by request: it fired on every match
+    # under CONFIDENT_MATCH, including the many that were simply long indicator
+    # names matched correctly, and hedging a right answer teaches the reader to
+    # ignore the hedge. The named cost of dropping it, recorded so the decision
+    # can be revisited rather than rediscovered: "What percentage of Qatar's
+    # energy is generated by solar?" once resolved to "Share of Qatari
+    # Teachers" — enough lexical overlap to clear MIN_CONFIDENCE — and was
+    # answered with that indicator's 2030 target of 50%. Nothing now signals
+    # that. The answer for a mismatch like that one is a better resolver or a
+    # higher bar to answer at all, not a caveat on the way out.
+    #
+    # _low_confidence_match is still SET, and deliberately left in the payload
+    # rather than popped: CONFIDENT_MATCH is documented as provisional and
+    # needing calibration against real bge-m3 scores, and the logged flag is
+    # where those scores come from. _public() strips it before the Composer
+    # sees it, so it is never narrated.
     footer = render_sources_footer(citations)
     if footer:
         answer = f"{answer}\n\n{footer}"

@@ -419,6 +419,11 @@ def count_indicators_by_type(indicator_type_en: str) -> list[dict]:
 _SCOPE_PERFORMANCE_SQL = """
 WITH scoped AS ({scope_cte}),
 latest AS (
+    -- "Latest" means latest WITHIN the window, when one is given. A snapshot
+    -- asked for as of 2023 is each indicator's most recent reading up to the
+    -- end of 2023, not its reading today: without the bound this returned
+    -- today's figures for a question about three years ago, and the answer
+    -- narrated them as though they were 2023's.
     SELECT DISTINCT ON (p.published_indicator_detail_id)
            p.published_indicator_detail_id AS detail_id,
            p.period_label, p.period_date, p.granularity,
@@ -434,6 +439,8 @@ latest AS (
     FROM published_data_points p
     WHERE p.actual IS NOT NULL
       AND (p.country_en IS NULL OR p.country_en = '' OR p.country_en = 'National / Overall')
+      AND (CAST(:start_date AS date) IS NULL OR p.period_date >= CAST(:start_date AS date))
+      AND (CAST(:end_date   AS date) IS NULL OR p.period_date <= CAST(:end_date   AS date))
     ORDER BY p.published_indicator_detail_id, p.period_date DESC
 )
 SELECT i.name_en AS indicator, i.indicator_id AS indicator_record_id,
@@ -485,7 +492,8 @@ _SCOPE_CTE = {
 }
 
 
-def get_scope_performance(kind: str, scope: str) -> list[dict]:
+def get_scope_performance(kind: str, scope: str,
+                           start_date=None, end_date=None) -> list[dict]:
     """Every published indicator in a sector (or indicator type), with its most
     recent reading, its target, and which DIRECTION counts as good.
 
@@ -495,13 +503,23 @@ def get_scope_performance(kind: str, scope: str) -> list[dict]:
     them (cost per student, PISA rank) a lower number is the better outcome.
     Comparison is only defensible against each indicator's OWN target, which is
     what this returns the pieces for.
+
+    start_date/end_date bound which readings count as "most recent". They were
+    absent, and the whole scope_* family therefore ignored any period in the
+    question — silently, which is the worst way to ignore one. "Give me the
+    snapshot of the national indicators" and "...3 years ago" returned the
+    identical twelve rows, and the second answer was written as though they
+    were three years old. An indicator with no reading in the window drops out
+    here and is reported as having none, rather than being back-filled with a
+    figure from outside it.
     """
     cte = _SCOPE_CTE.get(kind)
     if not cte:
         return []
     with engine.connect() as conn:
         rows = conn.execute(text(_SCOPE_PERFORMANCE_SQL.format(scope_cte=cte)),
-                            {"scope": f"%{scope}%"}).fetchall()
+                            {"scope": f"%{scope}%",
+                             "start_date": start_date, "end_date": end_date}).fetchall()
     return [dict(r._mapping) for r in rows]
 
 

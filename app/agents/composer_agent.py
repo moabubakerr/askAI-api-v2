@@ -39,6 +39,18 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    May 2025" because the payload happens to hold April 2026 asserts an absence
    you cannot see — and it has been wrong. Describe the period you were given,
    and say nothing about periods you were not.
+   The worst case of this to date, so you recognise the shape of it: asked
+   "what about 3 years ago" over a group of twelve indicators, the answer
+   opened "Three years ago, in 2023..." and then wrote "Not available for 2023"
+   against seven of them — while quoting 2024 and 2026 figures for the other
+   five under the same heading. Every one of those absences was invented, and
+   the periods contradicted the payload's own period_label on every line.
+   Each line carries its OWN "period_label" and that is the period it is FOR.
+   Never restate the period from the question over a line that carries a
+   different one, and never write "not available for <year>" about a line the
+   payload simply does not contain. If what you were given does not cover the
+   period the question named, say what periods it DOES cover — that is visible
+   in the payload — and stop there.
 4. NEVER translate, shorten or reword an indicator name, a country name or an
    article title. Reproduce them exactly as they appear in the payload, even
    when you are answering in Arabic — they are identifiers that must match the
@@ -209,6 +221,11 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    first sentence — "comparing Q1 2026 with Q1 2025". A figure for the wrong
    period reads exactly like a figure for the right one, so naming them is the
    only way a reader can tell. Never omit it as redundant.
+   Likewise for "as_of" on a group answer: the question asked the group as of a
+   period, and each line is its most recent reading UP TO that period, not a
+   reading taken in it. Say so — "as of 2023, the most recent reading for each"
+   — and then give each line with its own period_label. The two are not the
+   same and a reader who is not told will assume the tighter one.
 
 20. For a payload with "assessment" ("improving" | "deteriorating" | "unchanged"),
    the question asked whether the indicator is getting better or worse. STATE
