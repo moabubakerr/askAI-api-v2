@@ -172,6 +172,9 @@ _T = {
     "no_reading": {"en": "no reading", "ar": "لا توجد قراءة"},
     "from_in": {"en": ", from {val} in {per}", "ar": "، مقارنة بـ {val} في {per}"},
     "yoy": {"en": " ({pct}% YoY)", "ar": " ({pct}% على أساس سنوي)"},
+    # The same movement for a rate indicator, where the move is in points and
+    # calling it a percent would be a different — and wrong — number.
+    "yoy_pp": {"en": " ({pp} pp YoY)", "ar": " ({pp} نقطة مئوية على أساس سنوي)"},
     "largest_decline": {"en": "Largest decline: ", "ar": "أكبر تراجع: "},
     "then": {"en": ", then ", "ar": "، ثم "},
     "no_reading_in_period": {
@@ -194,6 +197,16 @@ _T = {
     "increasing": {"en": "Increasing", "ar": "مرتفعة"},
     "declining": {"en": "Declining", "ar": "منخفضة"},
     "unchanged_group": {"en": "Unchanged", "ar": "دون تغيير"},
+    # The half that was NOT asked about: named and counted, not listed with its
+    # figures. It is context for the answer, not a second answer.
+    "also_increasing": {
+        "en": "{n} of {total} rose over the same period: {names}.",
+        "ar": "ارتفع {n} من {total} خلال الفترة نفسها: {names}.",
+    },
+    "also_declining": {
+        "en": "{n} of {total} fell over the same period: {names}.",
+        "ar": "انخفض {n} من {total} خلال الفترة نفسها: {names}.",
+    },
     "no_yoy_for": {
         "en": "No year-on-year comparison available for {n} of {total}: ",
         "ar": "لا تتوفر مقارنة سنوية لـ {n} من {total}: ",
@@ -429,6 +442,8 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                             per=e.get("previous_period"))
             if e.get("change_yoy_percent") is not None:
                 line += _t("yoy", language, pct=e["change_yoy_percent"])
+            elif e.get("change_yoy_pp") is not None:
+                line += _t("yoy_pp", language, pp=e["change_yoy_pp"])
             if e.get("component_name"):
                 line += _t("component_note", language, part=e["component_name"],
                             n=e.get("component_of_total"))
@@ -519,7 +534,14 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
     if "increasing" in facts and "declining" in facts:
         scope = facts.get("scope") or _t("these_indicators", language)
         lines = [_t("vs_year_earlier", language, scope=scope)]
-        for key in ("increasing", "declining", "unchanged"):
+        # "Which indicators are rising" is answered with the rising ones first
+        # and in full; the other half follows as a named count, below. Where no
+        # direction was asked for, both are listed as before.
+        asked = facts.get("asked_group")
+        counterpart = facts.get("counterpart_group")
+        groups = ([asked, "unchanged"] if asked
+                  else ["increasing", "declining", "unchanged"])
+        for key in groups:
             group = facts.get(key) or []
             if not group:
                 continue
@@ -534,6 +556,11 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                          else f"{e.get('change_yoy_pp')} {_t('pp', language)}")
                 lines.append(f"- {e.get('indicator')}: {moved} "
                              f"({value} — {e.get('period_label')})")
+        others = (facts.get(counterpart) or []) if counterpart else []
+        if others:
+            lines.append("\n" + _t(f"also_{counterpart}", language,
+                                    n=len(others), total=facts.get("n_total"),
+                                    names=", ".join(e.get("indicator") for e in others)))
         skipped = facts.get("no_comparison") or []
         if skipped:
             lines.append("\n" + _t("no_yoy_for", language, n=len(skipped),

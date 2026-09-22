@@ -58,6 +58,7 @@ Output ONLY JSON with this exact shape:
   "extremum": "max" | "min" | null,
   "limit": <integer or null>,
   "order": "best" | "worst" | null,
+  "direction_asked": "up" | "down" | null,
   "language": "en" | "ar",
   "is_followup": true|false,
   "followup_reference": "<what the follow-up refers back to, e.g. 'same indicator, different period', or null>"
@@ -232,6 +233,14 @@ Rules:
   struggling. null when they did not say, so the previous turn's order is kept.
   Judge it from meaning, not from a keyword: "which ones are we failing at" is
   "worst", "where are we doing well" is "best".
+- "direction_asked" is the same idea for "scope_direction": WHICH HALF the user
+  asked about. "up" for rising/increasing/growing/improving/trending up, "down"
+  for falling/declining/dropping/backsliding/moving the wrong way, in either
+  language ("أيها يرتفع" is "up", "أيها يتراجع" is "down"). Leave it null when
+  the question asks for BOTH halves — "which got better and which got worse",
+  "what is improving and what is not" — or names no direction at all. It does
+  not change which indicators are examined, only which half the answer leads
+  with; the other half is still reported, briefly.
 - Do not invent countries, periods, or indicators the user did not mention.
 - If the question is a follow-up ("what about last year", "and Q2?", "and for Saudi Arabia?",
   "what is the latest value?"), set is_followup=true and fill ONLY the fields the user
@@ -272,6 +281,7 @@ def extract_intent(user_message: str, conversation_context: str = "") -> dict:
             "extremum": None,
             "limit": None,
             "order": None,
+            "direction_asked": None,
             "language": "en",
             "is_followup": False,
             "followup_reference": None,

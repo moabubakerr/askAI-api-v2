@@ -203,8 +203,15 @@ def preferred_change_field(row: dict, granularity: str, as_points: bool = False)
     for a yearly change, use yearly_yoy_percent verbatim; never compute a
     fresh one from raw values when a vetted figure already exists."""
     suffix = "pp" if as_points else "percent"
+    # Year-on-year in every granularity, in BOTH forms. The points branch used
+    # to send monthly series to monthly_mom_pp — a month-over-month move —
+    # while the percent branch sent them to monthly_yoy_percent, and every
+    # caller labels whatever comes back "year-on-year" (scope_direction says so
+    # in its own payload). For a monthly rate indicator that meant Inflation's
+    # change was read off the wrong column and then described as annual.
+    # monthly_yoy_pp is published and already selected by the retriever.
     field_map = {
-        "monthly": f"monthly_yoy_{suffix}" if suffix == "percent" else f"monthly_mom_{suffix}",
+        "monthly": f"monthly_yoy_{suffix}",
         "quarterly": f"quarterly_yoy_{suffix}",
         "yearly": f"yearly_yoy_{suffix}",
     }
@@ -411,7 +418,8 @@ def scope_performance(entries: list[dict], best_first: bool = True,
     })
 
 
-def scope_direction(entries: list[dict]) -> ComputeResult:
+def scope_direction(entries: list[dict],
+                     direction_asked: Optional[str] = None) -> ComputeResult:
     """Splits a group of indicators into those rising and those falling,
     year on year.
 
@@ -426,6 +434,16 @@ def scope_direction(entries: list[dict]) -> ComputeResult:
     performance ranking cannot reach. It says nothing about whether a movement
     is good: polarity is carried on every row so the caller can, and for
     Inflation or Cost per Student a rise is not an improvement.
+
+    direction_asked ("up"/"down") is the half the question actually asked for.
+    "Which national indicators are rising" was answered with the rising list AND
+    the falling list, given equal weight — an answer to a question nobody asked,
+    ahead of the one they did. Both halves are still returned, because "3 of 8
+    are rising" is the honest shape of the answer and a bare list of 3 implies
+    nothing else moved; what the flag changes is which one leads and which is
+    the aside. The split itself is unaffected — no indicator is dropped from the
+    payload on account of it, so a follow-up about the other half is already
+    answered.
     """
     if not entries:
         return ComputeResult(False, message="No published indicators were found for this group.")
@@ -476,7 +494,7 @@ def scope_direction(entries: list[dict]) -> ComputeResult:
 
     increasing.sort(key=moved, reverse=True)
     declining.sort(key=moved)
-    return ComputeResult(True, facts={
+    facts = {
         "increasing": increasing,
         "declining": declining,
         "unchanged": unchanged,
@@ -485,7 +503,17 @@ def scope_direction(entries: list[dict]) -> ComputeResult:
         "n_declining": len(declining),
         "n_total": len(entries),
         "comparison": "year-on-year, at each indicator's most recent reading",
-    })
+    }
+    if direction_asked in ("up", "down"):
+        facts["direction_asked"] = direction_asked
+        # Which key holds the answer, and which holds the aside. Named rather
+        # than left for each consumer to work out from "up", so the Composer,
+        # the template and the frontend all lead with the same list.
+        facts["asked_group"] = "increasing" if direction_asked == "up" else "declining"
+        facts["counterpart_group"] = "declining" if direction_asked == "up" else "increasing"
+        facts["n_asked"] = len(facts[facts["asked_group"]])
+        facts["n_counterpart"] = len(facts[facts["counterpart_group"]])
+    return ComputeResult(True, facts=facts)
 
 
 def _is_rank(unit: Optional[str]) -> bool:

@@ -366,7 +366,13 @@ def handle_message(user_message: str, conversation_context: str = "",
         if ctype == "scope_snapshot":
             result = compute.scope_snapshot(entries)
         elif ctype == "scope_direction":
-            result = compute.scope_direction(entries)
+            # Which half was asked for. The model's reading wins where it has
+            # one; the regex is the fallback for when it says nothing, the same
+            # arrangement scope_performance uses for "order" below.
+            asked = intent.get("direction_asked")
+            if asked not in ("up", "down"):
+                asked = _requested_direction(user_message)
+            result = compute.scope_direction(entries, direction_asked=asked)
         else:
             # The order is remembered, because a follow-up restates it even less
             # often than it restates the count: "just give me top 3" following a
@@ -1481,6 +1487,44 @@ def _asks_for_worst(text: str) -> bool:
     return bool(text and _WORST_FIRST.search(text))
 
 
+_RISING_ONLY = re.compile(
+    r"\b(ris\w*|rose|increas\w*|grow\w*|up|upward|improv\w*|climb\w*|gain\w*)\b"
+    r"|ترتفع|يرتفع|ارتفع|تزايد|تحسن",
+    re.IGNORECASE)
+
+_FALLING_ONLY = re.compile(
+    r"\b(fall\w*|fell|declin\w*|decreas\w*|drop\w*|down|downward|"
+    r"worsen\w*|backslid\w*|shrink\w*|deteriorat\w*)\b|\bwrong way\b"
+    r"|تنخفض|ينخفض|انخفض|تراجع|تدهور",
+    re.IGNORECASE)
+
+# A question that asks for both halves, in a phrasing where only one of them is
+# spelled out as a direction word. "What is improving and what is not" names
+# only "improving", and reading it as a one-sided question would answer half of
+# a question that plainly asked for both.
+_BOTH_SIDES = re.compile(
+    r"\b(vs\.?|versus)\b|\band\s+(what|which|who|the ones)\b"
+    r"|\bor\s+(fall\w*|declin\w*|decreas\w*|down)\b"
+    r"|مقابل|وأيها|وما\s+لا",
+    re.IGNORECASE)
+
+
+def _requested_direction(text: str) -> Optional[str]:
+    """Which half of a direction split the question asked for, or None.
+
+    None when BOTH are named — "which got better and which got worse" is a
+    two-sided question and answering it one-sided would be the same fault in
+    reverse — and None when neither is, which leaves the two-sided answer as
+    the default it has always been.
+    """
+    if not text or _BOTH_SIDES.search(text):
+        return None
+    up, down = bool(_RISING_ONLY.search(text)), bool(_FALLING_ONLY.search(text))
+    if up == down:
+        return None
+    return "up" if up else "down"
+
+
 def _requested_order(text: str, default: bool = True) -> bool:
     """Which end of a ranking to put first, as a boolean best_first.
 
@@ -1947,6 +1991,19 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
                 # (2.0276599261667307). Rounded to the same 4 places every other
                 # computed value uses, so the number shown is the number checked.
                 entry["change_yoy_percent"] = round(float(change), 4)
+                entry["change_kind"] = "percent"
+            else:
+                # Rate indicators leave the percent column empty and publish the
+                # move in percentage POINTS instead — a percent-of-a-percent
+                # would have called Inflation's 0.63% -> 2.62% a rise of 316%.
+                # Every other group shape already falls back here
+                # (scope_snapshot, scope_direction); this one did not, so the
+                # macro overview showed Inflation with no year-on-year figure at
+                # all while the figure sat in the next column of the same row.
+                change = compute.preferred_change_field(row, gran, as_points=True)
+                if change is not None:
+                    entry["change_yoy_pp"] = round(float(change), 4)
+                    entry["change_kind"] = "percentage_points"
             entry["report_as_growth"] = _asks_for_growth(phrase)
             citations += citations_for_rows([row], match.name_en, match.data_source_en)
         facts.append(entry)
