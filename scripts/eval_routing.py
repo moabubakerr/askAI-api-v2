@@ -144,6 +144,82 @@ CASES = [
     ("أيها الأفضل أداءً", "scope_performance", LISTED, EDU, ""),
 ]
 
+# The questions that actually broke this system.
+#
+# Everything above is a phrasing someone thought of while fixing a bug, which is
+# the wrong test for whether the patterns in decide_route can be removed: those
+# patterns exist because real users typed things nobody anticipated. Each one
+# carries its motivating question in a comment beside it, and these are those
+# questions, harvested from the source.
+#
+# This is the set that decides whether a pattern is load-bearing. A pattern that
+# catches nothing here is not insurance against the unknown — it is insurance
+# against something that has already been shown not to need it.
+TOURISTS = "User: How many tourists arrived in May 2025?\nAssistant: 142,000 in May 2025."
+INFL = "User: What was inflation in May 2025?\nAssistant: 0.2% in May 2025."
+SHARE = ("User: If non-hydrocarbon exports account for 38.6%, what share still comes from hydrocarbons?\n"
+         "Assistant: 61.4%.")
+
+HISTORICAL = [
+    # --- greeting / economy patterns -------------------------------------------
+    ("Is Qatar's economy growing?", "macro_overview", "", {}, "hist"),
+    ("how is Qatar's economy doing", "macro_overview", "", {}, "hist"),
+    ("how is the economy doing", "macro_overview", "", {}, "hist"),
+    ("هل ينمو اقتصاد قطر؟", "macro_overview", "", {}, "hist"),
+    # named a real indicator and was wrongly swallowed by the macro snapshot
+    ("how is Qatar doing on competitiveness?", "latest_value", "", {}, "hist"),
+    ("how is the education sector doing", ("scope_snapshot", "scope_performance"), "", {}, "hist"),
+    ("how are prices doing", ("latest_value", "trend", "direction_check"), "", {}, "hist"),
+
+    # --- diversification -------------------------------------------------------
+    ("is the economy diversifying?", "diversification_overview", "", {}, "hist"),
+    ("Is Qatar becoming less dependent on oil and gas?", "diversification_overview", "", {}, "hist"),
+    ("هل يقل اعتماد قطر على النفط", "diversification_overview", "", {}, "hist"),
+
+    # --- catalogue vs ranking --------------------------------------------------
+    ("List the indicators in Sectors", "count_list", "", {}, "hist"),
+    ("which are the best performing ones", "scope_performance", LISTED, EDU, "hist"),
+    ("what are the top performing indicators", "scope_performance", LISTED, EDU, "hist"),
+    ("what are the most performing ones", "scope_performance", LISTED, EDU, "hist"),
+    ("which performed best?", "scope_performance", LISTED, EDU, "hist"),
+    ("Which is the best performing one?", "scope_performance", LISTED, EDU, "hist"),
+    ("which one is the best", "scope_performance", LISTED, EDU, "hist"),
+    ("which indicator is the worst", "scope_performance", LISTED, EDU, "hist"),
+    ("which ones are we failing at", "scope_performance", LISTED, EDU, "hist"),
+
+    # --- direction split vs one indicator --------------------------------------
+    ("which national indicators are rising", "scope_direction", "", {}, "hist"),
+    ("which indicators are increasing?", "scope_direction", "", {}, "hist"),
+    ("is inflation increasing?", "direction_check", "", {}, "hist"),
+    ("Give me the latest snapshot of Qatar's economic diversification indicators.",
+     "scope_snapshot", "", {}, "hist"),
+
+    # --- follow-ups that lost the thread (F-030) -------------------------------
+    ("and for Saudi Arabia?", ("latest_value", "country_comparison"), TOURISTS, {}, "hist"),
+    ("what about in 2022", "latest_value", INFL, {}, "hist"),
+    ("what about in 2024", "latest_value", INFL, {}, "hist"),
+    ("what about if it was 29.44474", "complement_share", SHARE,
+     {"last_ctype": "complement_share", "last_indicator_name": "Non-Hydrocarbon Exports"}, "hist"),
+
+    # --- forecasts are not published, and must not be invented -----------------
+    ("What is the GDP forecast 2026", "out_of_scope", "", {}, "hist"),
+    ("What is the Real GDP forecast for 2026", "out_of_scope", "", {}, "hist"),
+
+    # --- the rest --------------------------------------------------------------
+    ("what has SCAI written about penguins", "article_lookup", "", {}, "hist"),
+    ("What has SCAI written about inflation?", "article_lookup", "", {}, "hist"),
+    ("ما هو أخر تحليل للتضخم", "analysis_lookup", "", {}, "hist"),
+    ("Show GDP growth, inflation, and government revenues for the year 2023",
+     "multi_indicator", "", {}, "hist"),
+    ("How many GCC tourists arrived into Qatar in 2025?", "latest_value", "", {}, "hist"),
+    ("How much OF Qatar's exports are non-oil", "latest_value", "", {}, "hist"),
+    ("What does the 13.4% share of non-hydrocarbon government revenue mean",
+     ("latest_value", "definition"), "", {}, "hist"),
+    ("الربع الافتتاحي من 2026 مقابل ما يقابله في 2025", "period_comparison", "", {}, "hist"),
+]
+
+CASES = CASES + HISTORICAL
+
 
 def _ok(actual, expected):
     return actual in (expected if isinstance(expected, tuple) else (expected,))
@@ -170,6 +246,7 @@ def main() -> int:
     print("-" * len(header))
 
     misroutes, rescued, broken, stats = [], [], [], Counter()
+    model_says = []
     for question, expected, context, state, note in CASES:
         try:
             intent = extract_intent(question, context)
@@ -177,6 +254,7 @@ def main() -> int:
             print(f"\nFAILED to reach the model: {type(exc).__name__}: {exc}")
             return 2
         model_ctype = intent.get("computation_type")
+        model_says.append(model_ctype)
         limit = intent.get("limit")
         if decide_route:
             routed, _pinned = decide_route(question, dict(intent), dict(state))
@@ -186,6 +264,13 @@ def main() -> int:
         m_ok, r_ok = _ok(model_ctype, expected), _ok(routed, expected)
         stats["model_ok"] += m_ok
         stats["routed_ok"] += r_ok
+        # The two sets answer different questions and are scored apart: the
+        # written set says whether today's routing works, the harvested set says
+        # whether the patterns are still needed.
+        bucket = "hist" if note == "hist" else "written"
+        stats[f"{bucket}_n"] += 1
+        stats[f"{bucket}_model"] += m_ok
+        stats[f"{bucket}_routed"] += r_ok
         if m_ok and not r_ok:
             broken.append((question, model_ctype, routed, expected))
         elif r_ok and not m_ok:
@@ -200,15 +285,67 @@ def main() -> int:
 
     n = len(CASES)
     print(f"\n{'='*70}")
-    print(f"model alone   {stats['model_ok']:>3}/{n}  ({stats['model_ok']/n:.0%})")
+    print(f"{'':<22}{'MODEL ALONE':>14}{'AFTER ROUTING':>16}")
+    for label, key in (("written cases", "written"), ("questions that broke it", "hist")):
+        k = stats[f"{key}_n"] or 1
+        print(f"{label:<22}{stats[f'{key}_model']:>8}/{k:<5}{stats[f'{key}_routed']:>10}/{k}")
+    print(f"{'TOTAL':<22}{stats['model_ok']:>8}/{n:<5}{stats['routed_ok']:>10}/{n}")
     if decide_route:
-        print(f"after routing {stats['routed_ok']:>3}/{n}  ({stats['routed_ok']/n:.0%})")
         print(f"\npatterns RESCUED {len(rescued)} case(s) the model got wrong:")
         for q, m, r, e in rescued:
             print(f"   {q[:50]:<52} model said {m}")
         print(f"\npatterns BROKE {len(broken)} case(s) the model got right:")
         for q, m, r, e in broken:
             print(f"   {q[:50]:<52} pattern forced {r}, wanted {e}")
+    # --- which patterns are still carrying anything --------------------------
+    #
+    # decide_route's chain has precedence, so "this pattern matched" is not the
+    # same as "this pattern decided". What can be said exactly, and is what the
+    # deletion question turns on, is: of the questions this pattern matches, how
+    # many did the model already route correctly on its own? A pattern that
+    # matches nothing, or only ever agrees with a model that was already right,
+    # is not protecting anything.
+    if decide_route:
+        from app.core import graph_v2 as g
+        PATTERNS = [
+            ("is_greeting", g.is_greeting, "general_chat"),
+            ("_proposes_derived_figure", g._proposes_derived_figure, "denominator_check"),
+            ("_asks_about_diversification", g._asks_about_diversification, "diversification_overview"),
+            ("_asks_about_the_economy", g._asks_about_the_economy, "macro_overview"),
+            ("_asks_for_direction_split", g._asks_for_direction_split, "scope_direction"),
+            ("_asks_what_to_watch", g._asks_what_to_watch, "scope_direction"),
+            ("_asks_for_group_snapshot", g._asks_for_group_snapshot, "scope_snapshot"),
+            ("_asks_for_performance_ranking", g._asks_for_performance_ranking, "scope_performance"),
+            ("_looks_like_catalog_request", g._looks_like_catalog_request, "count_list"),
+        ]
+        print(f"\n{'='*70}\npattern audit — what each one is still doing\n")
+        print(f"{'PATTERN':<32}{'MATCHES':>8}{'AGREES':>8}{'RESCUES':>8}{'HARMS':>7}  VERDICT")
+        for name, fn, forces in PATTERNS:
+            matched = agrees = rescues = harms = 0
+            for (question, expected, _c, _s, _n), model_ctype in zip(CASES, model_says):
+                try:
+                    hit = bool(fn(question))
+                except Exception:
+                    hit = False
+                if not hit:
+                    continue
+                matched += 1
+                if model_ctype == forces:
+                    agrees += 1
+                elif _ok(forces, expected):
+                    rescues += 1
+                elif _ok(model_ctype, expected):
+                    harms += 1
+            verdict = ("no match — delete" if matched == 0
+                       else "HARMS — fix or drop" if harms
+                       else "load-bearing" if rescues
+                       else "redundant here")
+            print(f"{name:<32}{matched:>8}{agrees:>8}{rescues:>8}{harms:>7}  {verdict}")
+        print("\n  MATCHES  questions this pattern fires on")
+        print("  AGREES   ...where the model said the same thing anyway")
+        print("  RESCUES  ...where the model was wrong and this pattern is right")
+        print("  HARMS    ...where the model was RIGHT and this pattern overrides it")
+
     print(f"\nstill wrong after routing: {len(misroutes)}")
     for q, m, r, e, note in misroutes:
         tag = f" ({note})" if note else ""
