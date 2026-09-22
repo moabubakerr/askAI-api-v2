@@ -48,6 +48,8 @@ Output ONLY JSON with this exact shape:
   "explicit_frequency": "monthly" | "quarterly" | "yearly" | null,
   "growth_method_hint": "CAGR" | "simple" | null,
   "extremum": "max" | "min" | null,
+  "limit": <integer or null>,
+  "order": "best" | "worst" | null,
   "language": "en" | "ar",
   "is_followup": true|false,
   "followup_reference": "<what the follow-up refers back to, e.g. 'same indicator, different period', or null>"
@@ -136,6 +138,20 @@ Rules:
   and instead ask something like "which is lowest/highest", use country_ranking or min_max.
 - extremum should be "max" for "highest"/"largest"/"most" style questions, "min" for
   "lowest"/"smallest"/"least", and null when computation_type isn't min_max/country_ranking.
+- "limit" is HOW MANY entries the user wants to SEE: 3 for "top 3", "the first three",
+  "just show me 3 of them", "cut it down to three", "أفضل 3". null when they did not say.
+  It is a request about the LENGTH of the answer, never about the data — a limit never
+  changes which indicator, period or country is being asked about.
+  A follow-up whose ONLY content is a shorter list — "just give me top 3", "kindly
+  shorten that to 5", "top 3 pls", "top 3 from the above", "فقط أفضل ٣" — sets limit,
+  sets is_followup=true, and leaves indicator_phrase null. It names no new metric and
+  no new group; it asks for less of the answer already on screen. Do NOT read "top 3"
+  as the name of an indicator.
+- "order" is WHICH END the user wants first: "best" for top/best/strongest/leading/
+  closest to target, "worst" for bottom/worst/weakest/furthest behind/lagging/
+  struggling. null when they did not say, so the previous turn's order is kept.
+  Judge it from meaning, not from a keyword: "which ones are we failing at" is
+  "worst", "where are we doing well" is "best".
 - Do not invent countries, periods, or indicators the user did not mention.
 - If the question is a follow-up ("what about last year", "and Q2?", "and for Saudi Arabia?",
   "what is the latest value?"), set is_followup=true and fill ONLY the fields the user
@@ -174,6 +190,8 @@ def extract_intent(user_message: str, conversation_context: str = "") -> dict:
             "explicit_frequency": None,
             "growth_method_hint": None,
             "extremum": None,
+            "limit": None,
+            "order": None,
             "language": "en",
             "is_followup": False,
             "followup_reference": None,

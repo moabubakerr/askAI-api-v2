@@ -187,11 +187,16 @@ def handle_message(user_message: str, conversation_context: str = "",
         ctype = "scope_performance"
     # "just give me top 3" — a request to shorten the list already on screen.
     # It names nothing, so every route below it refuses; the group it is about
-    # is the one the previous turn listed or ranked.
+    # is the one the previous turn listed or ranked. The intent agent is what
+    # recognises it, having been told that a bare limit request names no metric;
+    # the conditions here are the ones it cannot see — that a group is in play,
+    # and that this message did not name a different one.
     # Always the performance ranking: "top 3" asks for an ORDER, and progress
     # against each indicator's own target is the only order this group has. A
     # direction split or a snapshot has no first and last to take three of.
-    elif _is_bare_topn_request(user_message) and session_state.get("last_catalog_scope"):
+    elif (_clean_limit(intent.get("limit")) and intent.get("is_followup")
+            and session_state.get("last_catalog_scope")
+            and not _match_catalog_scope(user_message)[0]):
         ctype = "scope_performance"
     elif _looks_like_catalog_request(user_message):
         ctype = "count_list"
@@ -339,14 +344,23 @@ def handle_message(user_message: str, conversation_context: str = "",
         elif ctype == "scope_direction":
             result = compute.scope_direction(entries)
         else:
-            # Both remembered, because a follow-up restates neither: "just give
-            # me top 3" says nothing about which end is best, and "and the rest?"
-            # says nothing about how many.
-            best_first = _requested_order(
-                user_message, session_state.get("last_scope_best_first", True))
+            # The order is remembered, because a follow-up restates it even less
+            # often than it restates the count: "just give me top 3" following a
+            # worst-performing list would otherwise flip the list over under the
+            # same heading.
+            #
+            # The model's reading wins where it has one — it is judging meaning,
+            # and "which ones are we failing at" carries no keyword the regex
+            # knows. The regex stays as the fallback for when it says nothing.
+            order = intent.get("order")
+            if order in ("best", "worst"):
+                best_first = order == "best"
+            else:
+                best_first = _requested_order(
+                    user_message, session_state.get("last_scope_best_first", True))
             session_state["last_scope_best_first"] = best_first
             result = compute.scope_performance(
-                entries, best_first=best_first, limit=_requested_limit(user_message))
+                entries, best_first=best_first, limit=_clean_limit(intent.get("limit")))
         payload = {"ok": result.ok,
                    "facts": {**_round_facts(result.facts), "scope": scope, "scope_kind": kind}} \
             if result.ok else {"ok": False, "message": result.message}
@@ -1518,63 +1532,28 @@ def _requested_order(text: str, default: bool = True) -> bool:
     return default
 
 
-_NUMBER_WORDS = {
-    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
-    "seven": 7, "eight": 8, "nine": 9, "ten": 10,
-    "واحد": 1, "اثنين": 2, "ثلاثة": 3, "ثلاث": 3, "أربعة": 4, "اربعة": 4,
-    "خمسة": 5, "خمس": 5, "ستة": 6, "سبعة": 7, "ثمانية": 8, "تسعة": 9, "عشرة": 10,
-}
+def _clean_limit(value) -> Optional[int]:
+    """How many entries to show, as stated by the intent agent.
 
-# "top 3", "the 5 best", "first three", "أفضل 3". The number may come before or
-# after the word, and may be a digit or spelled out.
-_TOP_N = re.compile(
-    r"\b(?:top|first|bottom|last|best|worst)\s+(\d{1,2}|" + "|".join(_NUMBER_WORDS) + r")\b"
-    r"|\b(\d{1,2})\s+(?:best|worst|top|highest|lowest)\b"
-    r"|(?:أفضل|أسوأ|أعلى|أدنى|أول)\s*(\d{1,2}|" + "|".join(_NUMBER_WORDS) + r")",
-    re.IGNORECASE)
+    Reading "just give me top 3" is a language question — the ways to ask for a
+    shorter list are open-ended ("kindly shorten that", "top 3 pls", "cut it
+    down to three") and a word list that decides whether the question gets
+    answered at all will always be missing one of them. The model reads it; this
+    only checks the answer is a number in a sane range, because everything
+    crossing that boundary is checked.
 
-# What is left of "just give me the top 3" once the top-N phrase is removed:
-# scaffolding, and nothing that names a group or a metric.
-_TOPN_FILLER = {
-    "just", "only", "give", "gimme", "show", "tell", "list", "me", "us", "my",
-    "the", "a", "an", "of", "for", "and", "please", "can", "you", "i", "want",
-    "need", "them", "those", "these", "it", "ones", "one", "indicators",
-    "indicator", "metrics", "metric", "results", "entries", "items", "rows",
-    "now", "then", "again", "ok", "okay", "thanks", "top", "bottom", "first",
-    "last", "best", "worst", "rank", "ranked", "ranking",
-    "فقط", "اعطني", "أعطني", "اعرض", "أعرض", "لي", "من", "في", "المؤشرات",
-    "أفضل", "أسوأ", "أعلى", "أدنى", "أول", "الأولى",
-}
-
-
-def _requested_limit(text: str) -> Optional[int]:
-    """How many entries the user asked to see, if they said."""
-    match = _TOP_N.search(text or "")
-    if not match:
-        return None
-    token = next((g for g in match.groups() if g), None)
-    if token is None:
-        return None
-    token = token.strip().lower()
-    n = _NUMBER_WORDS.get(token, int(token) if token.isdigit() else 0)
-    return n if 1 <= n <= 50 else None
-
-
-def _is_bare_topn_request(text: str) -> bool:
-    """A follow-up whose only content is "make the previous list shorter".
-
-    "just give me top 3" after a sector ranking named no indicator, so it went
-    to indicator resolution and came back "No indicator in SCAI's approved data
-    matches 'top 3'" — a refusal to shorten a list the user was already looking
-    at. It only counts as this when NOTHING else is named: "top 3 education
-    indicators" names its own group and takes the normal route.
+    A limit is safe to take from the model in a way an indicator name is not:
+    getting it wrong shows five rows instead of three, and the answer says it
+    was shortened. Getting an indicator wrong silently answers a different
+    question.
     """
-    if not text or _requested_limit(text) is None:
-        return False
-    rest = _TOP_N.sub(" ", text)
-    words = [w for w in re.findall(r"[\w؀-ۿ]+", rest.lower())
-             if not w.isdigit() and w not in _TOPN_FILLER]
-    return not words
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    return n if 1 <= n <= 50 else None
 
 
 # A group split by direction of travel: which are up, which are down. Both
