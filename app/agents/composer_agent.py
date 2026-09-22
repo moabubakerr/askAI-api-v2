@@ -150,6 +150,9 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    "polarity" tells you which direction is good: for "Decrease" indicators a
    LOWER actual is the better result, so never describe a falling value there as
    underperformance.
+   If "n_shown" is smaller than "n_ranked" the list has been cut to the number the
+   user asked for — say so ("the top 3 of 10 that can be ranked"). Presenting three
+   rows as if they were the whole group describes a different sector from the real one.
    If "not_assessable" is non-empty you MUST say how many could not be ranked and
    why ("reason_code": no_reading = no reading yet, no_target = no target set,
    no_yoy_published = no year-on-year figure published; put it in your own

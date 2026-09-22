@@ -291,6 +291,10 @@ _T = {
         "en": "{n} of {total} could not be ranked: ",
         "ar": "تعذّر ترتيب {n} من {total}: ",
     },
+    "showing_top": {
+        "en": "Showing the first {n} of {total} ranked indicators.",
+        "ar": "يتم عرض أول {n} من أصل {total} مؤشراً مرتباً.",
+    },
 }
 
 
@@ -547,6 +551,9 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
             lines.append(_t("of_target", language, i=i, ind=e.get("indicator"),
                              pct=e.get("attainment_percent"), val=value,
                              per=e.get("period_label"), tgt=e.get("target")))
+        n_shown, n_ranked = facts.get("n_shown"), facts.get("n_ranked")
+        if n_shown and n_ranked and n_shown < n_ranked:
+            lines.append(_t("showing_top", language, n=n_shown, total=n_ranked))
         skipped = facts.get("not_assessable") or []
         if skipped:
             lines.append(_t("not_ranked", language, n=len(skipped), total=facts.get("n_total"))

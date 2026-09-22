@@ -398,6 +398,11 @@ def scope_performance(entries: list[dict], best_first: bool = True,
         "ranked_indicators": shown,
         "order": "best_first" if best_first else "worst_first",
         "n_ranked": len(ranked),
+        # Stated separately from n_ranked so a truncated answer can say it is
+        # truncated. "Top 3" that reads as if the sector had three indicators
+        # is a false picture of the sector, the same way ranking 8 of 13
+        # silently is.
+        "n_shown": len(shown),
         "n_total": len(entries),
         "not_assessable": unassessable,
         # Spelled out because the Composer must say it: this is progress

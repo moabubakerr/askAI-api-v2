@@ -185,6 +185,14 @@ def handle_message(user_message: str, conversation_context: str = "",
         ctype = "scope_snapshot"
     elif _asks_for_performance_ranking(user_message):
         ctype = "scope_performance"
+    # "just give me top 3" — a request to shorten the list already on screen.
+    # It names nothing, so every route below it refuses; the group it is about
+    # is the one the previous turn listed or ranked.
+    # Always the performance ranking: "top 3" asks for an ORDER, and progress
+    # against each indicator's own target is the only order this group has. A
+    # direction split or a snapshot has no first and last to take three of.
+    elif _is_bare_topn_request(user_message) and session_state.get("last_catalog_scope"):
+        ctype = "scope_performance"
     elif _looks_like_catalog_request(user_message):
         ctype = "count_list"
     # Arabic script is unambiguous; the model's language field is a guess. An
@@ -325,13 +333,20 @@ def handle_message(user_message: str, conversation_context: str = "",
             e["unit_en"] = display_unit(e.get("unit_en"), e.get("format"),
                                          language, e.get("unit_ar"))
             e["decimal_places"] = decimals_from_format(e.get("format"))
+        session_state["last_ctype"] = ctype
         if ctype == "scope_snapshot":
             result = compute.scope_snapshot(entries)
         elif ctype == "scope_direction":
             result = compute.scope_direction(entries)
         else:
+            # Both remembered, because a follow-up restates neither: "just give
+            # me top 3" says nothing about which end is best, and "and the rest?"
+            # says nothing about how many.
+            best_first = _requested_order(
+                user_message, session_state.get("last_scope_best_first", True))
+            session_state["last_scope_best_first"] = best_first
             result = compute.scope_performance(
-                entries, best_first=not _asks_for_worst(user_message))
+                entries, best_first=best_first, limit=_requested_limit(user_message))
         payload = {"ok": result.ok,
                    "facts": {**_round_facts(result.facts), "scope": scope, "scope_kind": kind}} \
             if result.ok else {"ok": False, "message": result.message}
@@ -1441,18 +1456,36 @@ def _looks_like_catalog_request(text: str) -> bool:
 # "most preformed" is in here on purpose. This is a bilingual audience typing
 # into a chat box; a spelling that a reader understands instantly should not
 # decide whether the question gets answered.
+#
+# The superlative comes on EITHER side of the verb, because English puts it on
+# either side and the user does not know which one we parse. "which one is the
+# most preformed" was answered and "which one preformed the best" was refused —
+# the same question, one word order apart, and the refusal told the user to
+# "name the metric more plainly" about a question that names no metric by
+# design.
 _PERFORMANCE_RANKING = re.compile(
     r"\b(best|worst|top|strongest|weakest|highest|lowest|most|least)[\s-]*"
     r"(performing|performer|performed|preforming|preformed|performance)\b"
+    r"|\b(perform\w*|preform\w*|do|does|doing|did)\s+(the\s+)?"
+    r"(best|worst|better|worse|strongest|weakest)\b"
     r"|\b(performance|performing)\s+(ranking|ranked|comparison)\b"
     r"|\bwhich\s+(ones?|indicators?)\s+(are\s+)?(doing|performing|preforming)\b"
+    # "which one is the best" / "which indicator is the worst", with no
+    # performance word at all. Only ever reaches a ranking when a group is in
+    # play, so it cannot swallow a question that names something of its own.
+    r"|\bwhich\s+(ones?|indicators?)\b[^?.!]{0,40}\b(best|worst)\b"
     r"|\brank\s+(them|these|the indicators)\b"
     r"|\b(on|against)\s+track\b"
     r"|أفضل\s*أداء|أسوأ\s*أداء|الأفضل\s*أداء|أداءً",
     re.IGNORECASE)
 
 _WORST_FIRST = re.compile(
-    r"\b(worst|weakest|lowest|least|behind|lagging|underperform\w*)\b|أسوأ|متأخر",
+    r"\b(worst|weakest|lowest|least|bottom|behind|lagging|furthest|"
+    r"underperform\w*)\b|أسوأ|أدنى|متأخر",
+    re.IGNORECASE)
+
+_BEST_FIRST = re.compile(
+    r"\b(best|top|strongest|highest|leading|closest|most)\b|أفضل|أعلى",
     re.IGNORECASE)
 
 
@@ -1469,6 +1502,79 @@ def _asks_for_performance_ranking(text: str) -> bool:
 
 def _asks_for_worst(text: str) -> bool:
     return bool(text and _WORST_FIRST.search(text))
+
+
+def _requested_order(text: str, default: bool = True) -> bool:
+    """Which end of a ranking to put first, as a boolean best_first.
+
+    The default matters: a bare "just give me top 3" following a worst-first
+    ranking would otherwise silently flip the list over, and the user would be
+    reading the opposite of what they just asked for under the same heading.
+    """
+    if text and _WORST_FIRST.search(text):
+        return False
+    if text and _BEST_FIRST.search(text):
+        return True
+    return default
+
+
+_NUMBER_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "واحد": 1, "اثنين": 2, "ثلاثة": 3, "ثلاث": 3, "أربعة": 4, "اربعة": 4,
+    "خمسة": 5, "خمس": 5, "ستة": 6, "سبعة": 7, "ثمانية": 8, "تسعة": 9, "عشرة": 10,
+}
+
+# "top 3", "the 5 best", "first three", "أفضل 3". The number may come before or
+# after the word, and may be a digit or spelled out.
+_TOP_N = re.compile(
+    r"\b(?:top|first|bottom|last|best|worst)\s+(\d{1,2}|" + "|".join(_NUMBER_WORDS) + r")\b"
+    r"|\b(\d{1,2})\s+(?:best|worst|top|highest|lowest)\b"
+    r"|(?:أفضل|أسوأ|أعلى|أدنى|أول)\s*(\d{1,2}|" + "|".join(_NUMBER_WORDS) + r")",
+    re.IGNORECASE)
+
+# What is left of "just give me the top 3" once the top-N phrase is removed:
+# scaffolding, and nothing that names a group or a metric.
+_TOPN_FILLER = {
+    "just", "only", "give", "gimme", "show", "tell", "list", "me", "us", "my",
+    "the", "a", "an", "of", "for", "and", "please", "can", "you", "i", "want",
+    "need", "them", "those", "these", "it", "ones", "one", "indicators",
+    "indicator", "metrics", "metric", "results", "entries", "items", "rows",
+    "now", "then", "again", "ok", "okay", "thanks", "top", "bottom", "first",
+    "last", "best", "worst", "rank", "ranked", "ranking",
+    "فقط", "اعطني", "أعطني", "اعرض", "أعرض", "لي", "من", "في", "المؤشرات",
+    "أفضل", "أسوأ", "أعلى", "أدنى", "أول", "الأولى",
+}
+
+
+def _requested_limit(text: str) -> Optional[int]:
+    """How many entries the user asked to see, if they said."""
+    match = _TOP_N.search(text or "")
+    if not match:
+        return None
+    token = next((g for g in match.groups() if g), None)
+    if token is None:
+        return None
+    token = token.strip().lower()
+    n = _NUMBER_WORDS.get(token, int(token) if token.isdigit() else 0)
+    return n if 1 <= n <= 50 else None
+
+
+def _is_bare_topn_request(text: str) -> bool:
+    """A follow-up whose only content is "make the previous list shorter".
+
+    "just give me top 3" after a sector ranking named no indicator, so it went
+    to indicator resolution and came back "No indicator in SCAI's approved data
+    matches 'top 3'" — a refusal to shorten a list the user was already looking
+    at. It only counts as this when NOTHING else is named: "top 3 education
+    indicators" names its own group and takes the normal route.
+    """
+    if not text or _requested_limit(text) is None:
+        return False
+    rest = _TOP_N.sub(" ", text)
+    words = [w for w in re.findall(r"[\w؀-ۿ]+", rest.lower())
+             if not w.isdigit() and w not in _TOPN_FILLER]
+    return not words
 
 
 # A group split by direction of travel: which are up, which are down. Both
