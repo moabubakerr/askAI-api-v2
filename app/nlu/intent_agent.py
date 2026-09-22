@@ -128,6 +128,11 @@ Rules:
   But a greeting ATTACHED to a real question is that question, greeted: "مرحبا،
   ما هو التضخم؟" and "hi, what was inflation in May?" are latest_value, not
   general_chat. Only route to general_chat when the greeting is the whole message.
+  A QUESTION is never general_chat, however conversational it sounds and however
+  little it looks like a database query. "can we build AI infrastructure in Qatar?"
+  is a question about Qatar's economy and belongs to article_lookup; answering it
+  with "Hello, I answer questions about indicators" tells someone who asked a real
+  question that they did not ask one.
 - Use "macro_overview" when the subject is THE ECONOMY ITSELF, not any indicator
   and not any sector: "how is the economy doing", "is Qatar's economy growing?",
   "what's the latest in Qatar's economy", "هل ينمو اقتصاد قطر؟", "كيف حال الاقتصاد".
@@ -178,6 +183,16 @@ Rules:
   indicator; or it asks for an opinion, argument, explanation or discussion; or it uses
   words like article, paper, publication, wrote, view, opinion, analysis, discuss.
   Put the topic the user is asking about in indicator_phrase.
+  The user does NOT have to mention SCAI, articles or writing. A substantive question
+  about Qatar's economy, policy, capability or strategy that names no published
+  indicator is article_lookup — the articles are where such questions are answered,
+  and it is the correct route even when the question is phrased as if to a person:
+  "هل قطر جاهزة للذكاء الاصطناعي؟".
+  Do not refuse these and do not treat them as small talk: a real question is never
+  "general_chat", and "out_of_scope" is for subjects outside Qatar's economy
+  altogether — the weather, sport, a recipe — not for an economic question the
+  catalogue happens to have no indicator for. If the articles do not cover it, that
+  is decided later against the article text, not here.
   Contrast: "what is inflation" wants a definition, "what is the inflation rate" wants a
   number, and "what does SCAI say about inflation's causes" wants an article.
 - Use "definition" when the user asks what an indicator MEANS rather than what it

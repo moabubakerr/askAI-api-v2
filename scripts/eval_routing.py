@@ -140,11 +140,25 @@ CASES = [
 
     # --- commentary and meta ---------------------------------------------------
     ("what has SCAI written about the trade war", "article_lookup", "", {}, ""),
+    # Thematic questions that name no indicator and never mention SCAI. These
+    # were answered with the greeting — "Hello, I answer questions about
+    # indicators" — to someone who had asked a real question. They only worked
+    # as a SECOND turn, when a previous article answer sat in the context and
+    # primed the model, so they are tested cold here, with no context.
+    ("can we build AI infrastructure in qatar", "article_lookup", "", {}, ""),
+    ("ما أهمية مضيق هرمز لصادرات قطر؟", "article_lookup", "", {}, ""),
+    ("how can Qatar attract more foreign investment?", "article_lookup", "", {}, ""),
+    ("is Qatar ready for the AI era?", "article_lookup", "", {}, ""),
     ("what is the latest analysis of inflation", "analysis_lookup", "", {}, ""),
     ("how is Qatar's economy doing right now?", "macro_overview", "", {}, ""),
     ("what can you do", "capabilities", "", {}, ""),
     ("hello", "general_chat", "", {}, ""),
+    # The guard against the rule above going too far: broadening article_lookup
+    # to thematic questions must not turn every unanswerable question into an
+    # article search. Subjects outside Qatar's economy stay out_of_scope.
     ("what is the weather in Doha", "out_of_scope", "", {}, ""),
+    ("who won the match last night", "out_of_scope", "", {}, ""),
+    ("what is a good recipe for machboos", "out_of_scope", "", {}, ""),
 
     # --- Arabic ----------------------------------------------------------------
     # The greetings is_greeting existed for. The model sent these down the data
