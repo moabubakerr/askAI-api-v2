@@ -145,6 +145,11 @@ def handle_message(user_message: str, conversation_context: str = "",
     # the direction comes from the indicator's polarity rather than from a
     # superlative the user never used.
     performance_followup = False
+    # Whether a group route was decided HERE rather than by the intent agent.
+    # The two are trusted differently: a pattern below fires on wording that
+    # only a group question has, while the model is reading meaning and will
+    # sometimes offer a group type for a question about one indicator.
+    scope_pinned = False
 
     # Greetings are decided here, not by the model. It routed "اهلا" and
     # "كيف حالك" to general_chat but sent "سلام" and "سلام علبكم" down the data
@@ -181,10 +186,13 @@ def handle_message(user_message: str, conversation_context: str = "",
         ctype = "macro_overview"
     elif _asks_for_direction_split(user_message) or _asks_what_to_watch(user_message):
         ctype = "scope_direction"
+        scope_pinned = True
     elif _asks_for_group_snapshot(user_message):
         ctype = "scope_snapshot"
+        scope_pinned = True
     elif _asks_for_performance_ranking(user_message):
         ctype = "scope_performance"
+        scope_pinned = True
     # "just give me top 3" — a request to shorten the list already on screen.
     # It names nothing, so every route below it refuses; the group it is about
     # is the one the previous turn listed or ranked. The intent agent is what
@@ -298,6 +306,30 @@ def handle_message(user_message: str, conversation_context: str = "",
                                                       query=indicator_type_hint)}
         return _finish(payload, language, session_state, citations,
                         question=user_message)
+
+    # The intent agent can now route to the group family itself, which is the
+    # only way "which are ahead of target" reaches a ranking — no pattern here
+    # contains that wording, and nothing else would have. The cost of letting it
+    # route is that it also offers a group type for questions about ONE
+    # indicator: "is inflation rising?" is a direction question and reads like a
+    # direction split.
+    #
+    # A group type with no group named in the message and none under discussion,
+    # over wording that resolves confidently to a single published indicator, is
+    # that mistake. The indicator wins — the same test macro_overview and
+    # article_lookup already apply below, for the same reason.
+    if (ctype in ("scope_performance", "scope_direction", "scope_snapshot")
+            and not scope_pinned
+            and not session_state.get("last_catalog_scope")
+            and not _match_catalog_scope(user_message)[0]):
+        probe = resolve_indicator(user_message, require_data=True, language=language)
+        if (probe.status == "resolved" and probe.match
+                and probe.match.confidence >= CONFIDENT_MATCH):
+            # Direction asked of one indicator is direction_check, which answers
+            # it. Falling back to latest_value there would print a number at
+            # someone who asked which way it was going.
+            ctype = "latest_value" if ctype == "scope_snapshot" else "direction_check"
+            intent["indicator_phrase"] = intent.get("indicator_phrase") or user_message
 
     if ctype in ("scope_performance", "scope_direction", "scope_snapshot"):
         # The group can come from this message ("best performing education

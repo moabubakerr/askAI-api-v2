@@ -29,6 +29,14 @@ COMPUTATION_TYPES = [
     "count_list",         # "how many indicators are in sector Y" / "list indicators in Z"
     "multi_indicator",    # "show GDP growth, inflation, and government revenues"
     "macro_overview",     # "what's the latest in Qatar's economy" / "how is the economy doing"
+    # A GROUP of indicators — a sector, or an indicator type — rather than one.
+    "scope_performance",  # "which education indicator is doing best" / "which are ahead of target"
+    "scope_direction",    # "which ones got better and which got worse"
+    "scope_snapshot",     # "give me the numbers for the education sector"
+    "direction_check",    # "is inflation improving?" (one indicator, is it going the right way)
+    "complement_share",   # "if non-hydrocarbon exports are 38.6%, what is the rest?"
+    "denominator_check",  # "so that means 40% of the workforce?" (user proposes a calculation)
+    "diversification_overview",  # "is the economy diversifying away from hydrocarbons?"
     "capabilities",       # "what can you do"
     "general_chat",       # greetings, small talk
     "out_of_scope",
@@ -82,6 +90,41 @@ Rules:
   Put the group the user named — the sector or indicator type — in
   indicator_phrase. These questions are about the CATALOGUE, not about any single
   indicator's value, so never route them to latest_value or definition.
+- The three "scope_" types are about a GROUP of indicators — a sector, or an
+  indicator type — rather than about one metric. Put the user's words for the group
+  in indicator_phrase ("the education sector", "the national indicators"), or leave
+  it null when they are following up on a group already under discussion.
+  * "scope_performance" — which of them are doing WELL or BADLY, in order: "which
+    one performed the best", "which are ahead of target", "which ones are we
+    falling short on", "rank the education sector", "أيها الأفضل أداءً". They are
+    ranked by progress against each indicator's own target.
+  * "scope_direction" — which are moving UP and which DOWN: "which ones got better
+    and which got worse", "what is improving and what is not", "which indicators
+    are backsliding", "which are trending up vs down".
+  * "scope_snapshot" — the current READINGS of all of them, with no ordering and no
+    direction asked for: "give me the numbers for the education sector", "show me
+    where the education sector stands", "latest snapshot of the diversification
+    indicators".
+  Judge these by MEANING, not by keyword: "where are we succeeding?" asked of a
+  sector is scope_performance even though it contains no word like rank or best.
+  Contrast: "count_list" answers with NAMES — use it when the user asks what the
+  indicators ARE or how many there are, and a "scope_" type when they ask how the
+  indicators are DOING. "country_ranking" ranks COUNTRIES on one indicator.
+- Use "direction_check" when the user asks whether ONE named indicator is getting
+  better or worse: "is inflation improving?", "is the trade balance on the right
+  track?", "are we heading the right way on unemployment?", "هل يتحسن التضخم؟".
+  One indicator, so never a "scope_" type; a judgement about direction, so not
+  latest_value.
+- Use "diversification_overview" for whether the economy is diversifying AWAY from
+  hydrocarbons: "is the economy diversifying?", "how dependent are we still on oil
+  and gas?", "هل ينوّع الاقتصاد مصادره؟".
+- Use "complement_share" when the user states a share and asks for the OTHER side
+  of it: "if non-hydrocarbon exports account for 38.6%, what share still comes from
+  hydrocarbons?", "what makes up the rest?", "how much is left?".
+- Use "denominator_check" when the user proposes a CALCULATION OF THEIR OWN over
+  published figures and asks you to confirm it: "so that means about 40% of the
+  workforce?", "does that mean X?", "can I just multiply those two?". What is being
+  asked is whether the arithmetic is valid, not what the numbers are.
 - Use "analysis_lookup" when the user asks for SCAI's ANALYSIS or COMMENTARY on a
   specific INDICATOR — "what is the latest analysis of inflation", "what did the
   Council say about the trade balance this quarter", "ما هو أخر تحليل للتضخم",
