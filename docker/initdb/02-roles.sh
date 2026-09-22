@@ -26,6 +26,10 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     -- one, so the record of what users said is append-only from its side.
     GRANT INSERT ON TABLE message_feedback TO scai_ro;
     GRANT INSERT ON TABLE chat_messages TO scai_ro;
+    -- Which rows each answer was built from. Written by the same best-effort
+    -- logger as chat_messages, and append-only for the same reason: the point
+    -- of keeping provenance is that nobody can revise it afterwards.
+    GRANT INSERT ON TABLE message_citations TO scai_ro;
 EOSQL
 
-echo "02-roles.sh: scai_ro created (SELECT-only, plus INSERT on message_feedback and chat_messages)"
+echo "02-roles.sh: scai_ro created (SELECT-only, plus INSERT on message_feedback, chat_messages and message_citations)"

@@ -15,7 +15,10 @@ Notes:
   that behavior once this is a live system with its own writes.
 """
 import argparse
+import hashlib
 import sys
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -28,8 +31,45 @@ from etl.utils import (
 )
 
 
+# Which export file fed which table, recorded as it happens rather than
+# declared. Every loader reaches its files through read_csv, so this registry
+# is a record of what the run actually opened — a filename that changes in a
+# loader changes the log with it, and the two cannot drift.
+#
+# Keyed by (loader name, filename): a loader that reads the same file twice
+# records it once, and two loaders reading one shared file each get their own
+# entry.
+_FILES_READ: dict[tuple, dict] = {}
+_current_loader = "unknown"
+
+
+def _file_facts(path: Path) -> dict:
+    """Digest, size and mtime of a file as read.
+
+    The digest is the part that matters. These filenames carry an export
+    timestamp that the CMS does not reliably bump, so "same name" is not
+    "same file" — a re-cut export lands under the old name and the only way to
+    see it is that the hash moved.
+    """
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(block)
+    stat = path.stat()
+    return {
+        "file_sha256": digest.hexdigest(),
+        "file_bytes": stat.st_size,
+        "file_modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+    }
+
+
 def read_csv(csv_dir: Path, filename: str) -> pd.DataFrame:
-    df = pd.read_csv(csv_dir / filename, encoding="utf-8-sig", dtype=str, keep_default_na=False)
+    path = csv_dir / filename
+    df = pd.read_csv(path, encoding="utf-8-sig", dtype=str, keep_default_na=False)
+    _FILES_READ[(_current_loader, filename)] = {
+        "loader": _current_loader, "source_file": filename,
+        "rows_in_file": len(df), **_file_facts(path),
+    }
     # normalize the literal-string 'NULL' cells that appear across these exports
     # (DataFrame.applymap was removed in pandas 3.0; .map is the replacement),
     # then case-normalize GUIDs so ids written upper-case in the CMS files join
@@ -478,6 +518,93 @@ TABLES_IN_LOAD_ORDER = [
     "lookups", "priority_types", "intervals", "countries",
 ]
 
+# Every loader and the table it fills, in the order they must run: parents
+# before children, because the foreign keys are real.
+#
+# This replaces a hand-written list of nineteen calls. The table name is
+# declared because there is no honest way to observe which table pandas wrote
+# to; the FILES are observed, in read_csv, which is the half that was
+# previously invisible outside this module.
+LOADERS = [
+    (load_countries, "countries"),
+    (load_intervals, "intervals"),
+    (load_priority_types, "priority_types"),
+    (load_lookups, "lookups"),
+    (load_indicators, "indicators"),
+    (load_indicator_details, "indicator_details"),
+    (load_indicator_values, "indicator_values"),
+    (load_published_data_points, "published_data_points"),
+    (load_indicator_analysis, "indicator_analysis"),
+    (load_benchmark_countries, "benchmark_countries"),
+    (load_indicator_dashboards, "indicator_dashboards"),
+    (load_champions, "champions"),
+    (load_sectors, "sectors"),
+    (load_general_entities, "general_entities"),
+    (load_articles, "articles"),
+    (load_chart_sub_indicators, "chart_sub_indicators"),
+    (load_chart_alternate_views, "chart_alternate_views"),
+    (load_additional_charts, "additional_charts"),
+    (load_additional_chart_countries, "additional_chart_countries"),
+]
+
+# Two lists naming the same nineteen tables in opposite orders is exactly the
+# kind of pair that drifts when a table is added to one and not the other. A
+# table truncated but never loaded silently empties the product; a table loaded
+# but never truncated doubles on the second run. Checked at import, because
+# both failures are worse than a refusal to start.
+_missing = set(TABLES_IN_LOAD_ORDER) ^ {t for _, t in LOADERS}
+if _missing:
+    raise RuntimeError(
+        f"TABLES_IN_LOAD_ORDER and LOADERS disagree about: {sorted(_missing)}")
+
+
+def run_loaders(csv_dir: Path, engine, load_id: str) -> None:
+    """Runs every loader, then records what each one read.
+
+    The log is written after the load rather than during it, so a run that dies
+    halfway leaves no row claiming a table was loaded. rows_in_table is counted
+    from the database, not from the DataFrame: several loaders drop rows on
+    purpose — nameless indicator stubs, orphans whose parent did not load — and
+    the gap between rows_in_file and rows_in_table is the most useful number
+    here. It is how you see that an export arrived with 531 indicators and 470
+    of them made it.
+    """
+    global _current_loader
+    started_at = datetime.now(timezone.utc)
+    tables_by_loader: dict[str, str] = {}
+
+    for fn, table in LOADERS:
+        _current_loader = fn.__name__
+        tables_by_loader[fn.__name__] = table
+        fn(csv_dir, engine)
+    _current_loader = "unknown"
+
+    finished_at = datetime.now(timezone.utc)
+    with engine.begin() as conn:
+        counts = {t: conn.execute(text(f"SELECT count(*) FROM {t}")).scalar()
+                  for _, t in LOADERS}
+        rows = [
+            {**rec, "load_id": load_id,
+             "table_name": tables_by_loader[rec["loader"]],
+             "rows_in_table": counts[tables_by_loader[rec["loader"]]],
+             "started_at": started_at, "finished_at": finished_at}
+            for rec in _FILES_READ.values()
+            if rec["loader"] in tables_by_loader
+        ]
+        if rows:
+            conn.execute(text("""
+                INSERT INTO etl_load_log
+                    (load_id, table_name, source_file, loader,
+                     started_at, finished_at, file_sha256, file_bytes,
+                     file_modified_at, rows_in_file, rows_in_table)
+                VALUES (:load_id, :table_name, :source_file, :loader,
+                        :started_at, :finished_at, :file_sha256, :file_bytes,
+                        :file_modified_at, :rows_in_file, :rows_in_table)
+                ON CONFLICT (load_id, table_name, source_file) DO NOTHING
+            """), rows)
+    print(f"\netl_load_log: {len(rows)} file-to-table rows recorded "
+          f"for load {load_id}")
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -527,9 +654,61 @@ def main():
             # Tolerant of a database without the app role — a developer
             # loading into a local Postgres has no scai_ro, and a failed GRANT
             # would abort the whole transaction and the load with it.
+            # Which rows each answer cited. Application data too, so created
+            # here and never truncated below.
+            "CREATE TABLE IF NOT EXISTS message_citations ("
+            " message_id TEXT NOT NULL, position SMALLINT NOT NULL,"
+            " source_table TEXT NOT NULL, record_id TEXT, indicator TEXT,"
+            " data_source TEXT, period_label TEXT, country TEXT,"
+            " PRIMARY KEY (message_id, position))",
+            "CREATE INDEX IF NOT EXISTS idx_message_citations_message"
+            " ON message_citations(message_id)",
+            "CREATE INDEX IF NOT EXISTS idx_message_citations_record"
+            " ON message_citations(source_table, record_id)",
+            # Where each table came from. Written by this script, read by the
+            # admin panel; append-only, so it is not in the truncate list.
+            "CREATE TABLE IF NOT EXISTS etl_load_log ("
+            " load_id TEXT NOT NULL, table_name TEXT NOT NULL,"
+            " source_file TEXT NOT NULL, loader TEXT NOT NULL,"
+            " started_at TIMESTAMPTZ NOT NULL, finished_at TIMESTAMPTZ NOT NULL,"
+            " file_sha256 TEXT, file_bytes BIGINT, file_modified_at TIMESTAMPTZ,"
+            " rows_in_file INTEGER, rows_in_table INTEGER,"
+            " PRIMARY KEY (load_id, table_name, source_file))",
+            "CREATE INDEX IF NOT EXISTS idx_etl_load_log_finished"
+            " ON etl_load_log(finished_at DESC)",
             "DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'scai_ro')"
             " THEN GRANT INSERT ON TABLE message_feedback TO scai_ro;"
-            " GRANT INSERT ON TABLE chat_messages TO scai_ro; END IF; END $$",
+            " GRANT INSERT ON TABLE chat_messages TO scai_ro;"
+            " GRANT INSERT ON TABLE message_citations TO scai_ro;"
+            " GRANT SELECT ON TABLE etl_load_log TO scai_ro; END IF; END $$",
+            # OR REPLACE rather than IF NOT EXISTS: a view is a definition, not
+            # data, and the running deployment should get this one's current
+            # form rather than whichever version it was created with.
+            "CREATE OR REPLACE VIEW v_etl_current_load AS"
+            " SELECT l.* FROM etl_load_log l"
+            " JOIN (SELECT load_id FROM etl_load_log"
+            "        ORDER BY finished_at DESC LIMIT 1) cur"
+            "   ON cur.load_id = l.load_id",
+            "CREATE OR REPLACE VIEW v_message_provenance AS"
+            " SELECT c.message_id, c.position, c.source_table, c.record_id,"
+            "        c.indicator, c.data_source, c.period_label, c.country,"
+            "        m.asked_at, m.question, m.answer, m.answered,"
+            "        m.answer_shape, m.language,"
+            "        (p.published_data_point_id IS NOT NULL) AS record_found,"
+            "        p.published_indicator_detail_id,"
+            "        p.actual, p.target, p.outlook, p.period_date, p.granularity,"
+            "        d.indicator_id, d.indicator_detail_id, d.unit_en, d.is_main,"
+            "        i.name_en AS indicator_name_en, i.name_ar AS indicator_name_ar,"
+            "        e.source_file, e.file_sha256, e.finished_at AS loaded_at"
+            " FROM message_citations c"
+            " LEFT JOIN chat_messages m ON m.message_id = c.message_id"
+            " LEFT JOIN published_data_points p"
+            "        ON c.source_table = 'published_data_points'"
+            "       AND p.published_data_point_id = c.record_id"
+            " LEFT JOIN indicator_details d"
+            "        ON d.published_detail_id = p.published_indicator_detail_id"
+            " LEFT JOIN indicators i ON i.indicator_id = d.indicator_id"
+            " LEFT JOIN v_etl_current_load e ON e.table_name = c.source_table",
         ]:
             conn.execute(text(ddl))
 
@@ -537,26 +716,8 @@ def main():
         for t in TABLES_IN_LOAD_ORDER:
             conn.execute(text(f"TRUNCATE TABLE {t} CASCADE"))
 
-    # Order matters: parents before children (FK constraints)
-    load_countries(args.csv_dir, engine)
-    load_intervals(args.csv_dir, engine)
-    load_priority_types(args.csv_dir, engine)
-    load_lookups(args.csv_dir, engine)
-    load_indicators(args.csv_dir, engine)
-    load_indicator_details(args.csv_dir, engine)
-    load_indicator_values(args.csv_dir, engine)
-    load_published_data_points(args.csv_dir, engine)
-    load_indicator_analysis(args.csv_dir, engine)
-    load_benchmark_countries(args.csv_dir, engine)
-    load_indicator_dashboards(args.csv_dir, engine)
-    load_champions(args.csv_dir, engine)
-    load_sectors(args.csv_dir, engine)
-    load_general_entities(args.csv_dir, engine)
-    load_articles(args.csv_dir, engine)
-    load_chart_sub_indicators(args.csv_dir, engine)
-    load_chart_alternate_views(args.csv_dir, engine)
-    load_additional_charts(args.csv_dir, engine)
-    load_additional_chart_countries(args.csv_dir, engine)
+    # Order matters: parents before children (FK constraints). LOADERS holds it.
+    run_loaders(args.csv_dir, engine, load_id=uuid.uuid4().hex)
 
     print("\nETL complete.")
 

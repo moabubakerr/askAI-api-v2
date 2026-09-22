@@ -410,6 +410,76 @@ CREATE INDEX idx_chat_messages_session ON chat_messages(session_id, asked_at);
 CREATE INDEX idx_chat_messages_asked ON chat_messages(asked_at DESC);
 CREATE INDEX idx_chat_messages_answered ON chat_messages(answered);
 
+-- Which rows an answer was built from. app/compute/citations.py already
+-- computes this for every exchange, deterministically and outside the LLM, to
+-- render the "Sources:" footer; until now it was rendered and thrown away.
+-- Keeping it is what lets the admin panel go from an answer back to the exact
+-- published_data_points row, and from there to the indicator and the export
+-- file it was loaded from.
+--
+-- Application data, like the two tables above: written by the app, never
+-- truncated by the ETL.
+--
+-- No foreign key to chat_messages, for the same reason message_feedback has
+-- none: both writes are best-effort and the message insert can be the one that
+-- fails. A citation for a message that was never logged is a partial record; a
+-- rejected insert is no record at all.
+--
+-- record_id is NOT a foreign key either, and that is the more interesting
+-- case: the ETL truncates and reloads the source layer, so a data point cited
+-- last month may not exist today. The row keeps enough denormalised context —
+-- indicator name, period, original data source — to stay readable after the
+-- id it points at has gone. A resolving join is a bonus, not the record.
+CREATE TABLE message_citations (
+    message_id     TEXT NOT NULL,
+    -- Position in the answer's citation list. Part of the key so a retried
+    -- insert cannot duplicate, and so the panel can show them in the order the
+    -- footer did.
+    position       SMALLINT NOT NULL,
+    source_table   TEXT NOT NULL,     -- published_data_points | indicator_values | ...
+    record_id      TEXT,              -- the cited row's primary key, when it has one
+    indicator      TEXT,
+    data_source    TEXT,              -- original source, e.g. 'World Bank'
+    period_label   TEXT,
+    country        TEXT,
+    PRIMARY KEY (message_id, position)
+);
+CREATE INDEX idx_message_citations_message ON message_citations(message_id);
+CREATE INDEX idx_message_citations_record ON message_citations(source_table, record_id);
+
+-- What the last ETL run actually read, and where each table came from.
+--
+-- The CSV-to-table mapping used to exist only as hardcoded filenames inside
+-- the loader functions in etl/load_data.py, which meant nothing could answer
+-- "which export file is this number from?" without reading Python. This table
+-- is written by the loader from what it observed on disk, not from a
+-- hand-maintained manifest, so it cannot drift from the load that produced it.
+--
+-- One row per (table, source file). A loader that merges two exports into one
+-- table — indicators, from Item_2 and P01 — gets two rows, both carrying that
+-- table's final row count.
+--
+-- Appended, not truncated: the history of loads is how you answer "the numbers
+-- changed, when did that happen and which file changed with them".
+CREATE TABLE etl_load_log (
+    load_id           TEXT NOT NULL,        -- one id per ETL run
+    table_name        TEXT NOT NULL,
+    source_file       TEXT NOT NULL,
+    loader            TEXT NOT NULL,        -- the function in etl/load_data.py
+    started_at        TIMESTAMPTZ NOT NULL,
+    finished_at       TIMESTAMPTZ NOT NULL,
+    -- Of the file as read. A changed digest with an unchanged filename is the
+    -- only reliable signal that an export was re-cut, because these filenames
+    -- carry a timestamp that the CMS does not always bump.
+    file_sha256       TEXT,
+    file_bytes        BIGINT,
+    file_modified_at  TIMESTAMPTZ,
+    rows_in_file      INTEGER,              -- data rows read from the CSV
+    rows_in_table     INTEGER,              -- rows present in the table after the load
+    PRIMARY KEY (load_id, table_name, source_file)
+);
+CREATE INDEX idx_etl_load_log_finished ON etl_load_log(finished_at DESC);
+
 -- Convenience for the dashboard. A session is not a table: it is whatever
 -- messages share a session_id, so deriving it avoids two sources of truth that
 -- can disagree.
@@ -433,6 +503,56 @@ SELECT f.feedback_id, f.message_id, f.session_id, f.rating, f.comment,
        m.answer_shape, m.indicator, m.language, m.answered, m.latency_ms
 FROM message_feedback f
 LEFT JOIN chat_messages m ON m.message_id = f.message_id;
+
+-- The next two views are MIRRORED in etl/load_data.py, which re-runs them as
+-- CREATE OR REPLACE on every load so an existing deployment picks them up
+-- without hand-run SQL. Change one, change the other.
+--
+-- The mirror is partly self-checking: Postgres refuses CREATE OR REPLACE VIEW
+-- if the column list, order or types differ, so a load against a database
+-- built from this file fails loudly rather than silently installing a
+-- different shape. It does NOT check the joins, so divergence in the body is
+-- still on you.
+
+-- The most recent load only. The log is append-only so that history survives,
+-- but "where does this table come from" almost always means "right now".
+CREATE VIEW v_etl_current_load AS
+SELECT l.*
+FROM etl_load_log l
+JOIN (SELECT load_id FROM etl_load_log ORDER BY finished_at DESC LIMIT 1) cur
+  ON cur.load_id = l.load_id;
+
+-- An answer, the rows it cited, and the export file each of those rows came
+-- from. The chain the admin panel is for, in one place.
+--
+-- LEFT JOINs throughout: a citation whose record has since been reloaded away,
+-- or one against a table with no per-row id (the indicator catalogue, analyst
+-- commentary), still appears with everything that is known about it. Dropping
+-- those rows would quietly under-report what an answer was built from, which
+-- is the one thing this view exists to show.
+CREATE VIEW v_message_provenance AS
+SELECT c.message_id, c.position, c.source_table, c.record_id,
+       c.indicator, c.data_source, c.period_label, c.country,
+       m.asked_at, m.question, m.answer, m.answered, m.answer_shape, m.language,
+       -- Did the cited row survive to today? Computed from the join rather
+       -- than inferred from whether some column came back null: `actual` is
+       -- legitimately null on a target-only point, so "no number" and "no row"
+       -- are different answers and must not be confused.
+       (p.published_data_point_id IS NOT NULL)       AS record_found,
+       p.published_indicator_detail_id,
+       p.actual, p.target, p.outlook, p.period_date, p.granularity,
+       d.indicator_id, d.indicator_detail_id, d.unit_en, d.is_main,
+       i.name_en AS indicator_name_en, i.name_ar AS indicator_name_ar,
+       e.source_file, e.file_sha256, e.finished_at AS loaded_at
+FROM message_citations c
+LEFT JOIN chat_messages m ON m.message_id = c.message_id
+LEFT JOIN published_data_points p
+       ON c.source_table = 'published_data_points'
+      AND p.published_data_point_id = c.record_id
+LEFT JOIN indicator_details d
+       ON d.published_detail_id = p.published_indicator_detail_id
+LEFT JOIN indicators i ON i.indicator_id = d.indicator_id
+LEFT JOIN v_etl_current_load e ON e.table_name = c.source_table;
 
 -- Lexical fallback for exact names and acronyms ("Tawteen", "ICV"), which
 -- embeddings match poorly — a rare token carries little semantic signal.

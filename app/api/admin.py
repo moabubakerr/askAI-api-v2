@@ -93,6 +93,44 @@ def list_messages(
                                    limit=limit, offset=offset)
 
 
+@router.get("/messages/{message_id}/provenance", dependencies=[Depends(require_admin)])
+def message_provenance(message_id: str):
+    """One answer and the exact rows it was built from.
+
+    The chain the panel exists for: question → answer → cited record → that
+    data point's own numbers → the indicator → the export file it was loaded
+    from. Nothing here is reconstructed after the fact; the citations were
+    computed when the answer was, in app/compute/citations.py, which is also
+    what rendered the "Sources:" footer the user saw.
+
+    An empty citation list is a real result, not an error: greetings and
+    refusals cite nothing. A 404 means the message was never logged, which the
+    best-effort logger permits.
+    """
+    result = admin_queries.message_provenance(message_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="No logged message with that id.")
+    return result
+
+
+@router.get("/lineage", dependencies=[Depends(require_admin)])
+def data_lineage():
+    """Which export file each table was loaded from, and when.
+
+    Recorded by etl/load_data.py from the files it actually opened, so it
+    describes the load that produced the data currently in the database.
+
+    Read `rows_in_file` against `rows_in_table`: they differ by design in
+    several places, and a gap appearing where there was not one before is the
+    earliest sign an export changed shape.
+
+    `not_loaded_by_etl` lists the tables no export feeds — the application's
+    own, and the embeddings and article chunks the index scripts write. Their
+    absence is the point: nothing upstream will ever refresh them.
+    """
+    return admin_queries.lineage()
+
+
 @router.get("/feedback", dependencies=[Depends(require_admin)])
 def list_feedback(
     min_rating: Optional[int] = Query(None, ge=1, le=5),

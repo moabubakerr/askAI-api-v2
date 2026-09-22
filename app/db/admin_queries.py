@@ -253,11 +253,122 @@ def catalogue_item(indicator_id: str, max_points: int = 1000) -> Optional[dict]:
     if not row:
         return None
     row["series"] = _rows("""
-        SELECT period_label, period_date, granularity, country_en,
+        SELECT published_data_point_id AS record_id,
+               period_label, period_date, granularity, country_en,
                actual, target, outlook
         FROM published_data_points
         WHERE published_indicator_detail_id = :pdid AND actual IS NOT NULL
         ORDER BY period_date, country_en NULLS FIRST
         LIMIT :limit
     """, {"pdid": row.get("published_detail_id"), "limit": max_points})
+    # Where these numbers came from. The panel shows it beside the series so
+    # "which spreadsheet is this from?" is answered on the same screen as the
+    # figure being questioned, rather than being a separate investigation.
+    row["provenance"] = _rows("""
+        SELECT table_name, source_file, file_sha256, rows_in_file,
+               rows_in_table, finished_at AS loaded_at
+        FROM v_etl_current_load
+        WHERE table_name IN ('published_data_points', 'indicator_details',
+                             'indicators')
+        ORDER BY table_name, source_file
+    """, {})
     return row
+
+
+def lineage() -> dict:
+    """Every table, the export file it was loaded from, and when.
+
+    Written by etl/load_data.py from the files it actually opened, so this is a
+    record of the load that produced the data now in the database — not a
+    mapping document that someone has to remember to update.
+
+    `rows_in_file` minus `rows_in_table` is the interesting column. They differ
+    on purpose in several places (61 nameless indicator stubs are dropped, as
+    are child rows whose parent did not load), and a gap that appears where
+    there was not one before is the first sign an export changed shape.
+    """
+    current = _rows("""
+        SELECT load_id, table_name, source_file, loader, file_sha256,
+               file_bytes, file_modified_at, rows_in_file, rows_in_table,
+               started_at, finished_at
+        FROM v_etl_current_load
+        ORDER BY table_name, source_file
+    """, {})
+    # Tables the ETL does not load: the application's own, and the two index
+    # scripts' output. Listing them as "no source file" is more useful than
+    # omitting them, because their absence from the lineage view is itself the
+    # thing worth knowing — nothing upstream will ever refresh them.
+    unmanaged = _rows("""
+        SELECT c.relname AS table_name, c.reltuples::bigint AS approx_rows
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relkind = 'r'
+          AND c.relname NOT IN (SELECT table_name FROM v_etl_current_load)
+        ORDER BY c.relname
+    """, {})
+    return {
+        "load": _one("""
+            SELECT load_id, min(started_at) AS started_at,
+                   max(finished_at) AS finished_at,
+                   count(DISTINCT table_name) AS tables,
+                   count(DISTINCT source_file) AS source_files,
+                   sum(rows_in_file) AS rows_in_files
+            FROM v_etl_current_load GROUP BY load_id
+        """, {}),
+        "tables": current,
+        "not_loaded_by_etl": unmanaged,
+        "history": _rows("""
+            SELECT load_id, max(finished_at) AS finished_at,
+                   count(DISTINCT table_name) AS tables,
+                   sum(rows_in_table) AS rows_loaded
+            FROM etl_load_log
+            GROUP BY load_id ORDER BY max(finished_at) DESC LIMIT 20
+        """, {}),
+    }
+
+
+def message_provenance(message_id: str) -> Optional[dict]:
+    """One answer and the exact rows it was built from.
+
+    The chain this whole feature exists for: question → answer → cited record →
+    the data point's own numbers → the indicator → the export file it was
+    loaded from.
+
+    Returns None only when the message itself was never logged. A logged
+    message with no citations is a real and ordinary result — greetings and
+    refusals cite nothing — and comes back with an empty list rather than a 404,
+    because "this answer used no data" is an answer to the question asked.
+    """
+    message = _one("""
+        SELECT m.message_id, m.session_id, m.asked_at, m.endpoint, m.language,
+               m.question, m.answer, m.answered, m.answer_shape, m.indicator,
+               m.period_label, m.verified, m.readable, m.latency_ms,
+               f.rating, f.comment
+        FROM chat_messages m
+        LEFT JOIN message_feedback f ON f.message_id = m.message_id
+        WHERE m.message_id = :mid
+    """, {"mid": message_id})
+    if not message:
+        return None
+    citations = _rows("""
+        SELECT position, source_table, record_id, indicator, data_source,
+               period_label, country, record_found,
+               published_indicator_detail_id, indicator_id, indicator_detail_id,
+               indicator_name_en, indicator_name_ar, unit_en, is_main,
+               actual, target, outlook, period_date, granularity,
+               source_file, file_sha256, loaded_at
+        FROM v_message_provenance
+        WHERE message_id = :mid
+        ORDER BY position
+    """, {"mid": message_id})
+    # `record_found` is false when a cited row no longer exists. Almost always
+    # a reload: the ETL truncates the source layer, so ids do not survive it.
+    # Reported rather than hidden — an admin checking an old answer against
+    # today's data needs to know the row it quoted is gone, not be shown a
+    # blank cell. Only meaningful for published_data_points, the one table the
+    # view resolves against; for the rest it is always false and says nothing.
+    unresolved = sum(1 for c in citations
+                     if c["source_table"] == "published_data_points"
+                     and c["record_id"] and not c["record_found"])
+    return {"message": message, "citations": citations,
+            "unresolved_records": unresolved}

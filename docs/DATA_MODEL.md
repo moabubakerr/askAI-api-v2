@@ -1,6 +1,6 @@
 # Data model
 
-23 tables in three layers, and **only 6 of them declare a foreign key**. The
+25 tables in three layers, and **only 6 of them declare a foreign key**. The
 rest are joined on conventions that exist in the source export rather than in
 the schema, and those conventions are where the joins go wrong. This document
 is mostly about them.
@@ -15,7 +15,8 @@ Kept beside `etl/schema.sql`; if you change one, change the other.
 |---|---|---|
 | **Source** — everything SCAI tracks, 531 indicators | `indicators`, `indicator_details`, `indicator_values`, `indicator_analysis` | the ETL |
 | **Published** — the 189 SCAI has reviewed, with units, polarity and vetted YoY | `published_data_points`, plus the `published_*` columns on the two above | the ETL |
-| **Application** — what the assistant itself produces | `chat_messages`, `message_feedback`, `indicator_embeddings`, `article_chunks` | the app and the index scripts |
+| **Application** — what the assistant itself produces | `chat_messages`, `message_citations`, `message_feedback`, `indicator_embeddings`, `article_chunks` | the app and the index scripts |
+| **Provenance** — where the other layers came from | `etl_load_log` | the ETL |
 
 The app answers from the **published** layer and falls back to source data only
 when an indicator is not published. Application tables are never truncated by
@@ -42,7 +43,13 @@ erDiagram
     indicator_values ||..o{ indicator_analysis : "ref_data_point_id, source = item"
     indicator_details ||..o{ indicator_embeddings : "text_key = name, or name + definition"
     chat_messages ||..o| message_feedback : "message_id"
+    chat_messages ||..o{ message_citations : "message_id"
+    published_data_points ||..o{ message_citations : "record_id, source_table = published_data_points"
 ```
+
+`etl_load_log` is deliberately absent from the diagram: it relates to tables by
+*name*, not by key, so it has an edge to all nineteen loaded tables and drawing
+them would say less than this sentence does.
 
 Solid lines are enforced foreign keys. Dotted lines are joins the code makes
 that the database does not enforce — a wrong id there returns nothing rather
@@ -136,6 +143,38 @@ silently re-embeds at runtime. That shows up as slowness, never as an error.
 different embedding models are not comparable; scoring against stale ones would
 give confidently wrong indicator matches with nothing in the answer to show it.
 
+### 8. `message_citations.record_id` outlives the row it points at
+
+Citations are written when an answer is produced; the ETL truncates and
+reloads the source layer, so the ids they hold do not survive a reload. That is
+why the row copies the indicator name, period, original data source and table
+label rather than relying on a join, and why there is no foreign key.
+
+`v_message_provenance` exposes this as `record_found`, computed from the join
+rather than from whether a column came back null — `actual` is legitimately
+null on a target-only data point, so "no number" and "no row" are different
+answers. `/admin/messages/{id}/provenance` counts the unresolved ones so a
+reviewer can tell "the answer was wrong" from "the data has moved since".
+
+### 9. `etl_load_log` is observed, not declared
+
+Written by `run_loaders()` in `etl/load_data.py` from the files `read_csv`
+actually opened, so the file-to-table mapping cannot drift from the load that
+produced it. One row per (table, source file): the three loaders that merge two
+exports into one table — `indicators`, `indicator_details`, `indicator_analysis`
+— get two rows each, both carrying that table's final row count. 19 tables, 22
+rows.
+
+`rows_in_file` and `rows_in_table` differ **on purpose** in several places and
+the gap is the useful number: 531 rows in `Item_2` become 470 indicators (61
+nameless stubs), 583 details survive of 644, 9,497 of 11,303 values. A gap
+appearing where there was not one before is the earliest sign an export changed
+shape.
+
+The digest matters more than the filename. These exports carry a timestamp in
+their names that the CMS does not reliably bump, so a re-cut file lands under
+the old name and `file_sha256` is the only thing that moves.
+
 ---
 
 ## Reading the application tables
@@ -164,6 +203,17 @@ LEFT JOIN published_data_points p
       AND p.actual IS NOT NULL
 WHERE d.is_published AND d.is_main
 GROUP BY i.name_en ORDER BY max(p.period_label);
+
+-- an answer and the exact rows it was built from, back to the export file
+SELECT position, indicator_name_en, period_label, actual, record_found,
+       source_file, loaded_at
+FROM v_message_provenance
+WHERE message_id = '...' ORDER BY position;
+
+-- where every table came from, and how many rows it lost on the way in
+SELECT table_name, source_file, rows_in_file, rows_in_table,
+       rows_in_file - rows_in_table AS dropped, finished_at
+FROM v_etl_current_load ORDER BY dropped DESC;
 ```
 
 ---
@@ -171,8 +221,16 @@ GROUP BY i.name_en ORDER BY max(p.period_label);
 ## What the ETL does and does not touch
 
 `TABLES_IN_LOAD_ORDER` in `etl/load_data.py` is truncated on every load. It
-deliberately excludes `chat_messages`, `message_feedback` and
-`indicator_embeddings`.
+deliberately excludes `chat_messages`, `message_citations`, `message_feedback`
+and `indicator_embeddings`, and `etl_load_log`, which is append-only so that
+the history of loads survives the loads.
+
+`TABLES_IN_LOAD_ORDER` (truncate order, children first) and `LOADERS` (load
+order, parents first) name the same nineteen tables in opposite orders, which
+is exactly the pair that drifts when a table is added to one and not the other.
+A table truncated but never loaded silently empties the product; one loaded but
+never truncated doubles on the second run. The module raises at import if the
+two sets disagree.
 
 `article_chunks` is **not** in the list but is still lost on every load: it
 cascade-deletes with `articles`. Re-run `index-articles` afterwards, and
