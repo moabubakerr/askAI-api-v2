@@ -954,6 +954,23 @@ def handle_message(user_message: str, conversation_context: str = "",
     # did not address the question asked.
     if _asks_if_improving(user_message) and ctype not in ("definition", "count_list"):
         ctype = "direction_check"
+    # ...but a direction question that names a SPAN is a question about that
+    # span, and direction_check cannot answer it. It compares the latest reading
+    # with the one a year earlier, full stop — the period the user asked for
+    # never reaches it.
+    #
+    # "How was inflation over the last 3 years, did it increase or not?" came
+    # back as April 2026 against April 2025: a one-year answer to a three-year
+    # question. Worse, the Composer could see the mismatch and tried to explain
+    # it, writing that the data "does not provide monthly readings for the
+    # entire three-year period" — an absence rule 3 forbids it from asserting,
+    # and one that is not true. The payload held one reading because this route
+    # only ever retrieves one, not because the series is short.
+    #
+    # A trend answers both halves of the question: the shape across the span,
+    # and the change from one end of it to the other.
+    if ctype == "direction_check" and period.kind in ("last_n_years", "range"):
+        ctype = "trend"
     # Checked after the indicator resolves, because whether this is answerable
     # depends on WHICH indicator it is, not on the wording. The wording only
     # gets it as far as being considered.
