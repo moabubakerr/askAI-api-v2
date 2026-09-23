@@ -604,6 +604,29 @@ def handle_message(user_message: str, conversation_context: str = "",
         payload = {"ok": False, "message": _denominator_warning(user_message, language)}
         return _finish(payload, language, session_state, [], question=user_message)
 
+    # A calculation the user has done, proposed to us with its answer, on a
+    # route that was never going to address it.
+    #
+    # This check existed and was unreachable: it sat inside the out_of_scope
+    # rescue, so it only ran once the router had already given up. "There were
+    # 126.6 thousand economically active Qataris and 8% of employed Qataris
+    # worked in the private sector. Does that mean about 10,100?" was routed to
+    # latest_value and answered "8.02 % in 2024" — which reads as agreement. The
+    # user multiplied two different populations, got a plausible number, and the
+    # system handed back a figure that appeared to confirm it. Silence about the
+    # arithmetic IS an answer about the arithmetic when the question was only
+    # about the arithmetic.
+    #
+    # Gated twice so it cannot hijack a question that merely sounds like one:
+    # the message must state a figure the user computed, and the catalogue must
+    # actually show the two indicators are measured over different populations.
+    # Where either is missing, the question continues to the route it was given.
+    if _proposes_computed_figure(user_message):
+        warning = _different_bases_warning(user_message, language)
+        if warning:
+            return _finish({"ok": False, "message": warning}, language,
+                            session_state, [], question=user_message)
+
     if ctype == "diversification_overview":
         payload, citations = _diversification_overview(language)
         return _finish(payload, language, session_state, citations,
@@ -2455,14 +2478,35 @@ def _proposes_derived_figure(text: str) -> bool:
     return bool(text and _PROPOSES_CALC.search(text))
 
 
-def _denominator_warning(user_message: str, language: str = "en"):
-    """Explains WHY two published figures cannot simply be multiplied.
+def _proposes_computed_figure(text: str) -> bool:
+    """A calculation proposal that STATES the figure it arrived at.
 
-    Only says it when the catalogue supports it: both indicators have to
-    resolve, and the things they are measured over have to be different. That
-    difference is in their own names — "as Share of Total Qataris Employed"
-    against "Qatari Nationals (Economically Active)" — so this reports the
-    catalogue rather than reasoning about economics.
+    Stricter than _proposes_derived_figure, because this one is allowed to
+    intercept a question the router has already routed somewhere. The wording
+    alone is not enough: "does that mean inflation is above target?" matches the
+    trigger and proposes no arithmetic at all — it asks for a comparison, and
+    answering it with a lecture about populations would be its own failure.
+
+    What separates the two is a number the USER worked out. "Does that mean
+    about 10,100 Qataris worked in the private sector?" carries one, and it is
+    the thing being asked about.
+    """
+    if not text:
+        return False
+    match = _PROPOSES_CALC.search(text)
+    if not match:
+        return False
+    return bool(re.search(r"(?<![\w.])\d[\d,]*\.?\d*", text[match.end():]))
+
+
+def _different_bases_warning(user_message: str, language: str = "en"):
+    """The refusal, but ONLY where the catalogue positively supports it.
+
+    Returns None unless two indicators resolve AND are measured over different
+    populations. That reticence is what makes it safe to run on a question the
+    router has already assigned somewhere else: where the evidence is not there,
+    the question carries on to the route it was given, and nothing is refused on
+    a hunch.
     """
     parts = split_indicator_phrases(user_message or "")
     resolved = []
@@ -2477,12 +2521,25 @@ def _denominator_warning(user_message: str, language: str = "en"):
         if len(resolved) == 2:
             break
     if len(resolved) < 2:
-        return msg("derived_not_supported", language)
+        return None
     (name_a, base_a), (name_b, base_b) = resolved[:2]
     if base_a.lower() == base_b.lower():
-        return msg("derived_not_supported", language)
+        return None
     return msg("derived_different_bases", language,
                 a=name_a, base_a=base_a, b=name_b, base_b=base_b)
+
+
+def _denominator_warning(user_message: str, language: str = "en"):
+    """Explains WHY two published figures cannot simply be multiplied.
+
+    Only says it when the catalogue supports it: both indicators have to
+    resolve, and the things they are measured over have to be different. That
+    difference is in their own names — "as Share of Total Qataris Employed"
+    against "Qatari Nationals (Economically Active)" — so this reports the
+    catalogue rather than reasoning about economics.
+    """
+    return (_different_bases_warning(user_message, language)
+            or msg("derived_not_supported", language))
 
 
 def _asks_about_diversification(text: str) -> bool:
