@@ -264,6 +264,38 @@ def decide_route(user_message: str, intent: dict, session_state: dict) -> tuple[
     return ctype, scope_pinned
 
 
+# "and GDP?", "what about inflation" — a follow-up whose whole content is a NEW
+# SUBJECT. It says nothing about what to do with it, because the question being
+# asked has not changed; only the thing being asked about has.
+_SUBJECT_SWAP = re.compile(
+    r"^\s*(and|what about|how about|what of|and what about|ok(ay)?[,\s]+and)\b"
+    r"|^\s*(و|وماذا عن|ماذا عن|وكيف عن)",
+    re.IGNORECASE)
+
+# Computations a follow-up keeps when it only swaps the subject. latest_value is
+# NOT here: it is the router's default for anything it cannot place, so treating
+# it as sticky would pin a conversation to it forever.
+_STICKY_CTYPES = ("definition", "analysis_lookup", "trend", "direction_check",
+                   "min_max", "growth_rate", "period_ranking")
+
+
+def _swaps_subject_only(text: str) -> bool:
+    """Whether this message changes WHAT is asked about and nothing else.
+
+    "What does inflation mean?" then "what about GDP" is a request for GDP's
+    definition. It was answered with GDP's latest value, because the indicator
+    carried forward and the question being asked about it did not — the router
+    sees four words naming a metric and returns its default.
+
+    Length matters as much as the opener. "and what about the trend since 2019
+    for the GCC" swaps far more than the subject, and inheriting a computation
+    over it would discard what the user actually said.
+    """
+    if not text or not _SUBJECT_SWAP.search(text):
+        return False
+    return len(text.split()) <= 6
+
+
 ANSWER_LENGTHS = ("brief", "detailed")
 
 
@@ -327,6 +359,21 @@ def handle_message(user_message: str, conversation_context: str = "",
     performance_followup = False
 
     ctype, scope_pinned = decide_route(user_message, intent, session_state)
+    # A follow-up that only names a new subject keeps the question that was
+    # being asked about the old one. "What does inflation mean?" then "what
+    # about GDP" is asking what GDP means; it was answered with GDP's latest
+    # value, because the indicator carried forward and the computation did not.
+    # From the reader's side the system changed the subject AND the question,
+    # having been asked to change only the subject.
+    if (intent.get("is_followup") and _swaps_subject_only(user_message)
+            and session_state.get("last_ctype") in _STICKY_CTYPES
+            and ctype in ("latest_value", "out_of_scope")):
+        ctype = session_state["last_ctype"]
+    # Recorded twice, and both are needed. Here, because definition,
+    # analysis_lookup and every refusal return long before the dispatch; and
+    # again just before the dispatch, because the overrides between the two are
+    # what turn a router default into the computation that actually ran.
+    session_state["last_ctype"] = ctype
     _stage(session_state, "routed", computation=ctype)
     # Arabic script is unambiguous; the model's language field is a guess. An
     # Arabic greeting was being answered in English, which is the product simply
@@ -601,7 +648,10 @@ def handle_message(user_message: str, conversation_context: str = "",
             return _article_answer(user_message, intent, language, session_state)
 
     if ctype == "denominator_check":
-        payload = {"ok": False, "message": _denominator_warning(user_message, language)}
+        warning = _denominator_warning(user_message, language)
+        if warning.get("indicators"):
+            remember(session_state, "last_offered_indicators", warning["indicators"])
+        payload = {"ok": False, "message": warning["message"]}
         return _finish(payload, language, session_state, [], question=user_message)
 
     # A calculation the user has done, proposed to us with its answer, on a
@@ -808,6 +858,31 @@ def handle_message(user_message: str, conversation_context: str = "",
                   or _disambiguate_by_asked_unit(resolution.candidates, user_message))
         if picked:
             resolution = ResolutionResult(picked, "resolved", [])
+
+    # A stub that was never a name, on a turn that has a subject already.
+    #
+    # "what does ir mean" — a typo for "it" — was sent to the resolver as an
+    # indicator called "ir" and refused: 'No indicator matches "ir"'. The
+    # conversation had just been about Real GDP, and the user was plainly asking
+    # about that. Quoting two characters back at someone as though they had
+    # misnamed a metric is the system telling them their question was
+    # unrecognisable when it was not.
+    #
+    # Deliberately narrow, because the alternative failure is worse: silently
+    # answering about the previous indicator when the user really did name a new
+    # one that this system does not carry. So it only fires on a fragment too
+    # short to be a name — "ir", "it", "that", a stray letter — never on
+    # something like "solar energy share", which IS a real attempt at a name and
+    # deserves the refusal that says so.
+    if (resolution.status not in ("resolved", "inactive")
+            and intent.get("is_followup")
+            and session_state.get("last_indicator_name")
+            and len((indicator_phrase or "").split()) <= 2
+            and len((indicator_phrase or "").strip()) <= 6):
+        indicator_phrase = session_state["last_indicator_name"]
+        resolution = resolve_indicator(indicator_phrase,
+                                        require_data=(ctype != "definition"),
+                                        language=language)
 
     if resolution.status != "resolved" and resolution.status != "inactive":
         # "What is the GDP forecast 2026" was refused with "I couldn't find an
@@ -1047,6 +1122,14 @@ def handle_message(user_message: str, conversation_context: str = "",
     # gets it as far as being considered.
     if _asks_for_complement_share(user_message) and ctype not in ("definition", "count_list"):
         ctype = "complement_share"
+
+    # The computation this turn actually ran, after every override above. Set
+    # here rather than at the top because the overrides are the point: a
+    # question the router called latest_value and the pipeline turned into a
+    # direction_check is a direction_check, and that is what a follow-up should
+    # inherit. Two branches used to record it for their own purposes; every
+    # route needs it now that a subject swap keeps the question.
+    session_state["last_ctype"] = ctype
 
     countries_res = resolve_countries(intent.get("countries_mentioned", []), intent.get("country_group_mentioned"))
 
@@ -2528,6 +2611,27 @@ def _proposes_computed_figure(text: str) -> bool:
     return bool(re.search(r"(?<![\w.])\d[\d,]*\.?\d*", text[match.end():]))
 
 
+def _resolved_indicator_names(user_message: str, language: str = "en") -> list[str]:
+    """Up to two catalogue names the message actually names.
+
+    Shared by both halves of the denominator refusal, which each need the same
+    walk for a different reason: one to compare what the two are measured over,
+    the other to remember what it just offered.
+    """
+    names = []
+    for part in split_indicator_phrases(user_message or ""):
+        if not has_identifying_content(part):
+            continue
+        res = resolve_indicator(part, language=language)
+        if res.status in ("resolved", "inactive") and res.match:
+            name = res.match.name_en.strip()
+            if name not in names:
+                names.append(name)
+        if len(names) == 2:
+            break
+    return names
+
+
 def _different_bases_warning(user_message: str, language: str = "en"):
     """The refusal, but ONLY where the catalogue positively supports it.
 
@@ -2537,21 +2641,10 @@ def _different_bases_warning(user_message: str, language: str = "en"):
     the question carries on to the route it was given, and nothing is refused on
     a hunch.
     """
-    parts = split_indicator_phrases(user_message or "")
-    resolved = []
-    for part in parts:
-        if not has_identifying_content(part):
-            continue
-        res = resolve_indicator(part, language=language)
-        if res.status in ("resolved", "inactive") and res.match:
-            name = res.match.name_en.strip()
-            if name not in [r[0] for r in resolved]:
-                resolved.append((name, _measured_over(name)))
-        if len(resolved) == 2:
-            break
-    if len(resolved) < 2:
+    names = _resolved_indicator_names(user_message, language)
+    if len(names) < 2:
         return None
-    (name_a, base_a), (name_b, base_b) = resolved[:2]
+    (name_a, base_a), (name_b, base_b) = [(n, _measured_over(n)) for n in names]
     if base_a.lower() == base_b.lower():
         return None
     # The names come back with the message, because the message OFFERS them —
@@ -2572,7 +2665,15 @@ def _denominator_warning(user_message: str, language: str = "en"):
     catalogue rather than reasoning about economics.
     """
     found = _different_bases_warning(user_message, language)
-    return found["message"] if found else msg("derived_not_supported", language)
+    if found:
+        return found
+    # The generic refusal still ENDS with an offer — "Ask me for either
+    # indicator on its own and I'll give you the published value" — so whatever
+    # did resolve is returned with it, even when there was only one or the two
+    # shared a base. An offer whose subject the caller cannot record is the same
+    # dead end "give me on its own" already fell into once.
+    return {"message": msg("derived_not_supported", language),
+            "indicators": _resolved_indicator_names(user_message, language)}
 
 
 def _asks_about_diversification(text: str) -> bool:
