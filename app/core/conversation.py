@@ -77,6 +77,11 @@ STALE_AFTER_TURNS = 3
 DECAYING_SLOTS = ("last_indicator_name", "last_indicator_detail_id", "last_countries",
                   "last_country_group", "last_period_expression",
                   "last_explicit_frequency", "last_extremum", "last_metrics",
+                  # An offer the last answer made in prose. It ages faster than
+                  # anything else here, and is cleared the moment it is taken
+                  # up: "give me on its own" four turns after the offer means
+                  # something else, and there is nothing to return to.
+                  "last_offered_indicators",
                   "answer_length")
 
 

@@ -624,7 +624,10 @@ def handle_message(user_message: str, conversation_context: str = "",
     if _proposes_computed_figure(user_message):
         warning = _different_bases_warning(user_message, language)
         if warning:
-            return _finish({"ok": False, "message": warning}, language,
+            # What the refusal just offered, so "give me on its own" has
+            # something to land on. Without it the offer is a dead end.
+            remember(session_state, "last_offered_indicators", warning["indicators"])
+            return _finish({"ok": False, "message": warning["message"]}, language,
                             session_state, [], question=user_message)
 
     if ctype == "diversification_overview":
@@ -709,6 +712,32 @@ def handle_message(user_message: str, conversation_context: str = "",
         if chosen:
             indicator_phrase = chosen
         session_state.pop("last_ambiguous_candidates", None)
+
+    # Taking up an offer the previous answer made in prose.
+    #
+    # The refusals name indicators and then invite the user to ask for them —
+    # "I can give you either figure on its own". Saying yes to that is a normal
+    # thing to do, and it failed: "give me on its own" was resolved as though it
+    # were the name of an indicator and came back "No indicator in SCAI's
+    # approved data matches 'give me on its own'". The system offered something,
+    # the user accepted, and it denied having anything to give.
+    #
+    # The chip mechanism above cannot cover this. It matches the typed text
+    # against a candidate name exactly, which works for a button and not for a
+    # sentence. What is needed is the OFFER itself remembered, so an acceptance
+    # in any wording lands on it.
+    #
+    # Only when the message does not name an indicator of its own: "give me Real
+    # GDP on its own" is answered about Real GDP, not about both offered names.
+    on_offer = session_state.get("last_offered_indicators") or []
+    if on_offer and indicator_phrase:
+        probe = resolve_indicator(indicator_phrase, require_data=True, language=language)
+        if not (probe.status == "resolved" and probe.match
+                and probe.match.confidence >= CONFIDENT_MATCH):
+            # Both, because "either" named two and the acceptance chose neither.
+            # Answering with one would be picking for them.
+            indicator_phrase = ", ".join(on_offer)
+        session_state.pop("last_offered_indicators", None)
 
     resolution = resolve_indicator(indicator_phrase or "", require_data=(ctype != "definition"),
                                     language=language)
@@ -2525,8 +2554,12 @@ def _different_bases_warning(user_message: str, language: str = "en"):
     (name_a, base_a), (name_b, base_b) = resolved[:2]
     if base_a.lower() == base_b.lower():
         return None
-    return msg("derived_different_bases", language,
-                a=name_a, base_a=base_a, b=name_b, base_b=base_b)
+    # The names come back with the message, because the message OFFERS them —
+    # "I can give you either figure on its own" — and the caller has to remember
+    # what it just offered for that sentence to mean anything on the next turn.
+    return {"message": msg("derived_different_bases", language,
+                            a=name_a, base_a=base_a, b=name_b, base_b=base_b),
+            "indicators": [name_a, name_b]}
 
 
 def _denominator_warning(user_message: str, language: str = "en"):
@@ -2538,8 +2571,8 @@ def _denominator_warning(user_message: str, language: str = "en"):
     against "Qatari Nationals (Economically Active)" — so this reports the
     catalogue rather than reasoning about economics.
     """
-    return (_different_bases_warning(user_message, language)
-            or msg("derived_not_supported", language))
+    found = _different_bases_warning(user_message, language)
+    return found["message"] if found else msg("derived_not_supported", language)
 
 
 def _asks_about_diversification(text: str) -> bool:
