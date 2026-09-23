@@ -816,6 +816,25 @@ def handle_message(user_message: str, conversation_context: str = "",
                                              match.published_detail_id if match.is_published else None,
                                              match.indicator_detail_id)) or "yearly")
         with_actuals = [r for r in rows if r.get("actual") is not None]
+        # Honour a period the question named. This route always took the six
+        # most recent readings and returned the newest commentary among them,
+        # so "what did the Council say about inflation in 2023" answered with
+        # this quarter's analysis — commentary written about a different
+        # reading, presented as though it were about the one asked for.
+        #
+        # Narrowed rather than refused when the window holds nothing: unlike a
+        # figure, analysis is published irregularly, and the nearest commentary
+        # is often what the reader wants. Which reading each entry belongs to is
+        # stated in the answer either way, so a period that could not be met is
+        # visible rather than silently substituted.
+        if period.start_date or period.end_date or period.kind == "last_n_years":
+            in_window = _apply_last_n_years(
+                [r for r in with_actuals
+                 if (not period.start_date or (r.get("period_date") and r["period_date"] >= period.start_date))
+                 and (not period.end_date or (r.get("period_date") and r["period_date"] <= period.end_date))],
+                period)
+            if in_window:
+                with_actuals = in_window
         recent = list(reversed(with_actuals[-6:]))
         found = retriever.get_analysis_for_data_points([r["record_id"] for r in recent])
         entries = []
@@ -1193,6 +1212,35 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
                 "actual": anchored["actual"],
                 "target": anchored.get("target"),
             })
+        elif period.start_date or period.end_date or period.kind == "last_n_years":
+            # A period was named, and until now nothing used it: the series was
+            # fetched unfiltered and the LATEST reading answered, whatever year
+            # the question was about. "If non-hydrocarbon exports were 38.6% in
+            # 2023, what is the rest?" derived its remainder from the Q4 2025
+            # share — the right arithmetic on the wrong reading, and nothing
+            # downstream could catch it because the figure traces to the data
+            # and passes the verifier.
+            #
+            # The guard above already knew a period could be present; it only
+            # used that to switch OFF the quoted-value anchor, and then fell
+            # through to the latest reading anyway.
+            windowed = _apply_last_n_years(
+                retriever.get_series(match.indicator_detail_id, published_detail_id,
+                                      granularity, start_date=period.start_date,
+                                      end_date=period.end_date,
+                                      country_en=single_country), period)
+            scoped = compute.latest_value(windowed)
+            if not scoped.ok:
+                # Named a period this indicator has no reading in. Say so with
+                # the range it does cover, rather than deriving from a period
+                # the user did not ask about.
+                actuals = [r for r in rows if r.get("actual") is not None]
+                return {"ok": False, "message": msg(
+                    "no_data_for_period", language, indicator=indicator_name.strip(),
+                    granularity=granularity, period=period.raw or "that period",
+                    first=actuals[0]["period_label"] if actuals else "—",
+                    last=actuals[-1]["period_label"] if actuals else "—")}, []
+            latest, rows = scoped, windowed
         # complement_of_share requires the question to NAME the other side, and
         # a follow-up does not repeat it — "what about if it was 29.44474" says
         # only the figure. The question that established the complement is kept
