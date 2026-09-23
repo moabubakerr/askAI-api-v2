@@ -44,7 +44,7 @@ from app.compute.chart_builder import build_chart_spec
 from app.compute.chart_request import wants_chart
 from app.compute.formatting import (display_unit, decimals_from_format, trim_decimal,
                                      round_for_display)
-from app.agents.composer_agent import compose_answer
+from app.agents.composer_agent import compose_answer, compose_answer_streamed
 from app.agents.article_agent import answer_from_articles
 from app.resolvers.embeddings import get_embedding
 # Definitions in indicator_details are inconsistently wrapped in HTML
@@ -2510,7 +2510,7 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
         answer = canned or ""
     else:
         _stage(session_state, "composing")
-        draft = compose_answer(payload, language, question=question,
+        compose_args = dict(question=question,
                                 length=session_state.get("answer_length"),
                                 # The last few exchanges, not just the previous
                                 # one. See _render_history in composer_agent —
@@ -2530,8 +2530,29 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
                                 # only the immediately preceding turn is what
                                 # "that" and "shorter" refer to.
                                 previous_turn=session_state.get("last_exchange"))
+        progress = session_state.get("_progress")
+        if progress:
+            # Streamed: the same prompt, the same model, the same temperature —
+            # the only difference is that the text is released as it is written.
+            # The gate holds each line until every number in it traces back to
+            # the payload, so a listener never sees a figure that is then
+            # withdrawn. See app/compute/streaming.py.
+            draft, gate_rejected = compose_answer_streamed(
+                payload, language, on_chunk=lambda text: _stage(
+                    session_state, "delta", text=text), **compose_args)
+        else:
+            draft, gate_rejected = compose_answer(payload, language, **compose_args), None
+
         _stage(session_state, "verifying")
         clean, offending = verify_numbers(draft, payload)
+        # The gate found an invented figure and stopped the stream before it was
+        # shown. The full check below would reach the same verdict on the text
+        # that was written, but not on the text that was RELEASED — the offending
+        # line never made it into `draft`. Recorded explicitly so the outcome does
+        # not depend on that coincidence.
+        if gate_rejected:
+            clean = False
+            offending = list(offending) + [gate_rejected]
         # An answer in the wrong language is not an answer. The model is asked
         # for Arabic and mostly complies, but "mostly" is not a guarantee and
         # the failure is total from the reader's side. Checked here rather than
@@ -2543,6 +2564,14 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
         answer = draft if clean else render_template_fallback(payload, language)
         if not clean:
             payload["_verifier_rejected_numbers"] = offending  # for logging/debugging only
+            if progress:
+                # A listener has text on screen that is about to be superseded.
+                # Told explicitly rather than left to infer it from the final
+                # answer differing from the deltas: the frontend has to clear
+                # what it has drawn, and working that out by comparing strings
+                # is the kind of thing that is right in testing and wrong on the
+                # one answer where it matters.
+                _stage(session_state, "replace", reason="unverified")
 
     # Sources footer: always appended deterministically, never left to the
     # LLM's discretion. Only skipped when there's genuinely nothing to cite

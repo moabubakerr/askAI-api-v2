@@ -224,8 +224,17 @@ def chat_endpoint(req: ChatRequest, request: Request):
     events: "queue.Queue[Optional[dict]]" = queue.Queue()
     outcome: dict = {}
 
+    # The pipeline announces everything through one callback; the event name it
+    # gets on the wire is decided here. "delta" and "replace" are about the
+    # ANSWER and are their own SSE events, so a client can handle them without
+    # string-matching inside a generic stage event.
+    _OWN_EVENT = {"delta", "replace"}
+
     def emit(name: str, detail: dict) -> None:
-        events.put({"event": "stage", "data": {"stage": name, **(detail or {})}})
+        if name in _OWN_EVENT:
+            events.put({"event": name, "data": dict(detail or {})})
+        else:
+            events.put({"event": "stage", "data": {"stage": name, **(detail or {})}})
 
     def work() -> None:
         try:

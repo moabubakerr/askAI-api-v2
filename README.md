@@ -327,11 +327,29 @@ Stages, in order: `understanding`, `routed`, `resolved`, `retrieving`,
 `composing`, `verifying`. Not all of them fire for every question — a greeting
 or a refusal skips most — so treat them as labels, not as a fixed progress bar.
 
-The answer TEXT is not streamed token by token and will not be: figures are
-verified against the facts payload only once the draft is complete, and a draft
-that fails is replaced wholesale by a template. Streaming it would show numbers
-that are then withdrawn. The stages say where the work has got to; the text still
-arrives at once.
+Between `composing` and `verifying` the answer itself arrives as `delta` events,
+each carrying a `text` fragment. Concatenating them gives the answer.
+
+The text is released in complete units — a paragraph, a bullet, a sentence — and
+only once every number inside that unit traces back to the facts payload
+(`app/compute/streaming.py`). That is what makes it safe to show at all: an
+invented figure is caught while its line is still buffered, so it is never
+displayed and nothing already on screen is ever taken back. The cost is that the
+reveal is line by line rather than word by word.
+
+If a draft fails the final check anyway, a `replace` event is sent before
+`answer`: whatever was streamed is superseded by the template in the `answer`
+event, and the client should clear what it has drawn.
+
+```
+event: stage    data: {"stage": "composing"}
+event: delta    data: {"text": "Real GDP was **185.17 Bn QAR** in 2025-Q4.\n\n"}
+event: stage    data: {"stage": "verifying"}
+event: answer   data: { ...the full response body... }
+```
+
+The `answer` event always carries the complete, final text, so a client may
+ignore `delta` entirely and still be correct.
 
 Note that a stream returns `200` before the work starts, so failures arrive as an
 `error` event rather than as a status code. That is why the JSON form exists and

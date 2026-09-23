@@ -10,8 +10,9 @@ number, all its data is retrieval."
 import json
 from typing import Optional
 
-from app.core.llm_client import chat, llm_client
+from app.core.llm_client import chat, chat_stream, llm_client
 from app.core.config import settings
+from app.compute.streaming import AnswerGate
 
 SYSTEM_PROMPT = """You write the final answer for a Qatari economic-data assistant (SCAI).
 You are given a JSON "facts" payload that has ALREADY been retrieved and computed by
@@ -452,10 +453,16 @@ def _render_history(history: Optional[list]) -> str:
     )
 
 
-def compose_answer(facts_payload: dict, language: str = "en", question: str = "",
-                    length: Optional[str] = None,
-                    previous_turn: Optional[dict] = None,
-                    history: Optional[list] = None) -> str:
+def _build_prompt(facts_payload: dict, language: str, question: str,
+                   length: Optional[str], previous_turn: Optional[dict],
+                   history: Optional[list]) -> str:
+    """The user half of the prompt.
+
+    Split out so the blocking and streaming paths cannot be given different
+    instructions. Two copies of a prompt this long would disagree within a
+    month, and the disagreement would show up as the streamed answer being
+    subtly worse than the plain one for reasons nobody could locate.
+    """
     facts_payload = _public(facts_payload)
     # `history` is the several-turn form; `previous_turn` is the single-turn one
     # it replaced, kept because it is a public argument of this function and a
@@ -495,10 +502,56 @@ def compose_answer(facts_payload: dict, language: str = "en", question: str = ""
             if str(language).lower().startswith("ar")
             else "\n\nWrite your entire answer in English.")
     )
+    return user_prompt
+
+
+def compose_answer(facts_payload: dict, language: str = "en", question: str = "",
+                    length: Optional[str] = None,
+                    previous_turn: Optional[dict] = None,
+                    history: Optional[list] = None) -> str:
     return chat(
         client=llm_client,
         model=settings.LLM_MODEL_NAME,
         system=SYSTEM_PROMPT,
-        user=user_prompt,
+        user=_build_prompt(facts_payload, language, question, length,
+                            previous_turn, history),
         temperature=0.0,
     )
+
+
+def compose_answer_streamed(facts_payload: dict, language: str = "en", question: str = "",
+                             length: Optional[str] = None,
+                             previous_turn: Optional[dict] = None,
+                             history: Optional[list] = None,
+                             on_chunk=None) -> tuple[str, Optional[str]]:
+    """The same answer, released through the gate as it is written.
+
+    Returns (text_so_far, rejected_number). A rejection means the model wrote a
+    figure that is not in the payload: everything `on_chunk` received before
+    that point is valid and stays on screen, and the caller replaces the
+    remainder with the template — see AnswerGate for why nothing already shown
+    ever has to be taken back.
+
+    The same prompt, the same model, the same temperature as compose_answer. The
+    only difference is when the text is allowed to leave.
+    """
+    gate = AnswerGate(_public(facts_payload))
+    pieces = chat_stream(
+        client=llm_client,
+        model=settings.LLM_MODEL_NAME,
+        system=SYSTEM_PROMPT,
+        user=_build_prompt(facts_payload, language, question, length,
+                            previous_turn, history),
+        temperature=0.0,
+    )
+    for piece in pieces:
+        for chunk in gate.push(piece):
+            if on_chunk:
+                on_chunk(chunk)
+        if gate.rejected:
+            break
+    else:
+        for chunk in gate.finish():
+            if on_chunk:
+                on_chunk(chunk)
+    return gate.released, gate.rejected

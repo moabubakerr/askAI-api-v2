@@ -66,11 +66,19 @@ def _normalize(value) -> str:
     return f"{f:.4f}".rstrip("0").rstrip(".")
 
 
-def verify_numbers(answer_text: str, facts_payload: dict, rounding_tolerance_decimals: int = 1) -> tuple[bool, list[str]]:
-    """Returns (is_clean, offending_numbers). Allows for the headline
-    rounding convention (payload may carry full precision, e.g. 177.429,
-    while the answer rounds to 177.4) by checking the LLM's number against
-    the payload's number rounded to `rounding_tolerance_decimals` as well."""
+def allowed_numbers(facts_payload: dict, rounding_tolerance_decimals: int = 1) -> set[str]:
+    """Every number an answer built from this payload may legitimately contain.
+
+    Split out of verify_numbers so it can be computed ONCE and reused. The
+    streaming gate (app/compute/streaming.py) checks each number the moment it
+    is written, which means asking this question on every delta — recomputing
+    the set by walking the whole payload each time would be quadratic in the
+    length of the answer.
+
+    Nothing about the rule changed in the move: same three sets, same union.
+    verify_numbers still calls this, so the streamed check and the final check
+    cannot drift apart.
+    """
     payload_numbers = _extract_numbers_from_payload(facts_payload)
     payload_rounded = set()
     for n in payload_numbers:
@@ -96,23 +104,116 @@ def verify_numbers(answer_text: str, facts_payload: dict, rounding_tolerance_dec
         except ValueError:
             pass
 
-    allowed = payload_numbers | payload_rounded | payload_absolute
+    return payload_numbers | payload_rounded | payload_absolute
+
+
+def is_allowed_number(text_number: str, allowed: set[str]) -> bool:
+    """Whether one number written in an answer traces back to the payload.
+
+    The year exemption is the reason this is a function rather than a set
+    lookup: 2019-2030 appear constantly and legitimately as period labels, and
+    are not data points to be found in the payload.
+    """
+    normalized = _normalize(text_number)
+    try:
+        value = float(normalized)
+    except ValueError:
+        return True
+    if 1900 <= value <= 2100 and value == int(value):
+        return True
+    return normalized in allowed
+
+
+def verify_numbers(answer_text: str, facts_payload: dict, rounding_tolerance_decimals: int = 1) -> tuple[bool, list[str]]:
+    """Returns (is_clean, offending_numbers). Allows for the headline
+    rounding convention (payload may carry full precision, e.g. 177.429,
+    while the answer rounds to 177.4) by checking the LLM's number against
+    the payload's number rounded to `rounding_tolerance_decimals` as well."""
+    allowed = allowed_numbers(facts_payload, rounding_tolerance_decimals)
     text_numbers = {_normalize(m) for m in NUMBER_PATTERN.findall(answer_text)}
 
-    # ignore tiny integers that are almost certainly not data (years handled
-    # separately since 2019-2030 range appears constantly and legitimately)
-    offending = []
-    for n in text_numbers:
-        try:
-            f = float(n)
-        except ValueError:
-            continue
-        if 1900 <= f <= 2100 and f == int(f):
-            continue  # looks like a year — years are allowed to appear as period labels
-        if n not in allowed:
-            offending.append(n)
-
+    offending = [n for n in text_numbers if not is_allowed_number(n, allowed)]
+    offending += mislabelled_units(answer_text, facts_payload)
     return (len(offending) == 0, offending)
+
+
+# A value the payload describes as a move in percentage POINTS, written in the
+# answer with a percent sign after it. "40.5 to 40.6 is +0.1%" states a
+# different and false figure from "+0.1 percentage points", and until now
+# nothing checked it: 0.1 is in the payload, so the number passed, and only
+# composer rule 18 stood between the reader and the wrong claim. A rule the
+# model is asked to follow is not the same as one the code enforces — which is
+# the whole argument for this module existing.
+_PP_FIELDS = ("change_yoy_pp", "change_pp")
+
+# Fields whose value IS a percentage, so the same digits followed by "%" are
+# correct wherever they appear.
+_PERCENT_FIELDS = ("change_yoy_percent", "percent_change", "change_percent",
+                   "growth_rate_percent", "attainment_percent")
+
+
+def _pp_and_percent_values(facts_payload) -> tuple[set[str], set[str]]:
+    """Values the payload marks as percentage POINTS, and values that are true
+    percentages. Collected in one walk because the check needs both."""
+    points: set[str] = set()
+    percents: set[str] = set()
+
+    def walk(value):
+        if isinstance(value, dict):
+            for field in _PP_FIELDS:
+                if value.get(field) is not None:
+                    points.add(_normalize(value[field]))
+            for field in _PERCENT_FIELDS:
+                if value.get(field) is not None:
+                    percents.add(_normalize(value[field]))
+            # A generically-named change, with the kind stated beside it.
+            if value.get("change") is not None:
+                kind = str(value.get("change_kind") or "")
+                target = points if kind == "percentage_points" else percents
+                target.add(_normalize(value["change"]))
+            # A reading whose own unit is "%" is a percentage in its own right.
+            if str(value.get("unit") or "").strip() == "%":
+                for field in ("actual", "target", "previous_value", "value"):
+                    if value.get(field) is not None:
+                        percents.add(_normalize(value[field]))
+            for v in value.values():
+                walk(v)
+        elif isinstance(value, (list, tuple)):
+            for v in value:
+                walk(v)
+
+    walk(facts_payload)
+    return points, percents
+
+
+def mislabelled_units(answer_text: str, facts_payload: dict) -> list[str]:
+    """Percentage-POINT figures written with a percent sign.
+
+    A ratio moving 40.5 to 40.6 rose 0.1 percentage points; "+0.1%" is a
+    different and false figure. Nothing checked this before — 0.1 is in the
+    payload, so the number itself passed, and only composer rule 18 stood
+    between the reader and the wrong claim. A rule the model is ASKED to follow
+    is not a rule the code enforces, which is the argument for this module.
+
+    Deliberately conservative. A value that the payload ALSO reports as a real
+    percentage somewhere is left alone: an indicator at 2.62% whose move was
+    2.62 points is contrived, but a false rejection here throws away a correct
+    answer in favour of a template, which is the more expensive mistake.
+
+    Returns offenders in the shape verify_numbers reports them, so whatever logs
+    _verifier_rejected_numbers shows why the draft was refused. Language-neutral
+    — Arabic answers write the same digits and the same percent sign.
+    """
+    points, percents = _pp_and_percent_values(facts_payload)
+    suspect = points - percents
+    if not suspect:
+        return []
+    bad = []
+    for match in re.finditer(r"(?<![\w.])(-?\d[\d,]*\.?\d*)\s*%", answer_text):
+        value = _normalize(match.group(1))
+        if value in suspect:
+            bad.append(f"{value}% (payload says percentage points)")
+    return bad
 
 
 # Every phrase the template fallback needs, in both languages.
