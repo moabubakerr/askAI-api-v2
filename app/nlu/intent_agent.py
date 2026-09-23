@@ -283,6 +283,24 @@ Rules:
   If the question asks for both at once ("explain in more detail, briefly"),
   prefer "detailed" — it is asking for more, and the qualifier is about style.
 - Do not invent countries, periods, or indicators the user did not mention.
+- A follow-up that names only a NEW SUBJECT keeps the computation_type of the turn
+  it follows. The "Prior conversation" block annotates each turn with what it
+  resolved to, including "computation=" — use it.
+  "What does inflation mean?" followed by "what about GDP" is asking what GDP
+  MEANS: computation_type is "definition", not "latest_value". The user changed
+  the thing being asked about and not the question being asked about it, and an
+  answer that changes both answers something they did not ask.
+  The same holds for every other type: after a trend, "and Real GDP?" is a trend;
+  after "what is SCAI's analysis of inflation", "what about the trade balance" is
+  analysis_lookup; after "when was inflation highest", "and GDP?" is min_max.
+  Judge it by what the message CONTAINS, not by how it opens — there is no list of
+  follow-up words to match. If the message adds a period, a country, a frequency,
+  an ordering or any other instruction, it is not only a subject swap and you
+  classify it on its own terms: "and what about the trend since 2019" asks for a
+  trend whatever preceded it.
+  This applies only where the previous turn HAS a computation to inherit. Where the
+  block shows none, or shows "latest_value" — which is what a question gets when
+  nothing more specific was asked for — classify the message on its own.
 - If the question is a follow-up ("what about last year", "and Q2?", "and for Saudi Arabia?",
   "what is the latest value?"), set is_followup=true and fill ONLY the fields the user
   actually restated. Leave every other field null — do not copy the indicator, country or

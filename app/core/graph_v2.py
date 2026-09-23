@@ -264,38 +264,6 @@ def decide_route(user_message: str, intent: dict, session_state: dict) -> tuple[
     return ctype, scope_pinned
 
 
-# "and GDP?", "what about inflation" — a follow-up whose whole content is a NEW
-# SUBJECT. It says nothing about what to do with it, because the question being
-# asked has not changed; only the thing being asked about has.
-_SUBJECT_SWAP = re.compile(
-    r"^\s*(and|what about|how about|what of|and what about|ok(ay)?[,\s]+and)\b"
-    r"|^\s*(و|وماذا عن|ماذا عن|وكيف عن)",
-    re.IGNORECASE)
-
-# Computations a follow-up keeps when it only swaps the subject. latest_value is
-# NOT here: it is the router's default for anything it cannot place, so treating
-# it as sticky would pin a conversation to it forever.
-_STICKY_CTYPES = ("definition", "analysis_lookup", "trend", "direction_check",
-                   "min_max", "growth_rate", "period_ranking")
-
-
-def _swaps_subject_only(text: str) -> bool:
-    """Whether this message changes WHAT is asked about and nothing else.
-
-    "What does inflation mean?" then "what about GDP" is a request for GDP's
-    definition. It was answered with GDP's latest value, because the indicator
-    carried forward and the question being asked about it did not — the router
-    sees four words naming a metric and returns its default.
-
-    Length matters as much as the opener. "and what about the trend since 2019
-    for the GCC" swaps far more than the subject, and inheriting a computation
-    over it would discard what the user actually said.
-    """
-    if not text or not _SUBJECT_SWAP.search(text):
-        return False
-    return len(text.split()) <= 6
-
-
 ANSWER_LENGTHS = ("brief", "detailed")
 
 
@@ -359,20 +327,25 @@ def handle_message(user_message: str, conversation_context: str = "",
     performance_followup = False
 
     ctype, scope_pinned = decide_route(user_message, intent, session_state)
-    # A follow-up that only names a new subject keeps the question that was
-    # being asked about the old one. "What does inflation mean?" then "what
-    # about GDP" is asking what GDP means; it was answered with GDP's latest
-    # value, because the indicator carried forward and the computation did not.
-    # From the reader's side the system changed the subject AND the question,
-    # having been asked to change only the subject.
-    if (intent.get("is_followup") and _swaps_subject_only(user_message)
-            and session_state.get("last_ctype") in _STICKY_CTYPES
-            and ctype in ("latest_value", "out_of_scope")):
-        ctype = session_state["last_ctype"]
+    # A follow-up that only swaps the subject keeps the question being asked —
+    # "What does inflation mean?" then "what about GDP" is asking what GDP
+    # means, not what it is worth. That decision is the intent agent's, not a
+    # pattern's: the transcript it is given annotates each turn with
+    # "computation=", so it can see what was being asked, and its prompt now
+    # tells it to carry that forward.
+    #
+    # This was briefly a regex here, matching "and", "what about", "how about".
+    # It was the same mistake 26b33a4 removed from decide_route and the same one
+    # _asks_for_length is written to argue against: the phrasings are
+    # open-ended and bilingual and share no keyword, so a list of them is always
+    # one short, and it cannot tell "and GDP?" from "and what about the trend
+    # since 2019" without also encoding what counts as too much to inherit over.
+    #
     # Recorded twice, and both are needed. Here, because definition,
     # analysis_lookup and every refusal return long before the dispatch; and
     # again just before the dispatch, because the overrides between the two are
-    # what turn a router default into the computation that actually ran.
+    # what turn a router default into the computation that actually ran. It
+    # reaches the next turn through the transcript annotation.
     session_state["last_ctype"] = ctype
     _stage(session_state, "routed", computation=ctype)
     # Arabic script is unambiguous; the model's language field is a guess. An
