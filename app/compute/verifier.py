@@ -149,7 +149,10 @@ _T = {
         "ar": "بلغ {ind} {val} في {per}، {dir} {amount} {kind} على أساس سنوي — {verdict}. {basis}",
     },
     "improving": {"en": "an improvement", "ar": "تحسّن"},
-    "deteriorating": {"en": "a deterioration", "ar": "تدهور"},
+    # "a worsening", not "a deterioration". Both are accurate; only one is a
+    # word a policymaker reads without slowing down, which is rule 9's point
+    # and the reason the overview labels are "improved"/"worsened" too.
+    "deteriorating": {"en": "a worsening", "ar": "تدهور"},
     "unchanged_word": {"en": "no change", "ar": "دون تغيير"},
     "up": {"en": "up", "ar": "بارتفاع"},
     "down": {"en": "down", "ar": "بانخفاض"},

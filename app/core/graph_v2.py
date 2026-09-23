@@ -2006,15 +2006,21 @@ def _asks_for_growth(phrase: str) -> bool:
 def _movement_verdict(change, polarity) -> Optional[str]:
     """Whether a move is the welcome one, decided from SCAI's own polarity.
 
-    "favourable" / "adverse" rather than "good" / "bad": the Council records a
+    "improved" / "worsened" rather than "good" / "bad": the Council records a
     desired direction per indicator, and this reports that record against the
     sign of the change. It asserts nothing beyond the two — a rise in Inflation
-    is adverse because polarity_en says Decrease, not because rising prices
+    has worsened because polarity_en says Decrease, not because rising prices
     sound bad.
+
+    Plain words on purpose. These are the labels the reader ends up seeing,
+    because the Composer echoes them, and "an adverse movement" appended to
+    four consecutive lines is the register of a compliance notice rather than
+    an answer. "Improved" and "worsened" say the same thing in words a
+    policymaker reads without stopping, which is rule 9's whole point.
 
     Returns None where there is nothing to say: no change figure, or no
     polarity recorded. A missing verdict has to stay missing. Defaulting to
-    "favourable" for an unpolarised indicator would be the same invented
+    "improved" for an unpolarised indicator would be the same invented
     judgement this exists to remove, just with the blame moved into code.
     """
     if change is None or not polarity:
@@ -2026,7 +2032,7 @@ def _movement_verdict(change, polarity) -> Optional[str]:
     if change == 0:
         return "unchanged"
     wants_lower = str(polarity).strip().lower().startswith("decrease")
-    return "favourable" if (change < 0) == wants_lower else "adverse"
+    return "improved" if (change < 0) == wants_lower else "worsened"
 
 
 def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
@@ -2084,7 +2090,7 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
                  # the target ranking both put polarity on each row, and the
                  # Composer's rules 16 and 18 are written around it — but the
                  # snapshot did not, so the macro overview was the one answer
-                 # with no way to tell a welcome move from an adverse one.
+                 # with no way to tell a welcome move from an unwelcome one.
                  # Asked "is Qatar's economy performing well?", it had four
                  # changes, no idea what any of them meant, and answered "Yes,
                  # performing well" over a rising inflation rate and two falling
@@ -2359,11 +2365,11 @@ def _macro_overview(language="en"):
         # show it. Left to itself the Composer picked a side.
         verdicts = [e.get("direction_assessment")
                     for e in payload["facts"].get("overview") or []]
-        n_fav = verdicts.count("favourable")
-        n_adv = verdicts.count("adverse")
-        payload["facts"]["n_favourable"] = n_fav
-        payload["facts"]["n_adverse"] = n_adv
-        payload["facts"]["mixed_signals"] = bool(n_fav and n_adv)
+        n_better = verdicts.count("improved")
+        n_worse = verdicts.count("worsened")
+        payload["facts"]["n_improved"] = n_better
+        payload["facts"]["n_worsened"] = n_worse
+        payload["facts"]["mixed_signals"] = bool(n_better and n_worse)
         # Named indicators that failed to resolve are an internal problem with
         # the editorial list above, not something to report to a user who never
         # named them.
