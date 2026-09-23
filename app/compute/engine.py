@@ -253,7 +253,22 @@ def trend(rows: list[dict], unit: Optional[str] = None) -> ComputeResult:
     # figures it wants are deterministic, so they are supplied: stating them
     # then becomes reporting, which is all the Composer is allowed to do.
     valued = [r for r in rows if r.get("actual") is not None]
-    if valued:
+    # ONE reading is not a shape, and every figure below describes a shape. With
+    # a single point first and last are the same row, so the change came out as
+    # exactly 0 and the highest and the lowest were the same reading — and the
+    # answer said the indicator was unchanged over the period. It was not
+    # unchanged; it was measured once. Asked "did inflation increase over the
+    # last 3 years" against a window holding one reading, that is a confident
+    # answer of "no" drawn from nothing.
+    #
+    # Flagged rather than refused: the reading itself is real and worth
+    # reporting, and composer rule 12a says how.
+    if len(valued) == 1:
+        only = valued[0]
+        facts.update({"single_reading": True,
+                       "only_period": only["period_label"],
+                       "only_value": only["actual"]})
+    elif valued:
         first, last = valued[0], valued[-1]
         facts.update({
             "first_period": first["period_label"], "first_value": first["actual"],
@@ -348,18 +363,32 @@ def country_ranking(series_by_country: dict[str, list[dict]], period_label: Opti
     if not comparison.ok:
         return comparison
     rows = sorted(comparison.facts["rows"], key=lambda r: r["actual"], reverse=not ascending)
-    return ComputeResult(True, facts={
+    facts = {
         "ranked": rows,
         "countries_with_no_data": comparison.facts["countries_with_no_data"],
         "period_used": rows[0]["period_label"] if rows else None,
+    }
+    # A superlative needs something to be superlative OVER. With one country in
+    # the result — routinely, because most SCAI indicators are published for
+    # Qatar alone and the benchmark countries have no data — this still set
+    # extremum and leader, and composer rule 13 duly wrote "Qatar had the lowest
+    # inflation in December 2022". Nothing in that sentence is false and all of
+    # it is misleading: it states the outcome of a comparison that never
+    # happened, against countries the reader assumes were checked.
+    #
+    # The reading is still returned. What is withheld is the claim about where
+    # it ranks.
+    if len(rows) >= 2:
         # WHICH END answers the question. The list was sorted correctly and
         # carried no statement of what the sort meant, so a follow-up to "which
         # country had the LOWEST inflation" was written up as "Qatar had the
         # highest" — the right table under the wrong sentence. The first row is
         # the answer; say so rather than leaving it to be inferred.
-        "extremum": "lowest" if ascending else "highest",
-        "leader": rows[0] if rows else None,
-    })
+        facts["extremum"] = "lowest" if ascending else "highest"
+        facts["leader"] = rows[0]
+    elif rows:
+        facts["only_country_with_data"] = rows[0]["country"]
+    return ComputeResult(True, facts=facts)
 
 
 def _attainment(actual: float, target: float, polarity: str) -> Optional[float]:

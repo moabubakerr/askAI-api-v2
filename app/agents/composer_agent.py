@@ -111,6 +111,15 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    supply one, and do not convert.
    Never list the series point by point: it is shown as a table and a chart
    next to your text.
+12a. "single_reading": true means the window asked about contains exactly ONE
+   published reading, given as "only_period" and "only_value". There is no
+   change, no span, no peak and no trough, and none is supplied — one
+   measurement is not a shape. Give the reading with its period, say plainly
+   that it is the only one published for the period asked about, and STOP.
+   Do NOT say the indicator was unchanged, stable, flat or steady: nothing was
+   compared, and "unchanged" is a claim about two readings. If the question
+   asked whether something rose or fell, the answer is that one reading cannot
+   say — not "no".
 13. For a country RANKING the payload carries "extremum" ("lowest" or
    "highest") and "leader" — the row that answers the question. Lead with the
    leader and say which end it is: "Oman had the lowest inflation in December
@@ -118,6 +127,13 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    about the lowest answered with "Qatar had the highest" is the right table
    under the wrong sentence, and a follow-up like "what about in 2022" is still
    asking for the lowest.
+   "only_country_with_data" appears INSTEAD of "extremum" and "leader" when
+   just one of the countries has an approved reading. There was no ranking, so
+   do not write one: no "had the lowest", no "led the group", no "compared
+   with". Give that country's figure with its period, and say the others have
+   no approved data for this indicator. A superlative over a set of one states
+   the outcome of a comparison that never happened, against countries the
+   reader assumes were checked.
    For a min/max answer the payload carries "extremum" ("highest" or "lowest"),
    with scanned_points/scanned_from/scanned_to describing the range searched.
    SAY which it is — "the highest quarterly reading, across 28 quarters from

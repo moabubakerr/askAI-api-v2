@@ -1278,8 +1278,19 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         # an indicator whose direction is recorded, one granularity over.
         available = retriever.get_available_granularities(published_detail_id,
                                                            match.indicator_detail_id)
+        # An explicitly requested frequency is tried FIRST, not just included in
+        # the sweep. The order below is finest-first, which is the right default
+        # and the wrong answer to "is YEARLY inflation improving?" — that was
+        # answered from the monthly series whenever monthly publishes a change,
+        # silently, because this loop takes the first granularity that works and
+        # never saw what the user asked for. `granularity` above already honours
+        # explicit_frequency; this branch computed its own and discarded it.
+        order = [g for g in ("monthly", "quarterly", "yearly") if g in available]
+        asked_gran = parse_explicit_frequency(intent.get("explicit_frequency"))
+        if asked_gran in order:
+            order = [asked_gran] + [g for g in order if g != asked_gran]
         result = None
-        for gran in [g for g in ("monthly", "quarterly", "yearly") if g in available]:
+        for gran in order:
             candidate_rows = retriever.get_series(match.indicator_detail_id, published_detail_id,
                                                    gran, country_en=single_country)
             candidate = compute.direction_assessment(

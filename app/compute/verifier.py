@@ -275,6 +275,18 @@ _T = {
         "ar": "بلغ {ind} {a} في {pa} و{b} في {pb} — بتغير قدره {abschg} ({pct}%).",
     },
     "no_reading": {"en": "no reading", "ar": "لا توجد قراءة"},
+    "single_reading": {
+        "en": ("{ind} was {val} in {per} — the only reading published for the "
+                "period asked about, so no change over that period can be stated."),
+        "ar": ("بلغ {ind} {val} في {per} — وهي القراءة الوحيدة المنشورة للفترة "
+                "المطلوبة، لذا لا يمكن بيان أي تغير خلالها."),
+    },
+    "only_country": {
+        "en": ("{country} is the only country with approved data for {ind}: {val} "
+                "in {per}. The others have none, so there is no ranking to give."),
+        "ar": ("{country} هي الدولة الوحيدة التي تتوفر لها بيانات معتمدة لـ {ind}: "
+                "{val} في {per}. ولا تتوفر للبقية بيانات، لذا لا يوجد ترتيب."),
+    },
     "from_in": {"en": ", from {val} in {per}", "ar": "، مقارنة بـ {val} في {per}"},
     "yoy": {"en": " ({pct}% YoY)", "ar": " ({pct}% على أساس سنوي)"},
     # The same movement for a rate indicator, where the move is in points and
@@ -647,6 +659,13 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                             names="; ".join(str(n) for n in sample))
         return line + _t("all_listed_below", language, n=facts["count"])
     if "series" in facts:
+        # One reading is not a series, and the summary below describes a series:
+        # it printed "Inflation: 1 readings." and nothing else — not even the
+        # figure. Composer rule 12a covers the composed side; this is the same
+        # answer for the path that skips the Composer.
+        if facts.get("single_reading"):
+            return _t("single_reading", language, ind=indicator,
+                       val=fmt(facts.get("only_value")), per=facts.get("only_period"))
         # Summarise; do NOT enumerate. The series is already rendered as a chart
         # and a table beside this text, so listing all 28 points printed the
         # same data three times on one screen.
@@ -668,6 +687,14 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                         hip=facts["highest_period"], lo=fmt(facts.get("lowest_value")),
                         lop=facts.get("lowest_period"))
         return line
+    # A ranking of one country is not a ranking. Without this it fell past both
+    # branches to the generic dump at the bottom and printed the payload's own
+    # field names at the reader: "only_country_with_data: Qatar".
+    if facts.get("only_country_with_data") and facts.get("ranked"):
+        row = facts["ranked"][0]
+        return _t("only_country", language, country=facts["only_country_with_data"],
+                   ind=indicator, val=f"{trim_zeros(row.get('actual'))} {unit}".strip(),
+                   per=row.get("period_label"))
     if "ranked" in facts and facts.get("leader"):
         leader = facts["leader"]
         lines = [_t("rank_leader", language, country=leader.get("country"),
@@ -754,6 +781,18 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                 lines.append(f"{i}. {row.get('country')}: {row.get('actual')} ({row.get('period_label')})")
         elif key == "countries_with_no_data" and value:
             lines.append("No approved data for: " + ", ".join(value))
+        elif isinstance(value, bool) or key.endswith(("_kind", "_basis")) or key.startswith("n_"):
+            # Machine fields. They say how to READ the other values, not what
+            # the reader should be told, and printed on their own they say
+            # nothing at all: "single_reading: True".
+            continue
         else:
-            lines.append(f"{key}: {value}")
+            # The last resort inside the last resort: a payload shape nobody
+            # anticipated. Showing the figure is better than showing nothing,
+            # but the KEY is an internal field name and was being printed
+            # verbatim — "only_country_with_data: Qatar", "period_used:
+            # 2022-12". Composer rule 6 forbids exactly that vocabulary in a
+            # composed answer, and this path reaches the reader without passing
+            # through it. Spelled out as words so the line is at least English.
+            lines.append(f"{key.replace('_', ' ').capitalize()}: {value}")
     return "\n".join(lines) if lines else "No approved data is available for this request."
