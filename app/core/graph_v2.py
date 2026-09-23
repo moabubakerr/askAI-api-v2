@@ -95,6 +95,12 @@ class SessionState(TypedDict, total=False):
     last_country_group: str
     last_period_expression: str
     last_explicit_frequency: str
+    # How long the answer should be, and what the last one said. Neither is a
+    # slot carry_forward fills — they are presentation, not subject — but they
+    # ride in the same dict because it is the one thing already threaded to
+    # every _finish call site.
+    answer_length: str
+    last_exchange: dict
 
 
 def _find_row_by_period(rows: list[dict], period_label: Optional[str]) -> Optional[dict]:
@@ -227,6 +233,31 @@ def decide_route(user_message: str, intent: dict, session_state: dict) -> tuple[
 
     return ctype, scope_pinned
 
+
+ANSWER_LENGTHS = ("brief", "detailed")
+
+
+def _asks_for_length(intent: dict) -> Optional[str]:
+    """The length the model extracted, accepted only if it is one we know.
+
+    No patterns. "Answer in short" and "اختصر الإجابة" and "spare me the
+    commentary" all mean the same thing and share no words, which is the reason
+    a router exists — the same reason 26b33a4 stopped the patterns overriding
+    it. A regex here would have to enumerate the phrasings in two languages and
+    would still miss the next one, while reading "short" in "a short-term rate"
+    or "the shortest series" as a formatting instruction.
+
+    What is left is not detection but validation: the model is asked for one of
+    two words, and anything else — a third word it invented, a stray sentence,
+    a null — is treated as "they did not say". A value outside the set would
+    silently select no directive at all in the Composer, so it is rejected here
+    where that is visible rather than there where it is not.
+    """
+    value = (intent or {}).get("answer_length")
+    value = str(value).strip().lower() if value is not None else ""
+    return value if value in ANSWER_LENGTHS else None
+
+
 def handle_message(user_message: str, conversation_context: str = "",
                     session_state: Optional[SessionState] = None) -> dict:
     session_state = dict(session_state or {})
@@ -263,6 +294,24 @@ def handle_message(user_message: str, conversation_context: str = "",
         session_state["last_countries"] = list(intent["countries_mentioned"])
     if intent.get("country_group_mentioned"):
         session_state["last_country_group"] = intent["country_group_mentioned"]
+
+    # How long the answer should be, as the router read it. Without this the
+    # request reached the Composer as four words of question text competing
+    # with twenty-one numbered rules pulling the other way, and won about half
+    # the time: "in a short answer" got one sentence, "respond in short" got
+    # four. It is an extraction, not a pattern, because the ways of asking for
+    # a shorter answer are open-ended and bilingual and share no keyword.
+    #
+    # Carried in session_state, which every _finish call already receives, so
+    # nothing has to be threaded through twenty-three call sites. It persists
+    # across follow-ups — "in short" then "and for 2024?" stays short, which is
+    # what asking for it once means — and is dropped on a fresh question, since
+    # a new subject is not covered by a preference expressed about the last one.
+    length = _asks_for_length(intent)
+    if length:
+        session_state["answer_length"] = length
+    elif not intent.get("is_followup"):
+        session_state.pop("answer_length", None)
 
     # --- non-data intents ---
     if ctype == "general_chat":
@@ -1122,7 +1171,11 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         return _wrap(result, unit, indicator_name=indicator_name, decimals=decimals), citations_for_rows(rows, indicator_name, data_source_en)
 
     if ctype == "trend":
-        result = compute.trend(rows)
+        # The unit decides whether the move over the span is a percentage, a
+        # percentage-point difference or a number of places. Without it the
+        # series summary divided a rate by a rate and called Inflation's
+        # -1.84% -> 2.62% "a decrease of 241.57%".
+        result = compute.trend(rows, unit=unit)
         return _wrap(result, unit, indicator_name=indicator_name, decimals=decimals), citations_for_rows(rows, indicator_name, data_source_en)
 
     if ctype == "min_max":
@@ -1950,6 +2003,32 @@ def _asks_for_growth(phrase: str) -> bool:
                           re.IGNORECASE))
 
 
+def _movement_verdict(change, polarity) -> Optional[str]:
+    """Whether a move is the welcome one, decided from SCAI's own polarity.
+
+    "favourable" / "adverse" rather than "good" / "bad": the Council records a
+    desired direction per indicator, and this reports that record against the
+    sign of the change. It asserts nothing beyond the two — a rise in Inflation
+    is adverse because polarity_en says Decrease, not because rising prices
+    sound bad.
+
+    Returns None where there is nothing to say: no change figure, or no
+    polarity recorded. A missing verdict has to stay missing. Defaulting to
+    "favourable" for an unpolarised indicator would be the same invented
+    judgement this exists to remove, just with the blame moved into code.
+    """
+    if change is None or not polarity:
+        return None
+    try:
+        change = float(change)
+    except (TypeError, ValueError):
+        return None
+    if change == 0:
+        return "unchanged"
+    wants_lower = str(polarity).strip().lower().startswith("decrease")
+    return "favourable" if (change < 0) == wants_lower else "adverse"
+
+
 def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
     """One latest reading per named indicator, each with its OWN period.
 
@@ -2000,6 +2079,17 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
         entry = {"indicator": match.name_en.strip(),
                  "unit": display_unit(match.unit_en, match.format, language, match.unit_ar),
                  "decimal_places": decimals_from_format(match.format),
+                 # Which way is WELCOME for this indicator, as SCAI records it.
+                 # Every other group shape carries this — scope_direction and
+                 # the target ranking both put polarity on each row, and the
+                 # Composer's rules 16 and 18 are written around it — but the
+                 # snapshot did not, so the macro overview was the one answer
+                 # with no way to tell a welcome move from an adverse one.
+                 # Asked "is Qatar's economy performing well?", it had four
+                 # changes, no idea what any of them meant, and answered "Yes,
+                 # performing well" over a rising inflation rate and two falling
+                 # balances.
+                 "polarity": (match.polarity_en or "").strip() or None,
                  "granularity": gran, "asked_as": phrase, **latest.facts}
         # SCAI's own vetted period-on-period change, never a fresh derivation
         # (F-022..F-026). Carried on every line so "GDP growth" can be answered
@@ -2036,6 +2126,16 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
                     entry["change_yoy_pp"] = round(float(change), 4)
                     entry["change_kind"] = "percentage_points"
             entry["report_as_growth"] = _asks_for_growth(phrase)
+            # Polarity and a direction combined ONCE, here, instead of at the
+            # far end of a prompt. The Composer is good at restating a word and
+            # unreliable at deriving one, and this derivation has a trap in it:
+            # for a Decrease indicator the welcome move is the fall, so the
+            # naive reading of a minus sign is backwards exactly where it
+            # matters most. Naming the answer is the same technique rule 20's
+            # "assessment" already uses, for the same reason.
+            entry["direction_assessment"] = _movement_verdict(
+                entry.get("change_yoy_percent", entry.get("change_yoy_pp")),
+                entry.get("polarity"))
             citations += citations_for_rows([row], match.name_en, match.data_source_en)
         facts.append(entry)
 
@@ -2251,6 +2351,19 @@ def _macro_overview(language="en"):
         # rather than an arbitrary set of metrics, so it reports the movement
         # rather than reading out four numbers.
         payload["facts"]["overview_kind"] = "macro"
+        # Counted here so the opening sentence is a fact about the payload
+        # rather than a verdict about the economy. "Is Qatar's economy
+        # performing well?" is a yes/no question with no yes/no in the data:
+        # four indicators can and do move in different directions at once, and
+        # the honest opening is that the picture is mixed, with the split to
+        # show it. Left to itself the Composer picked a side.
+        verdicts = [e.get("direction_assessment")
+                    for e in payload["facts"].get("overview") or []]
+        n_fav = verdicts.count("favourable")
+        n_adv = verdicts.count("adverse")
+        payload["facts"]["n_favourable"] = n_fav
+        payload["facts"]["n_adverse"] = n_adv
+        payload["facts"]["mixed_signals"] = bool(n_fav and n_adv)
         # Named indicators that failed to resolve are an internal problem with
         # the editorial list above, not something to report to a user who never
         # named them.
@@ -2298,7 +2411,20 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
     if skip_compose:
         answer = canned or ""
     else:
-        draft = compose_answer(payload, language, question=question)
+        draft = compose_answer(payload, language, question=question,
+                                length=session_state.get("answer_length"),
+                                # The exchange before this one, so a follow-up
+                                # does not re-state what the reader has just
+                                # read. Asked to shorten an answer about the
+                                # inflation trend, the Composer gave the April
+                                # 2023 peak and the January 2025 trough a second
+                                # time — it could not know they had already been
+                                # said, because it had never seen its own last
+                                # answer. One turn, not the transcript: the
+                                # prompt budget is shared with the facts, and
+                                # only the immediately preceding turn is what
+                                # "that" and "shorter" refer to.
+                                previous_turn=session_state.get("last_exchange"))
         clean, offending = verify_numbers(draft, payload)
         # An answer in the wrong language is not an answer. The model is asked
         # for Arabic and mostly complies, but "mostly" is not a guarantee and
@@ -2333,6 +2459,15 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
     # needing calibration against real bge-m3 scores, and the logged flag is
     # where those scores come from. _public() strips it before the Composer
     # sees it, so it is never narrated.
+    # Kept for the NEXT turn's Composer, so a follow-up can be told what has
+    # already been said. Stored before the footer is attached — the sources
+    # block is rendered deterministically every time and repeating it into the
+    # prompt would spend budget on text the Composer never writes. Capped for
+    # the same reason MAX_STORED_TEXT caps the transcript: this exists to stop
+    # repetition, not to be re-read in full.
+    session_state["last_exchange"] = {"user": (question or "")[:300],
+                                       "assistant": (answer or "")[:600]}
+
     footer = render_sources_footer(citations)
     if footer:
         answer = f"{answer}\n\n{footer}"

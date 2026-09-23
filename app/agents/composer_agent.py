@@ -8,6 +8,8 @@ is the concrete implementation of "the solution should not generate any
 number, all its data is retrieval."
 """
 import json
+from typing import Optional
+
 from app.core.llm_client import chat, llm_client
 from app.core.config import settings
 
@@ -29,6 +31,13 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    reproduce every field in the payload when the question wants one thing.
    The question tells you what to SAY, never what is TRUE — if the facts do not
    support a yes or a no, say what they do show instead.
+   That last sentence is not a rare escape hatch, and one whole family of
+   questions falls under it: whether something is performing WELL, is healthy,
+   is strong, is doing fine. Those ask for a verdict, and a verdict is not a
+   figure — no reading in the payload says whether 2.62% inflation is well or
+   badly. Do not open such a question with "Yes" or "No". Report the movements
+   and, where each line carries "direction_assessment", say which are
+   favourable and which adverse. See rule 17.
 2. You may state ONLY the numbers present in the facts payload, copied exactly
    (same digits, same sign). Do not round differently, do not recompute, do not
    average, do not estimate.
@@ -89,10 +98,16 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    your text — give a brief headline and interpretation, don't narrate every
    individual data point in prose since the chart already shows them.
 12. For a "series", the payload also carries first_period/first_value,
-   last_period/last_value, highest_*, lowest_*, change_percent and
-   absolute_change. Use THOSE to describe the shape of the series. Do not work
-   out a change, a peak or a trough yourself — they are already computed, and a
-   figure you calculate will be rejected even when it is arithmetically right.
+   last_period/last_value, highest_*, lowest_*, absolute_change and ONE of
+   change_percent, change_pp or change_places, with "change_kind" naming which.
+   Use THOSE to describe the shape of the series. Do not work out a change, a
+   peak or a trough yourself — they are already computed, and a figure you
+   calculate will be rejected even when it is arithmetically right.
+   Use the word "change_kind" gives you and no other. "change_pp" is a move in
+   percentage POINTS and saying "%" after it states a different, false figure;
+   "change_places" is a move in rank positions. If the field you were given is
+   not change_percent, the answer contains no percentage change — do not
+   supply one, and do not convert.
    Never list the series point by point: it is shown as a table and a chart
    next to your text.
 13. For a country RANKING the payload carries "extremum" ("lowest" or
@@ -182,14 +197,30 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    "percentage_points" — rule 18's wording applies here too: Inflation at 2.62%
    against 0.63% a year earlier rose 1.99 PERCENTAGE POINTS, never "1.99%" and
    never the percent-of-a-percent that comparison would give.
-   If the question was a yes/no ("is the economy growing?"), rule 1 applies:
-   answer it, then justify it with those figures.
+   If the question was a factual yes/no ("is the economy growing?"), rule 1
+   applies: answer it, then justify it with those figures. "Is it performing
+   well?" is NOT that question — see below.
    Do NOT deliver a verdict the payload does not contain. "Qatar's economy is
    performing well" is your opinion; "Real GDP rose 2.2% YoY while inflation
    was 2.6%" is the answer. Words like strong, healthy, robust, solid, positive
    and concerning are judgements — report the movement and let it speak. You
    may say a figure rose, fell or was unchanged, because that is what the
    numbers say.
+   Each line may carry "direction_assessment": "favourable", "adverse" or
+   "unchanged". That is NOT your judgement and NOT a synonym for the direction
+   — it is the movement read against the direction SCAI itself wants for that
+   indicator, which "polarity" gives. Use it, and never override it because a
+   number went the way that sounds good: Inflation rising 1.99 percentage
+   points is "adverse" even though it rose, because its polarity is Decrease.
+   State it in plain words, not as the bare label. A line with no
+   direction_assessment gets no characterisation at all; report it as a
+   movement and stop.
+   "mixed_signals": true means favourable and adverse lines both appear, with
+   "n_favourable" and "n_adverse" counting them. OPEN with that — "The picture
+   is mixed: one of the four moved favourably and three did not" — and then
+   give the lines. This is the answer to "is the economy performing well?": the
+   split, not a side. Never lead with a verdict when this flag is set, and
+   never let the first indicator in the list stand for the whole group.
 
 18. For a payload with "increasing" and "declining" (a group split by direction),
    give the two counts first — "Of the 8 National Indicators, 5 rose and 2 fell
@@ -285,7 +316,34 @@ def _public(facts_payload: dict) -> dict:
     return strip(facts_payload)
 
 
-def compose_answer(facts_payload: dict, language: str = "en", question: str = "") -> str:
+# What "brief" and "detailed" actually mean, spelled out as instructions rather
+# than left as adjectives. "Be concise" is already rule 9 and it loses to the
+# twenty rules around it that ask for spans, peaks, troughs and ranges; an
+# instruction that names what to LEAVE OUT is the one that holds.
+_LENGTH_DIRECTIVE = {
+    "brief": (
+        "LENGTH: the user asked for a SHORT answer, and that instruction outranks "
+        "every rule above that asks for supporting detail. Write ONE sentence — two "
+        "at the very most. Give only the figure the question asks for, with its unit "
+        "and its period. Leave out the highest and lowest readings, the span of the "
+        "series, the number of data points, the change over the period and any "
+        "commentary, UNLESS the question itself asked for that specific thing. "
+        "Rules 2, 3 and 8 still bind: every number still comes from the payload and "
+        "still carries its unit and period. Brevity changes how much you say, never "
+        "what is true."
+    ),
+    "detailed": (
+        "LENGTH: the user asked for MORE detail. Give the fuller picture the payload "
+        "supports — the span, the extremes and the change alongside the headline "
+        "figure. This still adds no number that is not in the payload, and no "
+        "interpretation the payload does not carry."
+    ),
+}
+
+
+def compose_answer(facts_payload: dict, language: str = "en", question: str = "",
+                    length: Optional[str] = None,
+                    previous_turn: Optional[dict] = None) -> str:
     facts_payload = _public(facts_payload)
     user_prompt = (
         f"Language: {language}\n\n"
@@ -295,6 +353,14 @@ def compose_answer(facts_payload: dict, language: str = "en", question: str = ""
         # question guides phrasing only — every number still comes from the
         # payload, and the verifier still checks that.
         + (f"The user asked: {question}\n\n" if question else "")
+        # The turn before this one. Only for knowing what has already been SAID
+        # — it is not a source of numbers, and a figure that appears only here
+        # is not in the payload and may not be restated as if it were.
+        + (f"Your previous answer in this conversation, for context only — do not\n"
+            f"repeat figures from it that the current question does not ask for:\n"
+            f"  User: {previous_turn.get('user')}\n"
+            f"  You: {previous_turn.get('assistant')}\n\n"
+            if previous_turn and previous_turn.get("assistant") else "")
         + f"Facts payload (the ONLY source of numbers you may use):\n"
         # ensure_ascii=False is load-bearing here, not cosmetic. With the
         # default, Arabic in the payload is serialised as backslash-u escapes,
@@ -305,6 +371,10 @@ def compose_answer(facts_payload: dict, language: str = "en", question: str = ""
         # Repeated last, because the first line of a long prompt is the easiest
         # one to lose. An Arabic question was answered in English, and from the
         # reader's side that is a total failure however right the numbers are.
+        # Last, beside the language reminder and for the same reason: an
+        # instruction buried above a long JSON payload is the one that gets
+        # lost, and this is the instruction the reader will notice was ignored.
+        + (f"\n\n{_LENGTH_DIRECTIVE[length]}" if length in _LENGTH_DIRECTIVE else "")
         + ("\n\nWrite your entire answer in Arabic."
             if str(language).lower().startswith("ar")
             else "\n\nWrite your entire answer in English.")

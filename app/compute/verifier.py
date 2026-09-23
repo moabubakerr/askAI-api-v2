@@ -236,6 +236,14 @@ _T = {
                      "ar": "، من {v0} في {p0} إلى {v1} في {p1}"},
     "series_change": {"en": " That is a change of {pct}% over the period.",
                        "ar": " أي بتغير قدره {pct}% خلال الفترة."},
+    # A rate moves in percentage POINTS, and a rank in places. The percent
+    # wording above is not a neutral default for them — it states a different
+    # figure. One phrasing per kind, so the fallback cannot say what the
+    # Composer is forbidden to say.
+    "series_change_pp": {"en": " That is a change of {pct} percentage points over the period.",
+                          "ar": " أي بتغير قدره {pct} نقطة مئوية خلال الفترة."},
+    "series_change_places": {"en": " That is a change of {pct} places over the period.",
+                              "ar": " أي بتغير قدره {pct} مركزًا خلال الفترة."},
     "series_extremes": {
         "en": " The highest reading was {hi} in {hip}, the lowest {lo} in {lop}.",
         "ar": " وكانت أعلى قراءة {hi} في {hip}، وأدناها {lo} في {lop}.",
@@ -512,6 +520,10 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
         line += "."
         if facts.get("change_percent") is not None:
             line += _t("series_change", language, pct=facts["change_percent"])
+        elif facts.get("change_pp") is not None:
+            line += _t("series_change_pp", language, pct=facts["change_pp"])
+        elif facts.get("change_places") is not None:
+            line += _t("series_change_places", language, pct=facts["change_places"])
         if facts.get("highest_period"):
             line += _t("series_extremes", language, hi=fmt(facts.get("highest_value")),
                         hip=facts["highest_period"], lo=fmt(facts.get("lowest_value")),

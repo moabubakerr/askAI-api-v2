@@ -59,6 +59,7 @@ Output ONLY JSON with this exact shape:
   "limit": <integer or null>,
   "order": "best" | "worst" | null,
   "direction_asked": "up" | "down" | null,
+  "answer_length": "brief" | "detailed" | null,
   "language": "en" | "ar",
   "is_followup": true|false,
   "followup_reference": "<what the follow-up refers back to, e.g. 'same indicator, different period', or null>"
@@ -256,6 +257,31 @@ Rules:
   "what is improving and what is not" — or names no direction at all. It does
   not change which indicators are examined, only which half the answer leads
   with; the other half is still reported, briefly.
+- "answer_length" is how long the ANSWER should be, and like "limit" it says
+  nothing about the data — it never changes which indicator, period or country
+  is being asked about. Exactly "brief", "detailed" or null; no other value.
+  "brief" is anything asking for less: "in short", "in a short answer", "respond
+  in short", "briefly", "one line", "just the number", "keep it short", "skip
+  the detail", "spare me the commentary", "tl;dr", "باختصار", "بشكل مختصر",
+  "اختصر الإجابة". "detailed" is anything asking for more: "explain in more
+  detail", "give me the full picture", "elaborate", "بالتفصيل". Judge it from
+  MEANING, not from a keyword list — these are the common phrasings, not the
+  whole set, and someone will always find a new way to ask for a shorter answer.
+  null when they did not ask about length at all.
+  The word "short" is NOT enough on its own. It has to be the answer that is
+  being asked to be short. These are all null: "what is the short-term interest
+  rate", "which series is the shortest", "show me the shortfall against target",
+  "has the gap narrowed". Set it only where the user is telling you how to
+  WRITE, not what to look up. If the sentence still makes sense as a question
+  about data after you remove the length request, the length request is real; if
+  removing it destroys the question, you have misread a subject as a format.
+  A follow-up whose ONLY content is this — "in short", "shorter please" — sets
+  answer_length, sets is_followup=true, and leaves indicator_phrase, period and
+  every other field null. It names no new metric: it asks for the answer already
+  on screen, said in fewer words. Do NOT read "in short" as an indicator name
+  and do NOT treat it as a new question about a different thing.
+  If the question asks for both at once ("explain in more detail, briefly"),
+  prefer "detailed" — it is asking for more, and the qualifier is about style.
 - Do not invent countries, periods, or indicators the user did not mention.
 - If the question is a follow-up ("what about last year", "and Q2?", "and for Saudi Arabia?",
   "what is the latest value?"), set is_followup=true and fill ONLY the fields the user
@@ -297,6 +323,7 @@ def extract_intent(user_message: str, conversation_context: str = "") -> dict:
             "limit": None,
             "order": None,
             "direction_asked": None,
+            "answer_length": None,
             "language": "en",
             "is_followup": False,
             "followup_reference": None,

@@ -219,7 +219,24 @@ def preferred_change_field(row: dict, granularity: str, as_points: bool = False)
     return row.get(field_name) if field_name else None
 
 
-def trend(rows: list[dict]) -> ComputeResult:
+def _is_rank(unit: Optional[str]) -> bool:
+    return (unit or "").strip().lower() in ("rank", "ranking", "المرتبة")
+
+
+def _is_rate(unit: Optional[str]) -> bool:
+    """A figure that is ITSELF a percentage, so a percentage OF it says nothing.
+
+    Inflation, unemployment, a debt-to-GDP ratio, a share of exports: the gap
+    between two of these is measured in percentage points. The distinction is
+    made in several places already — preferred_change_field's as_points branch,
+    scope_direction, direction_assessment — and this is the predicate they all
+    imply. Kept beside _is_rank because the two answer the same question about
+    a unit and are always considered together.
+    """
+    return (unit or "").strip().lower() in ("%", "percent", "percentage", "٪", "نسبة مئوية")
+
+
+def trend(rows: list[dict], unit: Optional[str] = None) -> ComputeResult:
     """The full chronological series, as-is — no gap-filling, no silent
     skipping. Fixes F-024: 'the system skipped 2025-Q3 and 2025-Q4 without
     explanation' — if periods are missing from the data, that's surfaced,
@@ -248,10 +265,33 @@ def trend(rows: list[dict]) -> ComputeResult:
             "highest_period": high["period_label"], "highest_value": high["actual"],
             "lowest_period": low["period_label"], "lowest_value": low["actual"],
         })
-        if first["actual"] not in (None, 0):
+        # The move from the first reading to the last. Always as a difference;
+        # as a PERCENTAGE only where dividing by the first reading means
+        # anything.
+        #
+        # It does not for a rate. Inflation ran from -1.84% in January 2019 to
+        # 2.62% in April 2026, and this line used to divide one by the other and
+        # report "a decrease of 241.57%" — a percent of a percent, across a sign
+        # change, so the magnitude was invented and even the direction was
+        # backwards. The move is 4.46 percentage POINTS, which is the figure
+        # every other path in this system already reports for a rate:
+        # preferred_change_field has an as_points branch, scope_direction uses
+        # it, and the Composer's rule 18 spells out why. trend() was the one
+        # place that never got it, because it is handed rows and had no idea
+        # what unit they were in. Now it is told.
+        facts["absolute_change"] = round(last["actual"] - first["actual"], 6)
+        if _is_rate(unit):
+            facts["change_pp"] = facts["absolute_change"]
+            facts["change_kind"] = "percentage_points"
+        elif _is_rank(unit):
+            # 9th to 11th is two PLACES, never "22% worse" — the same rule
+            # direction_assessment applies, for the same reason.
+            facts["change_places"] = facts["absolute_change"]
+            facts["change_kind"] = "places"
+        elif first["actual"] not in (None, 0):
             facts["change_percent"] = round(
                 (last["actual"] - first["actual"]) / first["actual"] * 100, 4)
-            facts["absolute_change"] = round(last["actual"] - first["actual"], 6)
+            facts["change_kind"] = "percent"
     return ComputeResult(True, facts=facts)
 
 
@@ -514,10 +554,6 @@ def scope_direction(entries: list[dict],
         facts["n_asked"] = len(facts[facts["asked_group"]])
         facts["n_counterpart"] = len(facts[facts["counterpart_group"]])
     return ComputeResult(True, facts=facts)
-
-
-def _is_rank(unit: Optional[str]) -> bool:
-    return (unit or "").strip().lower() in ("rank", "ranking", "المرتبة")
 
 
 def direction_assessment(rows: list[dict], granularity: str,
