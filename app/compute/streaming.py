@@ -36,10 +36,20 @@ from typing import Iterator, Optional
 from app.compute.verifier import NUMBER_PATTERN, allowed_numbers, is_allowed_number
 
 # Where a unit may end. A blank line closes a paragraph; a newline closes a
-# bullet; a sentence-ending punctuation mark followed by a space closes a
+# bullet; a sentence-ending punctuation mark FOLLOWED BY WHITESPACE closes a
 # sentence. Arabic full stops and question marks are here for the same reason
 # the rest of this codebase carries both languages.
-_BOUNDARY = re.compile(r"(\n\n|\n|(?<=[.!?؟।])\s+|(?<=[.!?؟])$)")
+#
+# There is deliberately no end-of-buffer alternative. An earlier version had
+# `(?<=[.!?])$`, on the reasoning that a trailing full stop ends a sentence —
+# but during streaming the end of the buffer is not the end of anything, it is
+# just where the model has got to. "…measured from 166." matched it, the gate
+# released that as a finished sentence, and checked "166." as a number: 166.11
+# is in the payload and 166 is not, so a correct answer was rejected and
+# replaced by the template mid-stream. The whitespace requirement is what
+# distinguishes a full stop from a decimal point, and it has to be present.
+# The tail is flushed by finish() instead, once the model has actually stopped.
+_BOUNDARY = re.compile(r"(\n\n|\n|(?<=[.!?؟।])\s+)")
 
 # Below this, holding back for a boundary costs more in latency than the
 # smoothness is worth — a long paragraph with no punctuation should still reach
@@ -54,12 +64,18 @@ def _has_open_emphasis(text: str) -> bool:
 
 
 def _trailing_partial_number(text: str) -> bool:
-    """Whether the buffer ends mid-number.
+    """Whether the text ends mid-number, with nothing after it yet.
 
     "185.1" may still become "185.17", and checking it as written would reject a
     figure the model had not finished writing.
+
+    \\Z, not $. In Python $ also matches just before a trailing newline, so a
+    finished bullet line like "- Global Rank: 11\\n" would read as ending
+    mid-number and never be released — the stream would stall on any line whose
+    last word is a figure. A number followed by ANY character, whitespace
+    included, is complete.
     """
-    return bool(re.search(r"\d[\d,]*\.?\d*$", text))
+    return bool(re.search(r"\d[\d,]*\.?\d*\Z", text))
 
 
 class AnswerGate:
@@ -121,7 +137,14 @@ class AnswerGate:
             unit, rest = self._buffer[:end], self._buffer[end:]
             # A boundary inside an unclosed "**" is not a boundary — the
             # emphasis would render broken. Wait for more text instead.
-            if not _has_open_emphasis(unit):
+            #
+            # Nor is one that leaves a half-written number at the end: checking
+            # "166." as though it were final rejects an answer whose next
+            # character was going to be a "1". The boundary pattern no longer
+            # produces that case on its own, and this stays as the guarantee
+            # rather than as a second line of defence — no release path may
+            # ever hand a partial number to the verifier.
+            if not _has_open_emphasis(unit) and not _trailing_partial_number(unit):
                 return unit, rest
         # No boundary, but the buffer has grown long enough that waiting is
         # worse than releasing at the last space.

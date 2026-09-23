@@ -10,6 +10,7 @@ payload (see render_template_fallback), which has no LLM in the loop at all.
 """
 import re
 from decimal import Decimal
+from typing import Optional
 
 from app.compute.formatting import trim_zeros
 
@@ -441,6 +442,23 @@ def _reason(entry: dict, language: str) -> str:
     return entry.get("reason") or ""
 
 
+# "cagr" is the engine's internal name for the method and was being printed
+# verbatim: "a 1.62% cagr growth rate". It is an acronym, so lowercase reads as
+# a typo, and in an Arabic answer it read as an untranslated English word in the
+# middle of the sentence.
+_METHOD_LABELS = {
+    "cagr": {"en": "CAGR", "ar": "مركب سنوي"},
+    "simple": {"en": "simple", "ar": "بسيط"},
+}
+
+
+def _method_label(method: Optional[str], language: str) -> str:
+    entry = _METHOD_LABELS.get(str(method or "").strip().lower())
+    if not entry:
+        return str(method or "")
+    return entry["ar"] if language == "ar" else entry["en"]
+
+
 def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
     """A zero-LLM, template-only rendering used when the Composer's text
     fails verification. Deliberately plain — correctness over eloquence.
@@ -531,7 +549,7 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
         return _t("growth", language, ind=indicator, v0=fmt(facts.get("value_start")),
                    p0=facts.get("period_start"), v1=fmt(facts.get("value_end")),
                    p1=facts.get("period_end"), rate=facts["growth_rate_percent"],
-                   method=facts.get("method", "")).replace("  ", " ")
+                   method=_method_label(facts.get("method"), language)).replace("  ", " ")
     if "absolute_difference" in facts:
         return _t("difference", language, ind=indicator, hi=fmt(facts.get("high_value")),
                    hip=facts.get("high_period"), lo=fmt(facts.get("low_value")),
