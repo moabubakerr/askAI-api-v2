@@ -41,6 +41,34 @@ def is_arabic(language: Optional[str]) -> bool:
     return (language or "en").lower().startswith("ar")
 
 
+# Words too common in a data question to say anything about language. "Q2 2025"
+# and "GDP 2024" are the same message in both halves of this product.
+_LANGUAGE_NEUTRAL = {"gdp", "cpi", "fdi", "q1", "q2", "q3", "q4", "top", "vs",
+                      "ok", "yes", "no", "pls", "plz"}
+
+
+def carries_language_signal(text: str) -> bool:
+    """Whether this message says anything about what language it is in.
+
+    detect_language reads the script, which is the right test for a message that
+    HAS script to read. A follow-up often does not: "2024", "Q2 2025", "top 3",
+    "GDP" carry no Arabic characters and no meaningful English either, and the
+    detector answered "en" for all of them — so an Arabic conversation switched
+    to English the moment someone typed a year into it.
+
+    Arabic script is always a signal. Otherwise it takes two or more ordinary
+    words: one word can be an indicator name or an abbreviation that is written
+    identically whichever language the reader is working in.
+    """
+    if not text:
+        return False
+    if _ARABIC_CHARS.search(text):
+        return True
+    words = [w for w in re.findall(r"[A-Za-z]{2,}", text)
+             if w.lower() not in _LANGUAGE_NEUTRAL]
+    return len(words) >= 2
+
+
 def answers_in_language(text: str, language: str) -> bool:
     """Is this reply actually written in the language that was asked for?
 
@@ -159,6 +187,13 @@ _MESSAGES = {
                 "• مقارنة — \"قارن التضخم بين قطر وسنغافورة\"\n"
                 "• تعريف — \"ما معنى الناتج المحلي غير الهيدروكربوني؟\"\n"
                 "• ما الذي أغطيه — \"ماذا يمكنك أن تفعل؟\""),
+    },
+    # The same courtesy mid-conversation, without the introduction. Replying to
+    # "thanks" on turn nine with the full five-line menu of what the assistant
+    # covers reads as though the previous eight turns did not happen.
+    "greeting_again": {
+        "en": "You're welcome — ask me anything else about the published indicators.",
+        "ar": "على الرحب والسعة — اسألني عن أي شيء آخر بخصوص المؤشرات المنشورة.",
     },
     "out_of_scope": {
         "en": ("That's outside what I can help with — I only cover Qatar's published SCAI "

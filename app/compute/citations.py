@@ -27,6 +27,29 @@ TABLE_LABELS = {
     "indicator_analysis": "SCAI Analyst Commentary",
 }
 
+# The same labels in Arabic. The footer is appended to EVERY answer, so while it
+# was English-only an Arabic answer ended in a block of English — the same defect
+# answers_in_language() exists to catch in the prose, arriving through the one
+# path that never passes through the model. Indicator and country names stay
+# verbatim in either language, exactly as composer rule 4 requires of the prose.
+TABLE_LABELS_AR = {
+    "published_data_points": "بيانات المجلس المعتمدة/المنشورة",
+    "indicator_values": "بيانات المجلس قيد العمل (غير منشورة بعد)",
+    "indicators": "كتالوج مؤشرات المجلس",
+    "sectors": "متابعة قطاعات المجلس",
+    "general_entities": "متابعة جهات المجلس",
+    "champions": "سجل الجهات الراعية بالمجلس",
+    "articles": "مقالات المجلس المنشورة",
+    "indicator_analysis": "تحليل محللي المجلس",
+}
+
+_FOOTER_STRINGS = {
+    "en": {"sources": "Sources:", "original": "original source", "to": "to",
+            "points": "data points"},
+    "ar": {"sources": "المصادر:", "original": "المصدر الأصلي", "to": "إلى",
+            "points": "نقطة بيانات"},
+}
+
 
 @dataclass
 class Citation:
@@ -62,9 +85,13 @@ def _group_key(c: Citation):
     return (c.indicator, c.data_source, c.table, c.country)
 
 
-def format_citation_group(indicator, data_source, table, country, periods: list[str], record_ids: list[str]) -> str:
-    table_label = TABLE_LABELS.get(table, table)
-    source_part = f" — original source: {data_source}" if data_source else ""
+def format_citation_group(indicator, data_source, table, country, periods: list[str],
+                           record_ids: list[str], language: str = "en") -> str:
+    arabic = str(language).lower().startswith("ar")
+    words = _FOOTER_STRINGS["ar" if arabic else "en"]
+    table_label = (TABLE_LABELS_AR if arabic else TABLE_LABELS).get(table) \
+        or TABLE_LABELS.get(table, table)
+    source_part = f" — {words['original']}: {data_source}" if data_source else ""
     country_part = f" ({country})" if country and country != "Qatar" else ""
     periods_sorted = periods  # already in retrieval order (chronological)
     if len(periods_sorted) == 1:
@@ -72,13 +99,21 @@ def format_citation_group(indicator, data_source, table, country, periods: list[
     elif len(periods_sorted) <= 3:
         period_part = ", ".join(periods_sorted)
     else:
-        period_part = f"{periods_sorted[0]} to {periods_sorted[-1]} ({len(periods_sorted)} data points)"
+        period_part = (f"{periods_sorted[0]} {words['to']} {periods_sorted[-1]} "
+                       f"({len(periods_sorted)} {words['points']})")
     return f"{indicator}{country_part} — {table_label}{source_part} — {period_part}"
 
 
-def render_sources_footer(citations: list[Citation]) -> str:
+def render_sources_footer(citations: list[Citation], language: str = "en") -> str:
     """Deduplicates and groups citations into a short, readable footer.
-    Always deterministic — never touched by the LLM."""
+    Always deterministic — never touched by the LLM.
+
+    The heading is italicised and the lines are markdown list items, because the
+    answer above is now markdown by contract (composer rules 22-28) and a plain
+    "Sources:" under a formatted answer reads as though the response ran out
+    rather than finished. Record ids stay out of the prose — a policymaker has no
+    use for a UUID — and remain available in full through citations_to_dicts().
+    """
     if not citations:
         return ""
 
@@ -92,11 +127,13 @@ def render_sources_footer(citations: list[Citation]) -> str:
         if c.record_id:
             groups[key]["record_ids"].append(c.record_id)
 
+    words = _FOOTER_STRINGS["ar" if str(language).lower().startswith("ar") else "en"]
     lines = []
     for (indicator, data_source, table, country), data in groups.items():
-        lines.append("• " + format_citation_group(indicator, data_source, table, country,
-                                                    data["periods"], data["record_ids"]))
-    return "Sources:\n" + "\n".join(lines)
+        lines.append("- " + format_citation_group(indicator, data_source, table, country,
+                                                    data["periods"], data["record_ids"],
+                                                    language))
+    return f"*{words['sources']}*\n" + "\n".join(lines)
 
 
 def citations_to_dicts(citations: list[Citation]) -> list[dict]:

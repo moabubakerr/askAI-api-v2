@@ -20,11 +20,12 @@ returns an updated one.
 """
 import re
 from datetime import date
-from typing import TypedDict, Optional
+from typing import TypedDict, Optional, Callable
 
 from app.nlu.intent_agent import extract_intent
-from app.core.conversation import carry_forward
-from app.core.messages import msg, detect_language, answers_in_language
+from app.core.conversation import carry_forward, remember, forget_stale, turn_index
+from app.core.messages import (msg, detect_language, answers_in_language,
+                                carries_language_signal)
 from app.resolvers.indicator_resolver import (resolve_indicator, has_usable_definition,
                                                ResolutionResult,
                                                resembles_catalogue_name, has_identifying_content)
@@ -84,6 +85,35 @@ ARTICLE_SECOND_MARGIN = 0.04
 # several chunks of a thematically-adjacent one — which is exactly how "the
 # trade war" lost to five passages about Strait of Hormuz tolls.
 ARTICLE_SEARCH_POOL = 30
+
+
+def _stage(session_state: dict, name: str, **detail) -> None:
+    """Announces which part of the pipeline is running, if anyone is listening.
+
+    /chat is one blocking POST and the wait is real: an indicator resolution, a
+    retrieval and a composition, in series. Nothing came back until all three
+    were done, so a slow question was indistinguishable from a hung one.
+
+    Stages, not tokens. The composed draft cannot be streamed as it is written
+    because verify_numbers checks it against the payload AFTER it is complete,
+    and an answer that fails is replaced by a template — streaming it would show
+    the reader figures that are then retracted, which is worse than waiting.
+    What can be streamed honestly is where the work has got to.
+
+    The callback is stashed on session_state to avoid threading a parameter
+    through the whole call graph, and popped in _finish for the same reason
+    _history is: it is not state, and it is not serialisable.
+    """
+    callback = (session_state or {}).get("_progress")
+    if not callback:
+        return
+    try:
+        callback(name, detail)
+    except Exception:
+        # A listener that has gone away — a closed connection, most often — must
+        # not take the answer down with it. The work is worth finishing either
+        # way: it is still logged, and still recorded in the conversation.
+        pass
 
 
 class SessionState(TypedDict, total=False):
@@ -259,8 +289,33 @@ def _asks_for_length(intent: dict) -> Optional[str]:
 
 
 def handle_message(user_message: str, conversation_context: str = "",
-                    session_state: Optional[SessionState] = None) -> dict:
+                    session_state: Optional[SessionState] = None,
+                    history: Optional[list] = None,
+                    progress: Optional[Callable[[str, dict], None]] = None) -> dict:
     session_state = dict(session_state or {})
+    # dict() is shallow, so the stamps would be the SAME object the store holds,
+    # and forget_stale below would age slots out of the stored session before
+    # this turn had succeeded. A request that then failed would have silently
+    # forgotten things on the user's behalf.
+    if session_state.get("_slot_turns"):
+        session_state["_slot_turns"] = dict(session_state["_slot_turns"])
+    if progress:
+        session_state["_progress"] = progress
+    _stage(session_state, "understanding")
+    # Which turn of the conversation this is. Everything that ages — a slot a
+    # follow-up may inherit, a length preference — is measured against it, so it
+    # has to be bumped before anything reads the state.
+    session_state["turn_index"] = turn_index(session_state) + 1
+    # Then drop what has aged out, once, here. Several stages below read
+    # last_indicator_name and last_catalog_scope directly rather than through
+    # carry_forward; expiring at the point of use would have to be repeated at
+    # each of them and would be missed at the next one added.
+    forget_stale(session_state)
+    # Parked on the state so _finish can reach it without a parameter threaded
+    # through twenty-five call sites. Popped there before the state is returned,
+    # so it is never persisted — see the note at the end of _finish.
+    if history:
+        session_state["_history"] = history
     intent = extract_intent(user_message, conversation_context)
     # A follow-up states only what changed. Inherit the rest from the previous
     # turn before anything is resolved, so "and for Saudi Arabia?" keeps the
@@ -272,28 +327,40 @@ def handle_message(user_message: str, conversation_context: str = "",
     performance_followup = False
 
     ctype, scope_pinned = decide_route(user_message, intent, session_state)
+    _stage(session_state, "routed", computation=ctype)
     # Arabic script is unambiguous; the model's language field is a guess. An
     # Arabic greeting was being answered in English, which is the product simply
     # not working in one of its two languages.
+    #
+    # The conversation's own language is the last fallback, below the script and
+    # below the model. A follow-up often carries no script to read — "2024",
+    # "top 3", "GDP" — and detection then fell through to English regardless of
+    # what the eight turns above it were in. A thread does not change language
+    # because one message in it was a number.
     language = detect_language(user_message, intent.get("language"))
+    if session_state.get("last_language") and not carries_language_signal(user_message):
+        language = session_state["last_language"]
+    session_state["last_language"] = language
 
     # Remember what this turn was about, whatever happens below, so the next
     # follow-up has something to refer back to even if this one fails to
     # resolve an indicator.
+    # remember(), not a plain assignment: it stamps the turn that wrote the slot,
+    # which is what lets forget_stale drop it once the conversation has moved on.
     if intent.get("period_expression"):
-        session_state["last_period_expression"] = intent["period_expression"]
+        remember(session_state, "last_period_expression", intent["period_expression"])
     if intent.get("explicit_frequency"):
-        session_state["last_explicit_frequency"] = intent["explicit_frequency"]
+        remember(session_state, "last_explicit_frequency", intent["explicit_frequency"])
     # Which end of a ranking was asked for, so "what about in 2022" keeps it.
     # Without this the follow-up relied on the default happening to match.
     if intent.get("extremum"):
-        session_state["last_extremum"] = intent["extremum"]
+        remember(session_state, "last_extremum", intent["extremum"])
     elif intent.get("is_followup") and session_state.get("last_extremum"):
         intent["extremum"] = session_state["last_extremum"]
     if intent.get("countries_mentioned"):
-        session_state["last_countries"] = list(intent["countries_mentioned"])
+        remember(session_state, "last_countries", list(intent["countries_mentioned"]))
     if intent.get("country_group_mentioned"):
-        session_state["last_country_group"] = intent["country_group_mentioned"]
+        remember(session_state, "last_country_group", intent["country_group_mentioned"])
 
     # How long the answer should be, as the router read it. Without this the
     # request reached the Composer as four words of question text competing
@@ -307,17 +374,31 @@ def handle_message(user_message: str, conversation_context: str = "",
     # across follow-ups — "in short" then "and for 2024?" stays short, which is
     # what asking for it once means — and is dropped on a fresh question, since
     # a new subject is not covered by a preference expressed about the last one.
+    #
+    # It also expires. Clearing it only on a fresh question left one hole: the
+    # router marks long runs of a conversation as follow-ups, so a single "in
+    # short" eight turns ago could still be shortening answers to questions that
+    # have nothing to do with the one it was said about. remember() stamps it and
+    # forget_stale above drops it after STALE_AFTER_TURNS, which is the same
+    # window a subject slot gets and for the same reason — a preference stated
+    # about one question does not outlive the reader's memory of stating it.
     length = _asks_for_length(intent)
     if length:
-        session_state["answer_length"] = length
+        remember(session_state, "answer_length", length)
     elif not intent.get("is_followup"):
         session_state.pop("answer_length", None)
 
     # --- non-data intents ---
     if ctype == "general_chat":
         payload = {"ok": True, "facts": {"note": "Greeting — no data needed."}}
+        # The full greeting introduces the assistant and lists five things it can
+        # be asked. That is the right answer to "hello" on turn one and the wrong
+        # one on turn nine: someone who has been asking about inflation for eight
+        # turns and types "thanks" does not need to be told what the product is,
+        # and being told anyway is the clearest sign that nothing was remembered.
+        opener = "greeting" if turn_index(session_state) <= 1 else "greeting_again"
         return _finish(payload, language, session_state, [], skip_compose=True,
-                        canned=msg("greeting", language),
+                        canned=msg(opener, language),
                         question=user_message)
 
     if ctype == "capabilities":
@@ -659,8 +740,8 @@ def handle_message(user_message: str, conversation_context: str = "",
                 # "what about in 2024" after a three-metric answer had no
                 # subject to inherit and was refused for naming no indicator —
                 # after the system had just listed three.
-                session_state["last_metrics"] = [e["indicator"]
-                                                  for e in payload["facts"]["overview"]]
+                remember(session_state, "last_metrics",
+                          [e["indicator"] for e in payload["facts"]["overview"]])
                 session_state.pop("last_indicator_name", None)
                 return _finish(payload, language, session_state, citations,
                         question=user_message)
@@ -707,8 +788,12 @@ def handle_message(user_message: str, conversation_context: str = "",
                         question=user_message)
 
     match = resolution.match
-    session_state["last_indicator_detail_id"] = match.indicator_detail_id
-    session_state["last_indicator_name"] = match.name_en
+    # The slowest step the reader can be told anything useful about: it names the
+    # indicator the rest of the answer will be about, so a wrong match is visible
+    # before the retrieval and the composition have been paid for.
+    _stage(session_state, "resolved", indicator=match.name_en)
+    remember(session_state, "last_indicator_detail_id", match.indicator_detail_id)
+    remember(session_state, "last_indicator_name", match.name_en)
     session_state.pop("last_metrics", None)
 
     # Definitional questions ("what is inflation?", F-030's "what does
@@ -790,8 +875,8 @@ def handle_message(user_message: str, conversation_context: str = "",
             if (retry.status == "resolved" and phrase_key
                     and phrase_key in retry.match.name_en.strip().lower()):
                 match = retry.match
-                session_state["last_indicator_detail_id"] = match.indicator_detail_id
-                session_state["last_indicator_name"] = match.name_en
+                remember(session_state, "last_indicator_detail_id", match.indicator_detail_id)
+                remember(session_state, "last_indicator_name", match.name_en)
 
         definition = match.definition_ar if language == "ar" and match.definition_ar else match.definition_en
         definition = strip_html(definition or "").strip()
@@ -876,6 +961,13 @@ def handle_message(user_message: str, conversation_context: str = "",
         ctype = "complement_share"
 
     countries_res = resolve_countries(intent.get("countries_mentioned", []), intent.get("country_group_mentioned"))
+
+    # The database reads and the computation. Fast next to the two model calls
+    # either side of it, but without this the listener went straight from
+    # "resolved" to "composing" and sat there for the whole of the slowest step —
+    # a progress display that is silent through the longest stretch tells the
+    # reader less than one that admits what it is doing.
+    _stage(session_state, "retrieving", indicator=match.name_en)
 
     payload, citations = _dispatch_computation(ctype, intent, match, published_detail_id, granularity,
                                                 period, countries_res, language,
@@ -2417,8 +2509,15 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
     if skip_compose:
         answer = canned or ""
     else:
+        _stage(session_state, "composing")
         draft = compose_answer(payload, language, question=question,
                                 length=session_state.get("answer_length"),
+                                # The last few exchanges, not just the previous
+                                # one. See _render_history in composer_agent —
+                                # a reference can reach two turns back, and a
+                                # Composer shown only one restates what the
+                                # reader has already had twice.
+                                history=session_state.get("_history"),
                                 # The exchange before this one, so a follow-up
                                 # does not re-state what the reader has just
                                 # read. Asked to shorten an answer about the
@@ -2431,6 +2530,7 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
                                 # only the immediately preceding turn is what
                                 # "that" and "shorter" refer to.
                                 previous_turn=session_state.get("last_exchange"))
+        _stage(session_state, "verifying")
         clean, offending = verify_numbers(draft, payload)
         # An answer in the wrong language is not an answer. The model is asked
         # for Arabic and mostly complies, but "mostly" is not a guarantee and
@@ -2474,15 +2574,59 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
     session_state["last_exchange"] = {"user": (question or "")[:300],
                                        "assistant": (answer or "")[:600]}
 
-    footer = render_sources_footer(citations)
+    # Language, so the footer does not end an Arabic answer in English — the
+    # one path to the reader that never passes through the Composer, and so the
+    # one the language check could not catch.
+    footer = render_sources_footer(citations, language)
     if footer:
         answer = f"{answer}\n\n{footer}"
 
     payload["citations"] = citations_to_dicts(citations)
+
+    # The transcript's own working memory, which handle_message put here to
+    # avoid threading a parameter through twenty-five call sites. It is not part
+    # of the session's state and must not be persisted into it: stored, it would
+    # be fed back as history of a history on every later turn.
+    session_state.pop("_history", None)
+    # Same reasoning, and more pressing: a callback is not serialisable, and this
+    # dict is copied into the session store and read back on every later turn.
+    session_state.pop("_progress", None)
 
     return {
         "answer": answer,
         "facts_payload": payload,
         "readable": is_readable(payload),
         "session_state": session_state,
+        # What this turn RESOLVED to, for the transcript the next turn is shown.
+        # Prose alone made the router re-derive from an English sentence what the
+        # pipeline had already established — see ConversationStore._render_slots.
+        "turn_slots": _turn_slots(payload, session_state),
+        "language": language,
     }
+
+
+# Which facts key names the subject, in the order they should be preferred.
+def _turn_slots(payload: dict, session_state: dict) -> dict:
+    """The resolved subject of this turn, as a small flat dict.
+
+    Read from the PAYLOAD first and the session state second. The state holds
+    what the question asked for; the payload holds what was actually answered,
+    and where they differ the answer is the thing a follow-up refers back to —
+    "what about the year before that" means the year before the one on screen,
+    not the year before the one that was requested and had no reading.
+    """
+    facts = payload.get("facts") or {}
+    period = next((facts.get(k) for k in
+                   ("period_label", "period_b", "period_end", "last_period", "period_used")
+                   if facts.get(k)), None)
+    indicator = (facts.get("indicator") or session_state.get("last_indicator_name")
+                 or (", ".join(session_state["last_metrics"])
+                     if session_state.get("last_metrics") else None))
+    scope = session_state.get("last_catalog_scope") or {}
+    return {k: v for k, v in {
+        "indicator": indicator,
+        "period": period,
+        "countries": session_state.get("last_countries"),
+        "group": scope.get("scope") or session_state.get("last_country_group"),
+        "computation": session_state.get("last_ctype"),
+    }.items() if v}

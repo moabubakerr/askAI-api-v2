@@ -7,10 +7,14 @@ nothing else; they are not required to replay the transcript on every request.
 Single-process and in-memory — see that module before running more than one
 replica.
 """
+import json
+import queue
+import threading
 import time
 import uuid
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -105,48 +109,158 @@ def read_endpoint(req: ChatRequest):
         user_message=req.message,
         conversation_context=_context_for(req),
         session_state=conversations.get_state(req.session_id),
+        history=conversations.recent_turns(req.session_id),
     )
 
     message_id = str(uuid.uuid4())
     answer_text = result.get("narration") or result.get("message") or ""
     conversations.record(req.session_id, req.message, answer_text,
-                          result["session_state"], message_id=message_id)
+                          result["session_state"], message_id=message_id,
+                          slots=result.get("turn_slots"),
+                          language=result.get("language"))
     message_log.log(message_id=message_id, session_id=req.session_id, endpoint="read",
                      question=req.message, answer=answer_text,
                      payload=result.get("facts_payload") or {},
                      language=_language_of(req.message),
                      readable=result.get("readable"),
                      latency_ms=int((time.perf_counter() - started) * 1000))
-    return ReadResponse(**{k: v for k, v in result.items() if k != "session_state"})
+    # turn_slots and language are for the conversation store, not the caller —
+    # excluded explicitly rather than relying on the model to drop unknown keys.
+    internal = {"session_state", "turn_slots", "language"}
+    return ReadResponse(**{k: v for k, v in result.items() if k not in internal})
 
 
-@app.post("/chat", response_model=ChatResponse)
-def chat_endpoint(req: ChatRequest):
+def _run_chat(req: ChatRequest, progress=None, endpoint: str = "chat") -> tuple[dict, str, int]:
+    """One chat turn, including the logging and the conversation record.
+
+    Shared by both shapes of /chat so they cannot drift: a streamed answer must
+    be the same answer, recorded the same way, with the same message_id. The
+    only difference is when the caller hears about it.
+
+    `endpoint` is what gets logged. It was hardcoded to "chat" for both, which
+    meant that once a frontend moved to streaming there was no way to see the
+    change — adoption, latency and failure rate for the two would sit in one
+    undifferentiated bucket in /admin/stats.
+    """
     started = time.perf_counter()
     result = handle_message(
         user_message=req.message,
         conversation_context=_context_for(req),
         session_state=conversations.get_state(req.session_id),
+        history=conversations.recent_turns(req.session_id),
+        progress=progress,
     )
-
     message_id = str(uuid.uuid4())
     conversations.record(req.session_id, req.message, result["answer"],
-                          result["session_state"], message_id=message_id)
-
-    payload = result["facts_payload"]
-    message_log.log(message_id=message_id, session_id=req.session_id, endpoint="chat",
-                     question=req.message, answer=result["answer"], payload=payload,
+                          result["session_state"], message_id=message_id,
+                          slots=result.get("turn_slots"),
+                          language=result.get("language"))
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    message_log.log(message_id=message_id, session_id=req.session_id, endpoint=endpoint,
+                     question=req.message, answer=result["answer"],
+                     payload=result["facts_payload"],
                      language=_language_of(req.message),
                      readable=result.get("readable", False),
-                     latency_ms=int((time.perf_counter() - started) * 1000))
-    return ChatResponse(
-        answer=result["answer"],
-        message_id=message_id,
-        facts_payload=payload,
-        chart=payload.get("chart"),
-        verified="_verifier_rejected_numbers" not in payload,
-        readable=result.get("readable", False),
-    )
+                     latency_ms=latency_ms)
+    return result, message_id, latency_ms
+
+
+def _chat_body(result: dict, message_id: str) -> dict:
+    """The response body, built once so the streamed and plain forms are equal.
+
+    Two code paths assembling the same six fields is how they end up disagreeing
+    about a seventh.
+    """
+    payload = result["facts_payload"]
+    return {
+        "answer": result["answer"],
+        "message_id": message_id,
+        "facts_payload": payload,
+        "chart": payload.get("chart"),
+        "verified": "_verifier_rejected_numbers" not in payload,
+        "readable": result.get("readable", False),
+    }
+
+
+def _wants_stream(request: Request) -> bool:
+    """Whether this caller asked for progress events rather than a JSON body.
+
+    Content negotiation rather than a second URL. The two used to be separate
+    endpoints, which gave every caller a choice it mostly should not have to
+    make and gave the frontend two integrations to keep in step. What actually
+    differs between them is the media type the caller can handle, which is what
+    Accept is for.
+    """
+    return "text/event-stream" in (request.headers.get("accept") or "").lower()
+
+
+@app.post("/chat", response_model=None)
+def chat_endpoint(req: ChatRequest, request: Request):
+    """One turn of the conversation, in whichever form the caller can read.
+
+    Send `Accept: text/event-stream` and the reply is Server-Sent Events: a
+    `stage` event for each step of the pipeline as it starts, then one `answer`
+    event carrying the same body the JSON form returns. Send anything else — or
+    nothing — and it is that JSON body, with an ordinary HTTP status code.
+
+    The distinction matters for callers that are not people. A stream commits to
+    200 before the work begins, so a failure can only arrive as an `error`
+    event; a monitor or a test harness watching status codes would read an
+    outage as success. Those callers send no Accept header and keep their status
+    codes. A browser with a person waiting sends one and gets the progress.
+
+    STAGES, not tokens, and that is not a limitation waiting to be lifted. The
+    composed text is verified against the facts payload only once it is
+    complete, and a draft quoting a number the payload does not contain is
+    discarded in favour of a template. Streaming the draft as it was written
+    would put figures on screen that the verifier then withdraws — and a
+    retracted number is worse than a slow one in a product whose whole design is
+    that it never states a figure it cannot source.
+    """
+    if not _wants_stream(request):
+        result, message_id, _ = _run_chat(req)
+        return ChatResponse(**_chat_body(result, message_id))
+
+    events: "queue.Queue[Optional[dict]]" = queue.Queue()
+    outcome: dict = {}
+
+    def emit(name: str, detail: dict) -> None:
+        events.put({"event": "stage", "data": {"stage": name, **(detail or {})}})
+
+    def work() -> None:
+        try:
+            result, message_id, _ = _run_chat(req, progress=emit, endpoint="chat-stream")
+            outcome["data"] = _chat_body(result, message_id)
+        except Exception as exc:  # noqa: BLE001 — reported to the caller, see below
+            # The stream has already returned 200, so an exception here cannot
+            # become an HTTP error code. It is sent as an event instead: a
+            # connection that simply stops tells the frontend nothing it can
+            # distinguish from a network failure.
+            outcome["error"] = str(exc)
+        finally:
+            events.put(None)
+
+    worker = threading.Thread(target=work, daemon=True)
+    worker.start()
+
+    def stream():
+        while True:
+            item = events.get()
+            if item is None:
+                break
+            yield f"event: {item['event']}\ndata: {json.dumps(item['data'], default=str)}\n\n"
+        if "error" in outcome:
+            yield f"event: error\ndata: {json.dumps({'message': outcome['error']})}\n\n"
+        else:
+            yield f"event: answer\ndata: {json.dumps(outcome.get('data', {}), default=str)}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        # nginx buffers proxied responses by default, which holds every event
+        # until the response completes and turns this endpoint back into /chat
+        # with extra steps.
+        "X-Accel-Buffering": "no",
+    })
 
 
 @app.get("/session/{session_id}")

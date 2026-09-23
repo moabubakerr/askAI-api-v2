@@ -189,7 +189,8 @@ def _looks_arabic(text: str) -> bool:
 
 
 def read_message(user_message: str, conversation_context: str = "",
-                  session_state: Optional[dict] = None) -> dict:
+                  session_state: Optional[dict] = None,
+                  history: Optional[list] = None) -> dict:
     """Runs the normal pipeline, then re-presents it as a reading.
 
     Deliberately built on handle_message rather than beside it: the readings,
@@ -197,10 +198,16 @@ def read_message(user_message: str, conversation_context: str = "",
     returns for the same question. A second retrieval path would be a second
     chance to disagree with itself.
     """
-    result = handle_message(user_message, conversation_context, session_state)
+    result = handle_message(user_message, conversation_context, session_state, history)
     payload = result["facts_payload"]
     citations = payload.get("citations", [])
     facts = payload.get("facts", {}) or {}
+    # Carried out of handle_message unchanged, so a turn recorded through /read
+    # leaves the conversation in the same shape one recorded through /chat does.
+    # Without this, pressing "Read this for me" wrote a turn with no resolved
+    # slots and no language, and the follow-up after it had less to work with
+    # than the follow-up after an ordinary answer.
+    turn_meta = {"turn_slots": result.get("turn_slots"), "language": result.get("language")}
 
     if not payload.get("ok"):
         return {
@@ -215,6 +222,7 @@ def read_message(user_message: str, conversation_context: str = "",
             "disclaimer": None,
             "facts_payload": payload,
             "session_state": result["session_state"],
+            **turn_meta,
         }
 
     language = "ar" if _looks_arabic(user_message) else "en"
@@ -267,4 +275,5 @@ def read_message(user_message: str, conversation_context: str = "",
         "facts_payload": payload,
         "chart": payload.get("chart"),
         "session_state": result["session_state"],
+        **turn_meta,
     }

@@ -311,6 +311,32 @@ Check (d) with "What can you do?" first on purpose: it is the one data-backed
 path that does **not** go through the embedding resolver, so it separates
 "models unreachable" from "embedding cold start is still running".
 
+`/chat` answers in two forms, chosen by `Accept`. With no header — curl, scripts,
+monitors — it returns the JSON body above and an ordinary HTTP status code. Ask
+for `text/event-stream` and the same turn arrives as Server-Sent Events: a
+`stage` event per step of the pipeline as it starts, then one `answer` event
+carrying that identical body.
+
+```bash
+curl -sN -X POST localhost:18000/chat \
+  -H 'Content-Type: application/json' -H 'Accept: text/event-stream' \
+  -d '{"message":"What is the latest Real GDP?","session_id":"demo"}'
+```
+
+Stages, in order: `understanding`, `routed`, `resolved`, `retrieving`,
+`composing`, `verifying`. Not all of them fire for every question — a greeting
+or a refusal skips most — so treat them as labels, not as a fixed progress bar.
+
+The answer TEXT is not streamed token by token and will not be: figures are
+verified against the facts payload only once the draft is complete, and a draft
+that fails is replaced wholesale by a template. Streaming it would show numbers
+that are then withdrawn. The stages say where the work has got to; the text still
+arrives at once.
+
+Note that a stream returns `200` before the work starts, so failures arrive as an
+`error` event rather than as a status code. That is why the JSON form exists and
+why anything automated should keep using it.
+
 ### Troubleshooting
 
 | Symptom | Cause |

@@ -363,6 +363,17 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
         # has two. Padding only; the digits themselves are untouched.
         return f"{trim_zeros(value)} {unit}".strip() if value is not None else "—"
 
+    def headline(value):
+        """fmt() for the ONE figure the question asked for.
+
+        Composer rule 23 bolds that figure, and this renderer stands in for the
+        Composer whenever a draft fails verification. Without the same emphasis
+        the product visibly changes register exactly when it is least sure of
+        itself — the reader cannot see why, only that the answer looks different.
+        Supporting figures keep plain fmt(), as rule 23 requires of them too.
+        """
+        return f"**{fmt(value)}**" if value is not None else fmt(value)
+
     if "complement_share" in facts:
         key = "complement" if facts.get("complement_of") else "remainder_unnamed"
         line = _t(key, language, other=facts.get("complement_of") or "",
@@ -384,7 +395,7 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
         # percentage of an ordinal, which means nothing.
         if facts.get("change_kind") == "places" and facts.get("previous_value") is not None:
             return _t("rank_assessment", language, ind=indicator,
-                       val=fmt(facts.get("actual")), per=facts.get("period_label"),
+                       val=headline(facts.get("actual")), per=facts.get("period_label"),
                        dir=direction, prev=fmt(facts.get("previous_value")),
                        prevper=facts.get("previous_period"),
                        amount=abs(facts.get("change", 0)), kind=_t("places", language),
@@ -392,7 +403,7 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                        basis=_t(f"desired_{facts.get('desired_direction', 'increase')}",
                                  language) if facts.get("desired_direction")
                        else facts.get("assessment_basis", "")).strip()
-        return _t("assessment", language, ind=indicator, val=fmt(facts.get("actual")),
+        return _t("assessment", language, ind=indicator, val=headline(facts.get("actual")),
                    per=facts.get("period_label"), dir=direction,
                    amount=abs(facts.get("change", 0)), kind=kind, verdict=verdict,
                    basis=_t(f"desired_{facts.get('desired_direction', 'increase')}",
@@ -400,14 +411,14 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                    else facts.get("assessment_basis", "")).strip()
     if facts.get("comparison_unavailable"):
         line = _t("one_side_only", language, ind=indicator,
-                   val=fmt(facts.get("actual")), per=facts.get("period_label"),
+                   val=headline(facts.get("actual")), per=facts.get("period_label"),
                    missing=facts.get("missing_period"))
         if facts.get("covers_from"):
             line += _t("series_covers", language, a=facts["covers_from"],
                         b=facts["covers_to"])
         return line
     if "actual" in facts and "period_label" in facts:
-        line = _t("was_in", language, ind=indicator, val=fmt(facts["actual"]),
+        line = _t("was_in", language, ind=indicator, val=headline(facts["actual"]),
                    per=facts["period_label"])
         if facts.get("target") is not None:
             line += _t("target_was", language, val=fmt(facts["target"]))
@@ -432,7 +443,12 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
     if "definition" in facts:
         return facts["definition"]
     if "overview" in facts:
-        lines = []
+        # One bullet per indicator, one trailing sentence per note — composer
+        # rules 24 and 25. These used to be bare newline-separated lines, so a
+        # rejected overview arrived as a wall of text beside composed overviews
+        # that are bulleted, and the difference looked like a different product
+        # rather than a fallback.
+        lines, notes = [], []
         for e in facts["overview"]:
             value = e.get("actual")
             row_unit = e.get("unit") or ""
@@ -473,18 +489,19 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
             if facts.get("periods_differ"):
                 line += _t("periods_differ", language,
                             periods=", ".join(str(p) for p in facts.get("periods_compared") or []))
-            lines.append(line)
+            notes.append(line)
         if facts.get("change_ranking"):
-            lines.append(_t("largest_decline", language) + _t("then", language).join(
+            notes.append(_t("largest_decline", language) + _t("then", language).join(
                 f"{e['indicator']} ({e['change_yoy_percent']}%)"
                 for e in facts["change_ranking"]) + ".")
         for e in facts.get("no_data_in_period") or []:
             covers = (_t("covers", language, a=e["covers_from"], b=e["covers_to"])
                       if e.get("covers_from") else "")
-            lines.append(_t("no_reading_in_period", language, ind=e["indicator"]) + covers)
+            notes.append(_t("no_reading_in_period", language, ind=e["indicator"]) + covers)
         if facts.get("not_found"):
-            lines.append(_t("not_found", language, names=", ".join(facts["not_found"])))
-        return "\n".join(lines)
+            notes.append(_t("not_found", language, names=", ".join(facts["not_found"])))
+        body = "\n".join(f"- {line}" for line in lines)
+        return "\n\n".join(part for part in (body, " ".join(notes)) if part)
     if "count" in facts and "names" in facts:
         scope = facts.get("scope")
         # A sector is a container, a type is a label: "101 published Sector

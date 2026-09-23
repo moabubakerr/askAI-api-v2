@@ -298,6 +298,51 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    the system, and a reader should be able to see it was a subtraction from a
    published number rather than take it on trust. "complement_of" names what
    the remainder IS — say that, not "the rest".
+
+PRESENTATION — the SHAPE of the answer.
+
+Rules 1-21 decide what is true and what gets said. The rules below decide how it
+is laid out. They never change, add or remove a figure, and where one of them
+appears to conflict with a rule above, the rule above wins.
+
+Nothing used to tell you how to lay an answer out, so the same kind of question
+came back as a paragraph one turn and a bulleted list the next. A reader cannot
+learn where to look in an answer whose shape changes every time.
+
+22. OPEN WITH THE ANSWER. The first line carries the figure, the verdict, the
+   count or the name that was asked for, with its unit and its period. No
+   preamble, no restatement of the question, no "Based on the available data",
+   no "Here is what I found". Where the question was yes/no, the first word is
+   Yes or No — subject to rules 1 and 17, which say when it is not a yes/no
+   question at all.
+23. Put the ONE headline figure of that first line in **bold** — the figure the
+   question actually asked for, and nothing else in the whole answer. Bolding
+   every number makes the emphasis meaningless, and bolding a supporting figure
+   points the reader at the wrong one. An answer with no single headline figure
+   — a catalogue listing, a refusal, a definition, a group split — has no bold
+   in it at all.
+24. The structure follows HOW MANY things are reported, not how much there is to
+   say about them:
+   * ONE reading, verdict or definition — one or two sentences of prose, no
+     bullets. A single bulleted item is a sentence wearing a bullet.
+   * TWO to FOUR — a short lead sentence, then one bullet per item.
+   * FIVE or more — a one-line lead giving the count and what they are, then one
+     bullet per item.
+25. A bullet is ONE line: "• <Name>: <value> <unit>, <period>", plus at most one
+   short clause where a rule above requires more of it — a movement, a direction
+   in plain words, why a line could not be assessed. Never a paragraph under a
+   bullet, never a nested bullet, never a bullet running past two lines.
+26. Never write a markdown HEADING (#, ##, ###), and never write a markdown
+   TABLE. Your text sits beside a rendered table and a chart supplied
+   separately: a heading over four lines is furniture, and a table here reprints
+   what the reader already has in a better form.
+27. Do not close with a summary, a restatement or an offer. "In summary",
+   "Overall the data shows", "Let me know if you would like more detail", "I
+   hope this helps" — the answer ends when the last fact has been given. A
+   closing line that carries no fact costs the reader the time to find out it
+   carries no fact.
+28. Do not open consecutive bullets with the same two or three words. Twelve
+   lines each beginning "The indicator" read as a form, not as an answer.
 """
 
 
@@ -332,6 +377,27 @@ def _public(facts_payload: dict) -> dict:
 # twenty rules around it that ask for spans, peaks, troughs and ranges; an
 # instruction that names what to LEAVE OUT is the one that holds.
 _LENGTH_DIRECTIVE = {
+    # What the user gets when they say nothing about length, which is almost
+    # every turn. There was no entry here before, so "no length requested" meant
+    # no length instruction at all, and the answer's size was decided by whatever
+    # the twenty-eight rules above happened to pull toward — and they pull long:
+    # spans, peaks, troughs, ranges, counts and both halves of a split are each
+    # required by some rule, and nothing capped the total. "Be concise" as rule 9
+    # is one line against all of that.
+    #
+    # This is the default, not a restriction: any rule above that requires a
+    # specific thing still requires it. What it removes is the material no rule
+    # asked for.
+    "normal": (
+        "LENGTH: the user did not ask for a particular length, so give the "
+        "DEFAULT shape — the answer in the first line, then at most three lines "
+        "of support. Include a span, a peak, a trough, a count of data points, a "
+        "comparison with another period or a note about coverage ONLY where the "
+        "question asked for it or a numbered rule above requires it. Everything "
+        "else the payload happens to contain is left out: the payload is what was "
+        "retrieved, not a list of things to report. Where a rule above does "
+        "require more, that rule wins and the answer is as long as it needs to be."
+    ),
     "brief": (
         "LENGTH: the user asked for a SHORT answer, and that instruction outranks "
         "every rule above that asks for supporting detail. Write ONE sentence — two "
@@ -352,10 +418,50 @@ _LENGTH_DIRECTIVE = {
 }
 
 
+def _render_history(history: Optional[list]) -> str:
+    """The recent exchanges, for knowing what has already been SAID.
+
+    Was one turn (`previous_turn`), which covered "say that again shorter" and
+    nothing else. Three turns covers what a reader actually means by "that": in
+    a chain like inflation → "and 2024?" → "which was higher?", the antecedent
+    of the third question is two turns back, and a Composer shown only the
+    second one restates figures the reader has had twice.
+
+    Emphatically NOT a source of numbers. These lines are text this Composer
+    wrote earlier, already checked against a payload that is gone; a figure that
+    appears only here has nothing behind it now. The numeric verifier enforces
+    that independently — it checks the draft against the CURRENT payload — so a
+    figure lifted from here is rejected and the answer falls back to a template.
+    """
+    if not history:
+        return ""
+    lines = []
+    for turn in history:
+        if not (turn or {}).get("assistant"):
+            continue
+        lines.append(f"  User: {turn.get('user')}\n  You: {turn.get('assistant')}")
+    if not lines:
+        return ""
+    return (
+        "Earlier in this conversation, oldest first. This is for knowing what has\n"
+        "already been said and what words like \"that\", \"those\" and \"shorter\" refer\n"
+        "back to. It is NOT a source of numbers: every figure in your answer comes\n"
+        "from the facts payload below, and one that appears only here may not be\n"
+        "restated. Do not repeat figures the current question does not ask for.\n"
+        + "\n".join(lines) + "\n\n"
+    )
+
+
 def compose_answer(facts_payload: dict, language: str = "en", question: str = "",
                     length: Optional[str] = None,
-                    previous_turn: Optional[dict] = None) -> str:
+                    previous_turn: Optional[dict] = None,
+                    history: Optional[list] = None) -> str:
     facts_payload = _public(facts_payload)
+    # `history` is the several-turn form; `previous_turn` is the single-turn one
+    # it replaced, kept because it is a public argument of this function and a
+    # caller outside this repo may still pass it.
+    if not history and previous_turn:
+        history = [previous_turn]
     user_prompt = (
         f"Language: {language}\n\n"
         # The Composer used to see only the facts, never the question, so it
@@ -364,14 +470,10 @@ def compose_answer(facts_payload: dict, language: str = "en", question: str = ""
         # question guides phrasing only — every number still comes from the
         # payload, and the verifier still checks that.
         + (f"The user asked: {question}\n\n" if question else "")
-        # The turn before this one. Only for knowing what has already been SAID
-        # — it is not a source of numbers, and a figure that appears only here
-        # is not in the payload and may not be restated as if it were.
-        + (f"Your previous answer in this conversation, for context only — do not\n"
-            f"repeat figures from it that the current question does not ask for:\n"
-            f"  User: {previous_turn.get('user')}\n"
-            f"  You: {previous_turn.get('assistant')}\n\n"
-            if previous_turn and previous_turn.get("assistant") else "")
+        # The exchanges before this one. Only for knowing what has already been
+        # SAID — not a source of numbers, and a figure that appears only here is
+        # not in the payload and may not be restated as if it were.
+        + _render_history(history)
         + f"Facts payload (the ONLY source of numbers you may use):\n"
         # ensure_ascii=False is load-bearing here, not cosmetic. With the
         # default, Arabic in the payload is serialised as backslash-u escapes,
@@ -385,7 +487,10 @@ def compose_answer(facts_payload: dict, language: str = "en", question: str = ""
         # Last, beside the language reminder and for the same reason: an
         # instruction buried above a long JSON payload is the one that gets
         # lost, and this is the instruction the reader will notice was ignored.
-        + (f"\n\n{_LENGTH_DIRECTIVE[length]}" if length in _LENGTH_DIRECTIVE else "")
+        # "normal" when they asked for nothing, rather than no directive at all:
+        # an unstated length is still a length, and leaving it unstated here let
+        # the rules above decide it.
+        + f"\n\n{_LENGTH_DIRECTIVE.get(length or 'normal', _LENGTH_DIRECTIVE['normal'])}"
         + ("\n\nWrite your entire answer in Arabic."
             if str(language).lower().startswith("ar")
             else "\n\nWrite your entire answer in English.")
