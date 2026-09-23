@@ -109,6 +109,20 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    "change_places" is a move in rank positions. If the field you were given is
    not change_percent, the answer contains no percentage change — do not
    supply one, and do not convert.
+   "direction_changed": true means the series REVERSED inside the period — its
+   highest or lowest reading falls between the two ends, at "turning_period" /
+   "turning_value". The net move between the endpoints is then NOT the story,
+   and describing it as one is wrong however right the subtraction is.
+   Inflation at 4.52% in April 2023 and 2.62% in April 2026, having passed
+   through -1.15% in January 2025, did not "decrease over the last 3 years" —
+   it fell, then rose. Say that, and name the turn: "down from 4.52% in April
+   2023 to -1.15% in January 2025, then back up to 2.62% in April 2026".
+   If the question asked whether something rose or fell, the answer is that it
+   did both, in that order — never one of them.
+   Do NOT state "n_points" — how many readings were retrieved is a fact about
+   the query, not about the economy, and "the series includes 37 monthly
+   readings" tells a policymaker nothing. Give it only if asked how much data
+   there is.
    Never list the series point by point: it is shown as a table and a chart
    next to your text.
 12a. "single_reading": true means the window asked about contains exactly ONE

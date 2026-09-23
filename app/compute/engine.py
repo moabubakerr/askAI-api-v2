@@ -280,6 +280,27 @@ def trend(rows: list[dict], unit: Optional[str] = None) -> ComputeResult:
             "highest_period": high["period_label"], "highest_value": high["actual"],
             "lowest_period": low["period_label"], "lowest_value": low["actual"],
         })
+        # Whether the series actually WENT one way, or only ended up there.
+        #
+        # Everything above compares the two endpoints, and over a span that is
+        # frequently the wrong story. Inflation ran 4.52% in April 2023, down to
+        # -1.15% in January 2025, back up to 2.62% in April 2026 — and the answer
+        # was "Inflation decreased over the last 3 years", because 2.62 is less
+        # than 4.52. True of the endpoints, false of the three years, and the
+        # question asked about the three years.
+        #
+        # An extreme strictly BETWEEN the endpoints means the direction reversed
+        # at least once, so net movement cannot be reported as a trend. The
+        # turning point is named, because "it fell then rose" is not usable
+        # without saying where.
+        interior = [r for r in (low, high) if r is not valued[0] and r is not valued[-1]]
+        if interior:
+            turn = min(interior, key=lambda r: abs(r["actual"] - first["actual"]))
+            facts.update({
+                "direction_changed": True,
+                "turning_period": turn["period_label"],
+                "turning_value": turn["actual"],
+            })
         # The move from the first reading to the last. Always as a difference;
         # as a PERCENTAGE only where dividing by the first reading means
         # anything.
