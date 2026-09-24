@@ -2953,6 +2953,22 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
     # Language, so the footer does not end an Arabic answer in English — the
     # one path to the reader that never passes through the Composer, and so the
     # one the language check could not catch.
+    # The answer WITHOUT the sources block, for the conversation store.
+    #
+    # last_exchange has always been stored pre-footer, for the reason written
+    # above it. recent_turns then reintroduced the problem through a different
+    # door: it serves what the store holds, the store held the full answer, and
+    # the Composer was handed its own previous footer as an example of how an
+    # answer looks. It copied it — an Arabic answer opened "المصدر:" and
+    # reproduced the whole block, beside the real one, in breach of rule 10.
+    #
+    # Nothing is lost by storing the body alone. The footer is rendered
+    # deterministically from the citations every turn, so it is never something a
+    # later turn needs to recall, and as history it is pure noise: the same
+    # boilerplate on every line, spending prompt budget to teach the model a
+    # habit the prompt forbids.
+    answer_body = answer
+
     footer = render_sources_footer(citations, language)
     if footer:
         answer = f"{answer}\n\n{footer}"
@@ -2970,6 +2986,9 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
 
     return {
         "answer": answer,
+        # What the conversation store should keep. The caller returns "answer"
+        # to the user and records this — see the note beside answer_body.
+        "answer_for_history": answer_body,
         "facts_payload": payload,
         "readable": is_readable(payload),
         "session_state": session_state,

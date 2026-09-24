@@ -151,7 +151,13 @@ def _run_chat(req: ChatRequest, progress=None, endpoint: str = "chat") -> tuple[
         progress=progress,
     )
     message_id = str(uuid.uuid4())
-    conversations.record(req.session_id, req.message, result["answer"],
+    # The answer WITHOUT its sources footer. The store feeds both the router's
+    # transcript and the Composer's history, and neither needs the block — it is
+    # rendered deterministically every turn, and shown to the Composer as an
+    # example of a previous answer it copied, writing its own footer beside the
+    # real one.
+    conversations.record(req.session_id, req.message,
+                          result.get("answer_for_history") or result["answer"],
                           result["session_state"], message_id=message_id,
                           slots=result.get("turn_slots"),
                           language=result.get("language"))

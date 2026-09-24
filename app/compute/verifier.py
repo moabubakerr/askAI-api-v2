@@ -112,9 +112,16 @@ def writes_own_sources(text: str) -> bool:
     so one in the draft means the reader gets two — and the model's is the one
     that can be wrong. Matched at the start of a line so an answer that merely
     mentions a source in passing is left alone.
+
+    Singular as well as plural. The first version of this listed "sources" and
+    "المصادر", and the very next answer to slip through opened "المصدر:" — the
+    singular, one letter shorter. A heading is a heading whether it announces one
+    source or several, and a check that has to enumerate the forms of a word is
+    a check that will keep being one form short.
     """
-    return bool(re.search(r"(?m)^\s*(\*{0,2})(sources|المصادر)\s*:?\s*\1\s*$", text or "",
-                           re.IGNORECASE))
+    return bool(re.search(r"(?m)^\s*(\*{0,2}|#{1,6}\s*)(sources?|references?|"
+                           r"المصادر|المصدر|مصادر|مصدر)\s*:?\s*\**\s*$",
+                           text or "", re.IGNORECASE))
 
 
 def allowed_numbers(facts_payload: dict, rounding_tolerance_decimals: int = 1) -> set[str]:
