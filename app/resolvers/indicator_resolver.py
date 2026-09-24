@@ -209,13 +209,33 @@ def names_nothing_in_catalogue(phrase: str) -> bool:
     return not any(w in vocabulary for w in candidates)
 
 
+def _same_word(a: str, b: str) -> bool:
+    """Whether two words are the same word, allowing for inflection.
+
+    Exact matching made "Qatari" and "qataris" different words, so a question
+    about "economically active Qataris" read the catalogue's "Qatari Nationals
+    (Economically Active)" as dropping a distinction it plainly carries. Two
+    such near-misses in one phrase were enough to refuse a correct match — and
+    did, silently turning a specific refusal that named both indicators into a
+    generic one that named neither.
+
+    A prefix test rather than a stemmer: four characters of agreement separates
+    plural from singular without pulling unrelated words together, and adding a
+    stemming dependency for one suffix would be the larger change.
+    """
+    if a == b:
+        return True
+    shorter, longer = sorted((a, b), key=len)
+    return len(shorter) >= 4 and longer.startswith(shorter)
+
+
 def _dropped_discriminators(phrase: str, matched_name: str) -> list[str]:
     """Words the question used, the catalogue discriminates on, and the match
     does not carry."""
     matched_words = set(re.findall(r"[\w؀-ۿ]{3,}", matched_name.lower()))
     terms = _discriminating_terms()
     return [w for w in re.findall(r"[\w؀-ۿ]{3,}", (phrase or "").lower())
-            if w in terms and w not in matched_words]
+            if w in terms and not any(_same_word(w, m) for m in matched_words)]
 
 
 def _has_contradiction(phrase: str, matched_name: str) -> bool:
