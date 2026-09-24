@@ -51,6 +51,49 @@ def parse_explicit_frequency(explicit_frequency: Optional[str]) -> Optional[str]
     return None
 
 
+# The three granularities this data has, named. Longest alternatives first so
+# "quarterly" is not matched as "quarter" inside a different phrase.
+_FREQUENCY_WORDS = (
+    # Arabic attaches the definite article between the two words of the
+    # compound — "ربع السنوي" as often as "ربع سنوي" — and checking only the
+    # bare form let the trailing "السنوي" match the YEARLY pattern below, so a
+    # question asking for quarters was read as asking for years.
+    ("quarterly",
+     r"quarter(?:ly|s)?\b|per\s+quarter|by\s+quarter|ربع\s*(?:ال)?سنوي(?:ة|ا)?|ربعي(?:ة|ا)?"),
+    ("monthly", r"month(?:ly|s)?\b|per\s+month|by\s+month|شهري(?:ة|ا)?"),
+    ("yearly", r"year(?:ly)?\b|annual(?:ly)?\b|per\s+year|by\s+year|سنوي(?:ة|ا)?"),
+)
+_FREQUENCY_IN_TEXT = [(gran, re.compile(pattern, re.IGNORECASE))
+                      for gran, pattern in _FREQUENCY_WORDS]
+
+
+def frequency_in_text(text: Optional[str]) -> Optional[str]:
+    """The frequency the QUESTION names, read from the question.
+
+    parse_explicit_frequency reads the intent agent's field and nothing else, so
+    when the model left it empty the word in the message was invisible to the
+    whole pipeline. "List Qatar's quarterly GDP values for 2024 and 2025" was
+    answered with two yearly figures: the periods implied the yearly series, the
+    word "quarterly" was never consulted, and the user got the opposite of what
+    they had asked for in the second word of the sentence.
+
+    A closed vocabulary, which is what makes reading it here legitimate where a
+    pattern would be wrong for an open-ended one. There are exactly three
+    granularities in this data, GRANULARITY_ORDER names them, and "quarterly"
+    means one of the three or nothing at all.
+
+    Checked finest-first so "quarterly figures for the year" reads as quarterly:
+    the finer word is the one that says which SERIES, the coarser one usually
+    says which window.
+    """
+    if not text:
+        return None
+    for granularity, pattern in _FREQUENCY_IN_TEXT:
+        if pattern.search(text):
+            return granularity
+    return None
+
+
 # Every way a single period is written in these questions, in canonical
 # period_label form: 'YYYY', 'YYYY-Q#', 'YYYY-MM'.
 # Arabic ordinals for quarters, and Arabic month names. Without these the

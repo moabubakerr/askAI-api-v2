@@ -35,7 +35,7 @@ from app.resolvers.period_resolver import (parse_period_expression, parse_explic
                                             parse_relative_pair, year_earlier_label,
                                             single_period_label, period_kind,
                                             parse_same_period_pair, validate_period_labels,
-                                            granularity_from_labels)
+                                            granularity_from_labels, frequency_in_text)
 from app.db import retriever
 from app.compute import engine as compute
 from app.compute.verifier import (verify_numbers, render_template_fallback,
@@ -1097,7 +1097,11 @@ def handle_message(user_message: str, conversation_context: str = "",
     # found", regardless of indicator or period.
     published_detail_id = match.published_detail_id if match.is_published else None
     available_gran = retriever.get_available_granularities(published_detail_id, match.indicator_detail_id)
-    explicit_gran = parse_explicit_frequency(intent.get("explicit_frequency"))
+    # The model's reading first, the question itself as the backstop. The model
+    # leaves this empty often enough that a question naming its frequency in the
+    # second word was answered at another one — see frequency_in_text.
+    explicit_gran = (parse_explicit_frequency(intent.get("explicit_frequency"))
+                     or frequency_in_text(user_message))
     # A named period implies its own granularity, and it is stronger evidence
     # than the default. Without this the finest series always won: "GDP for
     # 2023" returned 170.55, which is Real GDP in 2023-Q4, while the published
