@@ -98,12 +98,46 @@ CONTRASTIVE_PAIRS = [
 ]
 
 
+# A qualifier the user attached to the measure. Dropping one does not narrow an
+# answer, it changes what is being measured — Non-Hydrocarbon GDP and GDP are
+# different quantities, and so are GDP and GDP per capita.
+#
+# Kept separate from CONTRASTIVE_PAIRS because the failure is a different shape.
+# A pair catches a match that says the OPPOSITE of the question; this catches one
+# that says nothing about it at all, which the pair test cannot see.
+_NEGATED = re.compile(r"\bnon[\s-]?(\w+)|\bexcluding\s+(\w+)|\bغير\s+(\S+)", re.IGNORECASE)
+
+# Qualifiers that are not negations but still change the measure.
+_QUALIFIERS = ("per capita", "hydrocarbon", "seasonally adjusted", "للفرد")
+
+
 def _has_contradiction(phrase: str, matched_name: str) -> bool:
     phrase_l, matched_l = phrase.lower(), matched_name.lower()
     for a, b in CONTRASTIVE_PAIRS:
         if a in phrase_l and a not in matched_l and b in matched_l:
             return True
         if b in phrase_l and b not in matched_l and a in matched_l:
+            return True
+
+    # A NEGATED subject the match does not carry. "What does non-hydrocarbon GDP
+    # mean?" resolved to "Real GDP" and returned Real GDP's definition — a
+    # fluent, confident answer to a question about a different quantity, with
+    # nothing to tell the reader the subject had been changed. The pair test
+    # above could not catch it: it fires only when the match names the OPPOSITE
+    # side, and "Real GDP" names neither side, it simply drops the restriction.
+    #
+    # General rather than a list of known qualifiers — "non-oil", "non-financial",
+    # "non-resident" and whatever the catalogue grows next all behave the same,
+    # and enumerating them would be one short every time.
+    for match in _NEGATED.finditer(phrase_l):
+        subject = next((g for g in match.groups() if g), "")
+        if subject and subject not in matched_l:
+            return True
+
+    # And a qualifier that is not a negation but narrows the measure just as
+    # much. GDP per capita is not GDP.
+    for qualifier in _QUALIFIERS:
+        if qualifier in phrase_l and qualifier not in matched_l:
             return True
     return False
 
@@ -783,9 +817,34 @@ def _resolve_scored(scored, phrase, language="en"):
     )
 
     if _has_contradiction(phrase, match.name_en):
-        return ResolutionResult(
-            None, "not_found", [],
-            msg("indicator_contradiction", language, phrase=phrase, matched=match.name_en.strip()),
+        # Before refusing: the catalogue may hold the indicator that was
+        # actually asked for, one place down. Scoring is lexical, so a long
+        # correct name can lose to a short wrong one — "Non-Hydrocarbon Exports
+        # as Share of Total Exports" against "Total Exports" — and refusing then
+        # tells the reader SCAI publishes nothing on a subject it does publish.
+        #
+        # Only a candidate that already cleared MIN_CONFIDENCE on its own and
+        # contradicts nothing. This reaches past the top match, which F-003 and
+        # F-012 forbid doing silently — but not toward a LOOSER match: the one
+        # it skips has been shown to answer a different question, so the choice
+        # is between this candidate and a refusal, not between this candidate
+        # and a better one.
+        rescued = next((r for r, sc in scored[1:]
+                        if sc >= MIN_CONFIDENCE
+                        and not _has_contradiction(phrase, r["name_en"])), None)
+        if rescued is None:
+            return ResolutionResult(
+                None, "not_found", [],
+                msg("indicator_contradiction", language, phrase=phrase,
+                     matched=match.name_en.strip()),
+            )
+        match = IndicatorMatch(
+            rescued["indicator_detail_id"], rescued["indicator_id"], rescued["name_en"],
+            rescued["is_published"], rescued["published_detail_id"],
+            rescued["is_active"], rescued["unit_en"], rescued.get("unit_ar"),
+            rescued["polarity_en"], rescued["data_source_en"], rescued["format"],
+            rescued["definition_en"], rescued["definition_ar"],
+            next(sc for r, sc in scored[1:] if r is rescued),
         )
 
     if match.is_active is False:
