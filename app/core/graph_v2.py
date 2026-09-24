@@ -1370,6 +1370,8 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
                                  start_date=period.start_date, end_date=period.end_date,
                                  country_en=single_country)
     rows = _apply_last_n_years(rows, period)
+    # The periods the question actually LISTED, where it listed more than one.
+    rows = _keep_named_periods(rows, intent.get("period_labels"))
 
     # A named country with no data for this indicator must be said out loud,
     # not answered with Qatar's series as if it were theirs.
@@ -1726,6 +1728,38 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         used = [row] if row else []
     return (_wrap(result, unit, indicator_name=indicator_name, decimals=decimals),
             citations_for_rows(used, indicator_name, data_source_en))
+
+
+def _keep_named_periods(rows: list[dict], period_labels) -> list[dict]:
+    """Narrows a window to the periods the question actually listed.
+
+    "لسنه 2021 و 2023" was answered with 2021, 2022 AND 2023. The period parser
+    reads two years joined by "and" as a SPAN, which is right for "2024 and
+    2025" — adjacent, so span and list agree — and wrong the moment they are not
+    adjacent. The user named two years and was shown three.
+
+    Nothing here re-reads the question. The intent agent already reports the
+    periods it found, canonically, in period_labels, and that field was consumed
+    in exactly one branch — period_comparison — while every other route fell
+    back to the date window and ignored it. This is the field being used where
+    it was already being filled.
+
+    A label covers the periods INSIDE it, so "2021" keeps 2021-Q1 through
+    2021-Q4: the user names the year, the series answers in quarters, and the
+    granularity was decided elsewhere.
+
+    Applied only when it leaves something behind. A label finer than the rows —
+    "2026-Q1" against a yearly series — matches nothing, and an empty window
+    here would report an absence that is really a mismatch of grain.
+    """
+    labels = [str(lab).strip().upper() for lab in (period_labels or []) if str(lab).strip()]
+    if len(labels) < 2 or not rows:
+        return rows
+    kept = [r for r in rows
+            if any((r.get("period_label") or "").upper() == lab
+                   or (r.get("period_label") or "").upper().startswith(f"{lab}-")
+                   for lab in labels)]
+    return kept or rows
 
 
 def _apply_last_n_years(rows: list[dict], period) -> list[dict]:
