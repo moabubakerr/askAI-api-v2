@@ -248,6 +248,13 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    "percentage_points" — rule 18's wording applies here too: Inflation at 2.62%
    against 0.63% a year earlier rose 1.99 PERCENTAGE POINTS, never "1.99%" and
    never the percent-of-a-percent that comparison would give.
+   "change_basis": "computed_from_series" on a line means the question named a
+   SPAN, and the comparison is between its two ENDS rather than a year apart.
+   Do NOT write "a year earlier" or "YoY" on such a line — name both periods,
+   from "previous_period" and "period_label": "Real GDP rose to 185.17 Bn QAR in
+   2025-Q4 from 170.55 Bn QAR in 2023-Q4". The change was worked out from those
+   two readings and not read from a published figure, so do not call it a growth
+   rate or an official rate either.
    If the question was a factual yes/no ("is the economy growing?"), rule 1
    applies: answer it, then justify it with those figures. "Is it performing
    well?" is NOT that question — see below.

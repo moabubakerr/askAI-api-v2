@@ -2593,6 +2593,63 @@ def _movement_verdict(change, polarity) -> Optional[str]:
     return "improved" if (change < 0) == wants_lower else "worsened"
 
 
+def _spans_multiple_years(period) -> bool:
+    """Whether the question named a stretch of time rather than a point in it.
+
+    A span asks to be compared end to end. A single year asks for that year's
+    reading, and a year-on-year comparison alongside it is the normal thing to
+    give — which is why this is not simply "a period was named".
+    """
+    if period is None or getattr(period, "kind", None) != "range":
+        return False
+    start, end = getattr(period, "start_date", None), getattr(period, "end_date", None)
+    return bool(start and end and end.year > start.year)
+
+
+def _change_between(first, last, unit: Optional[str]) -> dict:
+    """The move between two readings, in the unit the move is measured in.
+
+    A percentage OF a percentage says nothing — Inflation going 0.63 to 2.62 is
+    1.99 percentage POINTS, not a rise of 316% — and a percentage of a rank
+    position says less. The same three-way split trend() and scope_direction
+    already make, applied here because a span comparison has no published
+    figure to fall back on.
+    """
+    try:
+        a, b = float(first), float(last)
+    except (TypeError, ValueError):
+        return {}
+    if compute._is_rate(unit) or compute._is_rank(unit):
+        return {"change_yoy_pp": round(b - a, 4), "change_kind": "percentage_points"} \
+            if compute._is_rate(unit) else \
+            {"change_places": round(b - a, 4), "change_kind": "places"}
+    if a == 0:
+        return {}
+    return {"change_yoy_percent": round((b - a) / a * 100, 4), "change_kind": "percent"}
+
+
+def _window_label(period) -> Optional[str]:
+    """The period a question asked for, written the way an answer can say it.
+
+    period.raw is the user's whole message — "compare qatar economy 2023 -2025"
+    — because that is what the parser was handed. Putting it in the payload as
+    "as_of" produced "as of compare qatar economy 2023 -2025", which the
+    Composer sensibly declined to write, so the answer named no window at all
+    and the key might as well not have been set.
+
+    Built from the resolved dates instead, so it says what was actually used.
+    """
+    if period is None:
+        return None
+    start = getattr(period, "start_date", None)
+    end = getattr(period, "end_date", None)
+    if not start and not end:
+        return None
+    if start and end and start.year != end.year:
+        return f"{start.year} to {end.year}"
+    return str((end or start).year)
+
+
 def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
     """One latest reading per named indicator, each with its OWN period.
 
@@ -2666,10 +2723,40 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
             # asks for.
             prior = _find_row_by_period(rows, year_earlier_label(
                 latest.facts.get("period_label")))
+            # ...unless the question named a SPAN, in which case the two ends of
+            # that span are the comparison it asked for.
+            #
+            # "Compare Qatar's economy 2023-2025" was answered with each
+            # indicator's latest reading inside the window measured against a
+            # year earlier — 2025-Q4 against 2024-Q4 — which is a one-year
+            # comparison wearing a three-year question's label. The window was
+            # honoured in WHICH reading was shown and ignored in what it was
+            # compared to.
+            span = _spans_multiple_years(period)
+            if span:
+                first = next((r for r in rows if r.get("actual") is not None), None)
+                if first and first["period_label"] != latest.facts.get("period_label"):
+                    prior = first
             if prior and prior.get("actual") is not None:
                 entry["previous_period"] = prior["period_label"]
                 entry["previous_value"] = prior["actual"]
                 citations += citations_for_rows([prior], match.name_en, match.data_source_en)
+            if span and prior and prior.get("actual") is not None:
+                # Across a span there is no published figure to quote: SCAI's
+                # stored change is year-on-year, and pairing it with endpoints
+                # three years apart would put a number beside two values it does
+                # not describe. Worked out from the two readings shown, and said
+                # to be — composer rule 20 has "computed_from_series" for
+                # exactly this, so it is not presented as an official rate.
+                entry.update(_change_between(prior["actual"], row["actual"],
+                                              match.unit_en))
+                entry["change_basis"] = "computed_from_series"
+                entry["report_as_growth"] = _asks_for_growth(phrase)
+                entry["direction_assessment"] = _movement_verdict(
+                    entry.get("change_yoy_percent", entry.get("change_yoy_pp")),
+                    match.polarity_en)
+                facts.append(entry)
+                continue
             change = compute.preferred_change_field(row, gran)
             if change is not None:
                 # SCAI's stored figure carries full float noise
@@ -2730,9 +2817,9 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
     # exactly like a figure for the right one. The scope routes have set it
     # since that rule was added; the snapshot every macro and multi-indicator
     # answer is built from never did.
-    asked_period = getattr(period, "raw", None) if period is not None else None
-    if asked_period:
-        payload["facts"]["as_of"] = asked_period
+    window = _window_label(period)
+    if window:
+        payload["facts"]["as_of"] = window
     # Ranking by movement, so "which experienced the largest decline?" can be
     # answered without the Composer ordering figures itself — the exact class
     # of work the QC report found it getting wrong (F-009). Only over the lines
