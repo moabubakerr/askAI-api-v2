@@ -25,11 +25,11 @@ from typing import TypedDict, Optional, Callable
 from app.nlu.intent_agent import extract_intent
 from app.core.conversation import carry_forward, remember, forget_stale, turn_index
 from app.core.messages import (msg, detect_language, answers_in_language,
-                                carries_language_signal)
+                                carries_language_signal, is_arabic)
 from app.resolvers.indicator_resolver import (resolve_indicator, has_usable_definition,
                                                ResolutionResult,
                                                resembles_catalogue_name, has_identifying_content)
-from app.resolvers.country_resolver import resolve_countries
+from app.resolvers.country_resolver import resolve_countries, display_country
 from app.resolvers.period_resolver import (parse_period_expression, parse_explicit_frequency,
                                             choose_granularity, parse_period_pair,
                                             parse_relative_pair, year_earlier_label,
@@ -1262,7 +1262,13 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
     # prose that said "QAR 185.2 billion".
     unit = display_unit(match.unit_en, match.format, language, match.unit_ar)
     decimals = decimals_from_format(match.format)
-    indicator_name = match.name_en
+    # SCAI's own Arabic name when the answer is Arabic, its English one
+    # otherwise. Every figure in an Arabic answer carried an English indicator
+    # name — "سجّلت Bahrain أدنى Inflation" — because this took name_en
+    # unconditionally, while unit_ar and definition_ar were already being used a
+    # few lines away. The catalogue holds the translation; nothing has to invent
+    # one, which is the whole of composer rule 4's concern.
+    indicator_name = match.display_name(language)
     data_source_en = match.data_source_en
 
     # Single-series computations queried the Qatar series unconditionally and
@@ -1380,6 +1386,24 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         citations = []
         if result.ok:
             entries = result.facts.get("ranked") or result.facts.get("rows") or []
+            # Country names in the language the answer is written in. Done here,
+            # after the ranking and before the payload, because everything above
+            # keys on the data's own English strings and everything below only
+            # displays them. The citations built further down keep the English
+            # name, since a citation identifies a row rather than reads as prose.
+            if is_arabic(language):
+                for entry in entries:
+                    entry["country"] = display_country(entry.get("country"), language)
+                for key in ("leader",):
+                    if isinstance(result.facts.get(key), dict):
+                        result.facts[key]["country"] = display_country(
+                            result.facts[key].get("country"), language)
+                if result.facts.get("only_country_with_data"):
+                    result.facts["only_country_with_data"] = display_country(
+                        result.facts["only_country_with_data"], language)
+                result.facts["countries_with_no_data"] = [
+                    display_country(c, language)
+                    for c in result.facts.get("countries_with_no_data") or []]
 
             periods = {e.get("period_label") for e in entries if e.get("period_label")}
             if len(periods) > 1:

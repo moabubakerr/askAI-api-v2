@@ -214,6 +214,23 @@ class IndicatorMatch:
     definition_en: Optional[str]
     definition_ar: Optional[str]
     confidence: float
+    # SCAI's own Arabic name for this indicator. It was already being fetched
+    # and already used to MATCH an Arabic question — and then dropped, so an
+    # Arabic answer named the indicator in English. Carried now for the same
+    # reason unit_ar and definition_ar are: the catalogue holds the translation,
+    # so nothing has to invent one.
+    name_ar: Optional[str] = None
+
+    def display_name(self, language: str = "en") -> str:
+        """The name to SHOW, in the language being written.
+
+        Falls back to English when SCAI has recorded no Arabic name, rather than
+        showing nothing: a missing translation should cost the reader a
+        language, not the name of the thing they asked about.
+        """
+        if str(language).lower().startswith("ar") and (self.name_ar or "").strip():
+            return self.name_ar.strip()
+        return (self.name_en or "").strip()
 
 
 @dataclass
@@ -854,7 +871,7 @@ def _resolve_scored(scored, phrase, language="en"):
                                 r["is_published"], r["published_detail_id"],
                                 r["is_active"], r["unit_en"], r.get("unit_ar"), r["polarity_en"],
                                 r["data_source_en"], r["format"],
-                                r["definition_en"], r["definition_ar"], s)
+                                r["definition_en"], r["definition_ar"], s, r.get("name_ar"))
                 for r, s in scored[:3]
             ]
             names = ", ".join(f'"{c.name_en.strip()}"' for c in candidates)
@@ -869,7 +886,7 @@ def _resolve_scored(scored, phrase, language="en"):
         top_row["is_active"], top_row["unit_en"], top_row.get("unit_ar"), top_row["polarity_en"],
         top_row["data_source_en"], top_row["format"],
         top_row["definition_en"], top_row["definition_ar"],
-        top_score,
+        top_score, top_row.get("name_ar"),
     )
 
     if _has_contradiction(phrase, match.name_en):
@@ -900,7 +917,7 @@ def _resolve_scored(scored, phrase, language="en"):
             rescued["is_active"], rescued["unit_en"], rescued.get("unit_ar"),
             rescued["polarity_en"], rescued["data_source_en"], rescued["format"],
             rescued["definition_en"], rescued["definition_ar"],
-            next(sc for r, sc in scored[1:] if r is rescued),
+            next(sc for r, sc in scored[1:] if r is rescued), rescued.get("name_ar"),
         )
 
     if match.is_active is False:

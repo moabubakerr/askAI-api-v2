@@ -20,6 +20,7 @@ alias map below.
 """
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from functools import lru_cache
 from typing import Optional
 
 from sqlalchemy import text
@@ -91,6 +92,56 @@ def _arabic_to_english(name: str) -> Optional[str]:
         if score > best_score:
             best, best_score = name_en, score
     return best if best_score >= 0.85 else None
+
+
+@lru_cache(maxsize=1)
+def _arabic_names() -> dict:
+    """Every country's Arabic name, keyed by the English one the data uses.
+
+    The reverse of _arabic_to_english, and needed for the same reason in the
+    other direction: an Arabic answer named every country in English —
+    "سجّلت Bahrain أدنى Inflation" — because the countries table was consulted
+    when reading a question and never when writing an answer.
+
+    The data's own country_en strings are not always the table's name_en: SCAI
+    writes "KSA" where the table says "Saudi Arabia". Both are keyed, so a
+    lookup by either works.
+    """
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text(
+                "SELECT name_en, name_ar FROM countries "
+                "WHERE name_ar IS NOT NULL AND name_ar <> ''"
+            )).fetchall()
+    except Exception:
+        # A display convenience, never a reason to fail a request: without it
+        # the answer keeps the English names it has always had.
+        return {}
+    names = {}
+    for name_en, name_ar in rows:
+        names[(name_en or "").strip().lower()] = name_ar.strip()
+    # SCAI's own shorthands, which the countries table does not carry.
+    for alias, target in ALIASES.items():
+        if target and target.strip().lower() not in names:
+            arabic = names.get(alias.strip().lower())
+            if arabic:
+                names[target.strip().lower()] = arabic
+    names.setdefault("qatar", "قطر")
+    names.setdefault("ksa", "المملكة العربية السعودية")
+    names.setdefault("uae", "الإمارات العربية المتحدة")
+    return names
+
+
+def display_country(name: Optional[str], language: str = "en") -> str:
+    """A country's name in the language being written.
+
+    Falls back to the English name where SCAI records no Arabic one, so a
+    missing translation costs a language rather than the country.
+    """
+    text_name = (name or "").strip()
+    if not text_name or not str(language).lower().startswith("ar"):
+        return text_name
+    return _arabic_names().get(text_name.lower(), text_name)
 
 
 def _match_one(name: str, known: list[str]) -> Optional[str]:
