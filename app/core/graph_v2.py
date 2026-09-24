@@ -1295,7 +1295,17 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         # Only for RANKING. A comparison must return exactly the countries the
         # user named and never a default benchmark list — that is F-001, where
         # "compare Qatar and Singapore" came back with six countries.
-        if ctype == "country_ranking" and not countries:
+        #
+        # "Named none" is not the same as "resolved to an empty list". Qatar is
+        # the domestic sentinel — it carries no country_en string, so naming it
+        # leaves resolved_countries empty — and this read that as naming nobody.
+        # "وماذا عن قطر", asked straight after a ranking, therefore re-ran the
+        # benchmark ranking and returned the identical three countries with
+        # Qatar nowhere in it: the one country the question was about was the
+        # one the answer left out.
+        named_nobody = (not countries and not countries_res.includes_qatar
+                        and not countries_res.unresolved_names)
+        if ctype == "country_ranking" and named_nobody:
             countries = retriever.get_benchmark_countries(published_detail_id)
             if not countries:
                 return {"ok": False, "message": msg("no_benchmarks", language,
@@ -1352,8 +1362,18 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
                               "a {dir} figure is the better outcome.").format(
                 ind=indicator_name.strip(), dir="lower" if decreasing else "higher")
             note = f"{note} {note_direction}" if note else note_direction
+        # A limit cuts the BOTTOM off a ranking, which is the wrong end when the
+        # user has named who they are asking about. "وماذا عن قطر" following
+        # "which 3 countries have the lowest inflation" kept the three and cut
+        # Qatar, whose inflation is higher — so the one country the question was
+        # about was the one the answer removed.
+        #
+        # "Top 3" means "the top 3 of the set"; naming countries means "these
+        # ones". They do not combine, and where both appear the named countries
+        # win, because they are the subject and the limit is only a length.
+        ranking_limit = None if not named_nobody else _clean_limit(intent.get("limit"))
         result = (compute.country_ranking(series_by_country, period_label, ascending=ascending,
-                                           limit=_clean_limit(intent.get("limit")))
+                                           limit=ranking_limit)
                   if ctype == "country_ranking"
                   else compute.country_comparison(series_by_country, period_label))
 
