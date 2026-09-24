@@ -99,10 +99,15 @@ class AnswerGate:
         self._buffer = ""
         self._seen = Counter()
         self.released = ""
-        # The first number that did not trace back to the payload, if any. Set
-        # means the stream was abandoned: whatever has been released is valid,
-        # and the caller replaces the rest with the template.
+        # Why the stream was abandoned, if it was. Whatever has been released is
+        # valid; the caller replaces the rest.
         self.rejected: Optional[str] = None
+        # WHICH kind of failure: "number" for a figure that is not in the
+        # payload, "degenerate" for the model coming off the rails. The caller
+        # answers them differently — a malformed draft is worth asking for
+        # again, an invented figure is not — and it cannot tell them apart from
+        # the text, because the offending unit was never released.
+        self.rejected_kind: Optional[str] = None
 
     def _numbers_clear(self, unit: str) -> Optional[str]:
         """The first number in `unit` that is not in the payload, or None."""
@@ -142,11 +147,13 @@ class AnswerGate:
             unit, rest = self._split()
             if unit is None:
                 return
-            offender = self._numbers_clear(unit) or self._sane(unit)
+            bad_number = self._numbers_clear(unit)
+            offender = bad_number or self._sane(unit)
             if offender is not None:
                 # Caught before display. The buffer is dropped rather than
                 # released — this is the whole point of holding it.
                 self.rejected = offender
+                self.rejected_kind = "number" if bad_number else "degenerate"
                 self._buffer = ""
                 return
             self._buffer = rest
@@ -191,9 +198,11 @@ class AnswerGate:
         if self.rejected or not self._buffer:
             return
         tail, self._buffer = self._buffer, ""
-        offender = self._numbers_clear(tail) or self._sane(tail)
+        bad_number = self._numbers_clear(tail)
+        offender = bad_number or self._sane(tail)
         if offender is not None:
             self.rejected = offender
+            self.rejected_kind = "number" if bad_number else "degenerate"
             return
         self.released += tail
         yield tail

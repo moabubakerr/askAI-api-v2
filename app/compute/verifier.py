@@ -752,6 +752,21 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
         return _t("only_country", language, country=facts["only_country_with_data"],
                    ind=indicator, val=f"{trim_zeros(row.get('actual'))} {unit}".strip(),
                    per=row.get("period_label"))
+    # A country comparison. It had no branch at all, so a rejected Arabic answer
+    # about Qatar and Singapore reached the reader as the payload read out field
+    # by field — "Countries with no data: []", "Decimal places: 1" — which is the
+    # plumbing, in English, under an Arabic question.
+    if facts.get("rows"):
+        lines = [f"- {r.get('country')}: "
+                 f"{trim_zeros(r.get('actual'))} {unit}".strip()
+                 + f" ({r.get('period_label')})"
+                 for r in facts["rows"]]
+        if facts.get("countries_with_no_data"):
+            lines.append(_t("no_data_for", language,
+                             names=", ".join(facts["countries_with_no_data"])))
+        if facts.get("note"):
+            lines.append(facts["note"])
+        return "\n".join(lines)
     if "ranked" in facts and facts.get("leader"):
         leader = facts["leader"]
         lines = [_t("rank_leader", language, country=leader.get("country"),
@@ -838,6 +853,12 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                 lines.append(f"{i}. {row.get('country')}: {row.get('actual')} ({row.get('period_label')})")
         elif key == "countries_with_no_data" and value:
             lines.append("No approved data for: " + ", ".join(value))
+        elif value in (None, "", [], {}):
+            # An empty value says nothing and used to say it out loud: the guard
+            # above falls through when the list is empty, and the branch below
+            # printed "Countries with no data: []" at a reader who had asked
+            # about two countries that both had data.
+            continue
         elif isinstance(value, bool) or key.endswith(("_kind", "_basis")) or key.startswith("n_"):
             # Machine fields. They say how to READ the other values, not what
             # the reader should be told, and printed on their own they say

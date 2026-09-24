@@ -1307,9 +1307,8 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
             if len(periods) > 1:
                 # Only reachable when the countries share no period at all, so
                 # alignment was impossible and each contributed its own latest.
-                mixed = (f"These countries report no period in common, so each figure below is "
-                         f"that country's own latest ({min(periods)} to {max(periods)}). "
-                         f"This is not a like-for-like comparison.")
+                mixed = msg("no_common_period", language,
+                             first=min(periods), last=max(periods))
                 note = f"{note} {mixed}" if note else mixed
             elif period_label and len(entries) > 1:
                 # Only when there is actually something to align. "Compare Real
@@ -1317,8 +1316,7 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
                 # and telling the reader it was "compared at 2025-Q4, the most
                 # recent period all of these countries report" described a
                 # comparison that did not happen.
-                aligned = (f"Compared at {period_label}, the most recent period all of these "
-                           f"countries report.")
+                aligned = msg("compared_at", language, period=period_label)
                 note = f"{note} {aligned}" if note else aligned
             for entry in entries:
                 country_rows = series_by_country.get(entry["country"], [])
@@ -2818,7 +2816,7 @@ def is_readable(payload: dict) -> bool:
 
 def _finish(payload: dict, language: str, session_state: dict, citations: list[Citation],
             skip_compose: bool = False, canned: Optional[str] = None,
-            question: str = "") -> dict:
+            question: str = "", retries_left: int = 1) -> dict:
     # The period this answer actually reported, so "compare it with Q4 2025"
     # has the other half of its comparison. Recorded from the facts rather than
     # from the question, because the question may have named no period at all
@@ -2869,14 +2867,18 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
             # The gate holds each line until every number in it traces back to
             # the payload, so a listener never sees a figure that is then
             # withdrawn. See app/compute/streaming.py.
-            draft, gate_rejected = compose_answer_streamed(
+            draft, gate_rejected, gate_kind = compose_answer_streamed(
                 payload, language, on_chunk=lambda text: _stage(
                     session_state, "delta", text=text), **compose_args)
         else:
-            draft, gate_rejected = compose_answer(payload, language, **compose_args), None
+            draft = compose_answer(payload, language, **compose_args)
+            gate_rejected, gate_kind = None, None
 
         _stage(session_state, "verifying")
         clean, offending = verify_numbers(draft, payload)
+        # Kept apart from the checks below, because the two failures are not
+        # alike and must not be answered alike — see the retry.
+        offending_numbers = list(offending)
         # The gate found an invented figure and stopped the stream before it was
         # shown. The full check below would reach the same verdict on the text
         # that was written, but not on the text that was RELEASED — the offending
@@ -2885,6 +2887,14 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
         if gate_rejected:
             clean = False
             offending = list(offending) + [gate_rejected]
+            # An invented figure counts as a numeric failure even though
+            # verify_numbers above could not see it: the gate stopped the line
+            # carrying it before it was released, so the draft the final check
+            # looked at is clean. Without this the retry below read a rejection
+            # for a bad number as a malformed draft and asked the model again,
+            # which is exactly what it must not do.
+            if gate_kind == "number":
+                offending_numbers.append(gate_rejected)
         # An answer in the wrong language is not an answer. The model is asked
         # for Arabic and mostly complies, but "mostly" is not a guarantee and
         # the failure is total from the reader's side. Checked here rather than
@@ -2908,6 +2918,20 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
         if clean and writes_own_sources(draft):
             clean = False
             offending = list(offending) + ["answer wrote its own sources footer"]
+        # One retry, but only for a draft that came out MALFORMED — the wrong
+        # language, a loop, a footer of its own. Those are the model losing its
+        # footing on a prompt it can handle, and asking again generally gets a
+        # clean answer; falling straight to the template turns a recoverable
+        # stumble into a raw dump of payload fields at the reader.
+        #
+        # Never for a bad NUMBER. A figure that is not in the payload is the one
+        # failure this system exists to catch, and a second attempt is just as
+        # likely to invent a second figure. That falls to the template as before.
+        if not clean and not offending_numbers and retries_left > 0:
+            payload.pop("_wrong_language_draft", None)
+            return _finish(payload, language, session_state, citations,
+                            skip_compose=skip_compose, canned=canned,
+                            question=question, retries_left=retries_left - 1)
         answer = draft if clean else render_template_fallback(payload, language)
         if not clean:
             payload["_verifier_rejected_numbers"] = offending  # for logging/debugging only

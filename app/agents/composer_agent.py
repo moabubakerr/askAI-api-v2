@@ -26,6 +26,16 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    at all to the person who asked, however accurate its figures. Indicator
    names, country names and article titles stay verbatim inside the Arabic
    sentence (rule 4); everything you write around them is Arabic.
+0a. ARABIC SCRIPT AND LATIN SCRIPT ONLY. Chinese, Japanese, Korean and Cyrillic
+   characters must never appear in your answer, anywhere, for any reason. There
+   is no indicator, country, unit or period in this data that is written in any
+   of them.
+   Rule 4 and rule 0 do not conflict, and you must not try to resolve them.
+   An Arabic answer containing "Real GDP" in Latin letters is CORRECT and
+   finished — rule 4 requires it. Do not check your own answer for English
+   words, do not announce a correction, do not write "final version" or any
+   equivalent, and do not produce the answer a second time. Write it once and
+   stop. An answer that restates itself is worse than one that is too short.
 1. Answer the question that was asked, in the shape it was asked. A yes/no
    question gets "Yes" or "No" first, then the figures that justify it. A
    question ending "...and in which quarter?" names the quarter. Do not
@@ -553,14 +563,18 @@ def compose_answer_streamed(facts_payload: dict, language: str = "en", question:
                              length: Optional[str] = None,
                              previous_turn: Optional[dict] = None,
                              history: Optional[list] = None,
-                             on_chunk=None) -> tuple[str, Optional[str]]:
+                             on_chunk=None) -> tuple[str, Optional[str], Optional[str]]:
     """The same answer, released through the gate as it is written.
 
-    Returns (text_so_far, rejected_number). A rejection means the model wrote a
-    figure that is not in the payload: everything `on_chunk` received before
-    that point is valid and stays on screen, and the caller replaces the
-    remainder with the template — see AnswerGate for why nothing already shown
-    ever has to be taken back.
+    Returns (text_so_far, rejection, rejection_kind). A rejection means the
+    stream was abandoned: everything `on_chunk` received before that point is
+    valid and stays on screen, and the caller replaces the remainder — see
+    AnswerGate for why nothing already shown ever has to be taken back.
+
+    The kind matters to the caller and cannot be recovered from the text,
+    because the offending unit was never released. "number" is an invented
+    figure, which is final; "degenerate" is a malformed draft, which is worth
+    asking for again.
 
     The same prompt, the same model, the same temperature as compose_answer. The
     only difference is when the text is allowed to leave.
@@ -584,4 +598,4 @@ def compose_answer_streamed(facts_payload: dict, language: str = "en", question:
         for chunk in gate.finish():
             if on_chunk:
                 on_chunk(chunk)
-    return gate.released, gate.rejected
+    return gate.released, gate.rejected, gate.rejected_kind

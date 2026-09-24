@@ -391,6 +391,22 @@ _MESSAGES = {
         "ar": ("لم ينشر المجلس تحليلاً مكتوباً لـ \"{indicator}\" ضمن البيانات المعتمدة. "
                 "يمكنني عرض قيمه أو اتجاهه بدلاً من ذلك."),
     },
+    # Notes attached to a country comparison. They were built as English
+    # f-strings in the payload, which the Composer translates as prose but the
+    # template fallback prints verbatim — so a rejected Arabic answer ended in an
+    # English sentence about how the comparison had been aligned.
+    "compared_at": {
+        "en": ("Compared at {period}, the most recent period all of these "
+                "countries report."),
+        "ar": "تمت المقارنة عند {period}، وهي أحدث فترة تنشرها جميع هذه الدول.",
+    },
+    "no_common_period": {
+        "en": ("These countries report no period in common, so each figure below "
+                "is that country's own latest ({first} to {last}). This is not a "
+                "like-for-like comparison."),
+        "ar": ("لا تشترك هذه الدول في أي فترة، لذا فإن كل رقم أدناه هو أحدث قراءة "
+                "لتلك الدولة ({first} إلى {last}). وهذه ليست مقارنة متكافئة."),
+    },
     "measured_in": {
         "en": "\n\nMeasured in {unit}.",
         "ar": "\n\nوحدة القياس: {unit}.",
