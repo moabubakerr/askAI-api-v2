@@ -47,6 +47,40 @@ _LANGUAGE_NEUTRAL = {"gdp", "cpi", "fdi", "q1", "q2", "q3", "q4", "top", "vs",
                       "ok", "yes", "no", "pls", "plz"}
 
 
+# The two languages this product writes in, named. A closed set, like the three
+# granularities — "in Arabic" means one of two things or nothing at all, which
+# is what makes reading it from the text recognition rather than a guess at
+# meaning.
+_LANGUAGE_WORDS = (
+    ("ar", r"\barabic\b|عرب(?:ي|ية|ى|يه)\b"),
+    ("en", r"\benglish\b|[إا]نجليزي(?:ة|ه)?\b|[إا]نكليزي(?:ة|ه)?\b"),
+)
+_LANGUAGE_IN_TEXT = [(code, re.compile(pattern, re.IGNORECASE))
+                     for code, pattern in _LANGUAGE_WORDS]
+
+
+def language_request_in_text(text: Optional[str]) -> Optional[str]:
+    """The language a message NAMES, read from the message.
+
+    The intent agent has an answer_language field and leaves it empty often
+    enough to matter: "بالعربي", on its own after a full answer, was sent to the
+    indicator resolver and refused as the name of an indicator. That is the same
+    failure explicit_frequency had, with the same shape of fix — the model's
+    reading first, the words as the backstop.
+
+    Naming a language is NOT on its own a request to be answered in it. "How
+    many people speak English in Qatar" names one and asks for data. This only
+    reports what was named; the caller decides whether the message asks for
+    anything else, which is the test that makes it safe.
+    """
+    if not text:
+        return None
+    for code, pattern in _LANGUAGE_IN_TEXT:
+        if pattern.search(text):
+            return code
+    return None
+
+
 def carries_language_signal(text: str) -> bool:
     """Whether this message says anything about what language it is in.
 

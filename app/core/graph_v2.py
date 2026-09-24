@@ -25,7 +25,8 @@ from typing import TypedDict, Optional, Callable
 from app.nlu.intent_agent import extract_intent
 from app.core.conversation import carry_forward, remember, forget_stale, turn_index
 from app.core.messages import (msg, detect_language, answers_in_language,
-                                carries_language_signal, is_arabic)
+                                carries_language_signal, is_arabic,
+                                language_request_in_text)
 from app.resolvers.indicator_resolver import (resolve_indicator, has_usable_definition,
                                                ResolutionResult,
                                                resembles_catalogue_name, has_identifying_content)
@@ -342,6 +343,16 @@ def handle_message(user_message: str, conversation_context: str = "",
     # inherit quarterly and ignore the word the user had just typed.
     if not intent.get("explicit_frequency"):
         intent["explicit_frequency"] = frequency_in_text(user_message)
+    # And the language, for the same reason and with the same ordering. The
+    # router leaves answer_language empty often enough that "بالعربي" on its own
+    # was sent to the indicator resolver and refused as the name of an
+    # indicator. Only where the message names NOTHING else — see `stated` below,
+    # which is what keeps "how many people speak English in Qatar" a question
+    # about data.
+    if not intent.get("answer_language") and not any(
+            intent.get(k) for k in ("indicator_phrase", "countries_mentioned",
+                                     "country_group_mentioned", "period_expression")):
+        intent["answer_language"] = language_request_in_text(user_message)
     # A follow-up states only what changed. Inherit the rest from the previous
     # turn before anything is resolved, so "and for Saudi Arabia?" keeps the
     # earlier indicator AND period instead of only the indicator.
