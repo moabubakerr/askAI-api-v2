@@ -107,8 +107,57 @@ CONTRASTIVE_PAIRS = [
 # that says nothing about it at all, which the pair test cannot see.
 _NEGATED = re.compile(r"\bnon[\s-]?(\w+)|\bexcluding\s+(\w+)|\bغير\s+(\S+)", re.IGNORECASE)
 
-# Qualifiers that are not negations but still change the measure.
-_QUALIFIERS = ("per capita", "hydrocarbon", "seasonally adjusted", "للفرد")
+
+@lru_cache(maxsize=1)
+def _discriminating_terms() -> frozenset:
+    """Words the CATALOGUE itself uses to tell one indicator from another.
+
+    This began as a hand-written list — "per capita", "hydrocarbon",
+    "seasonally adjusted" — which is wrong for the same reason a list of
+    follow-up phrasings is wrong: it only covers what someone thought of, and
+    SCAI publishes 400-odd indicators whose names carry distinctions nobody
+    writing this file would predict. A question using one of the others would
+    sail past.
+
+    So the distinctions are read from the names. A word that appears in SOME
+    indicator names and not others is a word this catalogue discriminates on —
+    that is what makes "Real" meaningful in "Real GDP", and it is equally what
+    makes "Greenhouses" meaningful in "Crop Yield - Vegetables, Greenhouses".
+    A word in nearly every name, or in none, discriminates nothing.
+
+    Derived once and cached with the catalogue it came from, so it follows the
+    data rather than this file. clear_catalog_cache() drops it.
+    """
+    from collections import Counter
+    counts, total = Counter(), 0
+    try:
+        catalog = _fetch_catalog()
+    except Exception:
+        # This check used to be pure, and callers are entitled to assume it
+        # cannot fail. An empty set means the catalogue-derived rule simply
+        # finds nothing; the contrastive pairs and the negation rule still
+        # apply, so a database hiccup costs a check rather than the request.
+        return frozenset()
+    for row in catalog:
+        total += 1
+        for word in set(re.findall(r"[\w؀-ۿ]{3,}", (row.get("name_en") or "").lower())):
+            counts[word] += 1
+    if not total:
+        return frozenset()
+    # Present in at least one name and at most a third of them. The upper bound
+    # drops words like "rate", "total" and "share" that head half the
+    # catalogue and separate nothing.
+    ceiling = max(1, total // 3)
+    return frozenset(w for w, n in counts.items() if n <= ceiling)
+
+
+def _dropped_discriminators(phrase: str, matched_name: str) -> list[str]:
+    """Words the question used, the catalogue discriminates on, and the match
+    does not carry."""
+    matched_words = set(re.findall(r"[\w؀-ۿ]{3,}", matched_name.lower()))
+    terms = _discriminating_terms()
+    return [w for w in re.findall(r"[\w؀-ۿ]{3,}", (phrase or "").lower())
+            if w in terms and w not in matched_words]
 
 
 def _has_contradiction(phrase: str, matched_name: str) -> bool:
@@ -135,11 +184,14 @@ def _has_contradiction(phrase: str, matched_name: str) -> bool:
             return True
 
     # And a qualifier that is not a negation but narrows the measure just as
-    # much. GDP per capita is not GDP.
-    for qualifier in _QUALIFIERS:
-        if qualifier in phrase_l and qualifier not in matched_l:
-            return True
-    return False
+    # much: GDP per capita is not GDP. Which words those are is read from the
+    # catalogue rather than listed here — see _discriminating_terms.
+    #
+    # Two of them, not one. A single dropped word is ordinary: names are long,
+    # questions are short, and "what is Qatar's GDP" legitimately matches "Real
+    # GDP" while dropping "Qatar". Two independent distinctions the catalogue
+    # draws, both absent from the match, is the match being a different measure.
+    return len(_dropped_discriminators(phrase, matched_name)) >= 2
 
 
 @dataclass
@@ -525,6 +577,10 @@ def clear_catalog_cache() -> None:
     """Drops the cached catalogue and every vector derived from it."""
     _fetch_catalog_cached.cache_clear()
     _catalog_embeddings_cached.cache_clear()
+    # Also derived from the catalogue, so it goes stale the same way: an
+    # indicator added with a new distinction in its name is not one this can
+    # discriminate on until it is re-read.
+    _discriminating_terms.cache_clear()
 
 
 def _fetch_catalog_uncached() -> list[dict]:
