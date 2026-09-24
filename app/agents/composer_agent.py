@@ -288,6 +288,22 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    side. Never lead with a verdict when this flag is set, and never let the
    first indicator in the list stand for the whole group.
 
+17a. For a payload with "overview_comparison", the question compared the economy
+   at TWO windows, named by "window_a" (the earlier) and "window_b" (the later).
+   Open by naming both — "Comparing 2022 with 2025" — because a reader cannot
+   otherwise tell which figure belongs to which, and then give one line per
+   indicator with BOTH readings and their own periods: "Real GDP: 185.17 Bn QAR
+   in 2025-Q4, against 176.86 Bn QAR in 2022-Q4 (+4.7%)".
+   "period_a"/"value_a" are the earlier window, "period_b"/"value_b" the later,
+   and the change runs from a to b. Never write "a year earlier" or "YoY" — the
+   windows are whatever the user named and are usually not a year apart. The
+   change was worked out from the two readings shown, so it is not a published
+   growth rate and must not be called one.
+   "mixed_signals", "n_improved" and "n_worsened" work exactly as in rule 17:
+   where both appear, open with the split rather than with a side.
+   "not_in_both" lists indicators that have a reading in only one of the two
+   windows. Say which they are and that they could not be compared; do not show
+   the one reading as though it were a comparison.
 18. For a payload with "increasing" and "declining" (a group split by direction),
    give the two counts first — "Of the 8 National Indicators, 5 rose and 2 fell
    compared with a year earlier" — then the members of each group with their

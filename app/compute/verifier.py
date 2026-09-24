@@ -332,6 +332,18 @@ _T = {
         "ar": "بلغ {ind} {a} في {pa} و{b} في {pb} — بتغير قدره {abschg} ({pct}%).",
     },
     "no_reading": {"en": "no reading", "ar": "لا توجد قراءة"},
+    "comparing_windows": {
+        "en": "Comparing {a} with {b}:",
+        "ar": "مقارنة {a} بـ {b}:",
+    },
+    "against": {
+        "en": ", against {val} in {per}",
+        "ar": "، مقابل {val} في {per}",
+    },
+    "not_in_both": {
+        "en": "Not comparable — a reading in only one of the two periods: {names}.",
+        "ar": "غير قابلة للمقارنة — لها قراءة في إحدى الفترتين فقط: {names}.",
+    },
     "single_reading": {
         "en": ("{ind} was {val} in {per} — the only reading published for the "
                 "period asked about, so no change over that period can be stated."),
@@ -630,6 +642,32 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                    pct=facts["percent_change"])
     if "definition" in facts:
         return facts["definition"]
+    if facts.get("overview_comparison"):
+        # Two windows, one line each. Without a branch this fell to the generic
+        # dump and printed "window_a: 2022" at the reader.
+        lines = [_t("comparing_windows", language,
+                     a=facts.get("window_a"), b=facts.get("window_b"))]
+        for e in facts["overview_comparison"]:
+            row_unit = e.get("unit") or ""
+            line = (f"- {e.get('indicator')}: "
+                    f"{trim_zeros(e.get('value_b'))} {row_unit}".strip()
+                    + f" ({e.get('period_b')})"
+                    + _t("against", language,
+                          val=f"{trim_zeros(e.get('value_a'))} {row_unit}".strip(),
+                          per=e.get("period_a")))
+            # Percent for a level, percentage POINTS for a rate, places for a
+            # rank — the same three-way split every other shape makes.
+            if e.get("change_yoy_percent") is not None:
+                line += f" ({e['change_yoy_percent']}%)"
+            elif e.get("change_yoy_pp") is not None:
+                line += f" ({e['change_yoy_pp']} {_t('pp', language)})"
+            elif e.get("change_places") is not None:
+                line += f" ({e['change_places']} {_t('places', language)})"
+            lines.append(line)
+        if facts.get("not_in_both"):
+            lines.append(_t("not_in_both", language,
+                             names=", ".join(facts["not_in_both"])))
+        return "\n".join(lines)
     if "overview" in facts:
         # One bullet per indicator, one trailing sentence per note — composer
         # rules 24 and 25. These used to be bare newline-separated lines, so a

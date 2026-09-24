@@ -37,7 +37,8 @@ from app.resolvers.period_resolver import (parse_period_expression, parse_explic
                                             parse_relative_pair, year_earlier_label,
                                             single_period_label, period_kind,
                                             parse_same_period_pair, validate_period_labels,
-                                            granularity_from_labels, frequency_in_text)
+                                            granularity_from_labels, frequency_in_text,
+                                            PeriodResolution)
 from app.db import retriever
 from app.compute import engine as compute
 from app.compute.verifier import (verify_numbers, render_template_fallback,
@@ -1022,8 +1023,20 @@ def handle_message(user_message: str, conversation_context: str = "",
                           and (not stated_phrase
                                or names_nothing_in_catalogue(stated_phrase)))
         if _ECONOMY_WORD.search(user_message or "") or macro_followup:
-            payload, citations = _macro_overview(language, period=period)
+            # Two windows on screen and one question. "Compare it with 2022",
+            # after an overview of 2025, names the second half of a comparison
+            # whose first half is the answer above it — so both are given, side
+            # by side, instead of re-running the overview at the new window and
+            # leaving the reader to hold the old one in their head.
+            previous = _remembered_window(session_state)
+            if macro_followup and previous and _window_label(period):
+                earlier, later = sorted(
+                    (previous, period), key=lambda w: (w.start_date or w.end_date))
+                payload, citations = _macro_comparison(earlier, later, language)
+            else:
+                payload, citations = _macro_overview(language, period=period)
             if payload.get("ok"):
+                _remember_window(session_state, period)
                 if wants_chart(user_message, "macro_overview"):
                     payload["chart"] = build_chart_spec("macro_overview", payload["facts"],
                                                          "Economic Overview", None, None)
@@ -2623,6 +2636,32 @@ def _movement_verdict(change, polarity) -> Optional[str]:
     return "improved" if (change < 0) == wants_lower else "worsened"
 
 
+def _remember_window(session_state: dict, period) -> None:
+    """The window a macro answer covered, so the next turn can compare with it.
+
+    Stored as plain dates rather than the period object, because session state
+    is copied into the conversation store and has to stay something a dict can
+    hold.
+    """
+    start = getattr(period, "start_date", None)
+    end = getattr(period, "end_date", None)
+    if start or end:
+        remember(session_state, "last_macro_window",
+                 [start.isoformat() if start else None, end.isoformat() if end else None])
+    else:
+        session_state.pop("last_macro_window", None)
+
+
+def _remembered_window(session_state: dict):
+    """The previous macro window, as a period the snapshot can read."""
+    stored = (session_state or {}).get("last_macro_window") or []
+    if len(stored) != 2 or not any(stored):
+        return None
+    start, end = (date.fromisoformat(s) if s else None for s in stored)
+    return PeriodResolution(kind="range", start_date=start, end_date=end,
+                             raw=f"{(start or end).year}")
+
+
 def _spans_multiple_years(period) -> bool:
     """Whether the question named a stretch of time rather than a point in it.
 
@@ -3104,6 +3143,70 @@ def _diversification_overview(language="en"):
     return payload, citations
 
 
+def _macro_comparison(period_a, period_b, language="en"):
+    """The headline indicators at two periods, side by side.
+
+    "What was Qatar's economy like in 2025" then "compare it with 2022" is one
+    question asked in two turns, and until now the second could only re-run the
+    overview at the new period and leave the reader to hold the first answer in
+    their head. Both windows are on screen; only the system could not see them
+    together.
+
+    Built from two snapshots rather than a new retrieval, so each side is
+    exactly the answer that window produces on its own — the same readings, the
+    same units, the same per-indicator periods. What is added is the join.
+
+    period_a is the EARLIER window. The change runs a to b, which is the
+    direction a reader expects from "compare 2025 with 2022": the older figure
+    is what the newer one moved from.
+    """
+    payload_a, citations_a = _indicator_snapshot(HEADLINE_NAMES, language=language,
+                                                  period=period_a)
+    payload_b, citations_b = _indicator_snapshot(HEADLINE_NAMES, language=language,
+                                                  period=period_b)
+    if not (payload_a.get("ok") and payload_b.get("ok")):
+        # One of the two windows holds nothing. Falling back to whichever side
+        # has data is better than refusing both, and the window it covers is
+        # stated by the snapshot itself.
+        return (payload_b, citations_b) if payload_b.get("ok") else (payload_a, citations_a)
+
+    by_name_a = {e.get("indicator"): e for e in payload_a["facts"].get("overview") or []}
+    rows, missing = [], []
+    for entry_b in payload_b["facts"].get("overview") or []:
+        entry_a = by_name_a.get(entry_b.get("indicator"))
+        if not entry_a:
+            missing.append(entry_b.get("indicator"))
+            continue
+        row = {
+            "indicator": entry_b.get("indicator"),
+            "unit": entry_b.get("unit"),
+            "decimal_places": entry_b.get("decimal_places"),
+            "polarity": entry_b.get("polarity"),
+            "period_a": entry_a.get("period_label"), "value_a": entry_a.get("actual"),
+            "period_b": entry_b.get("period_label"), "value_b": entry_b.get("actual"),
+        }
+        row.update(_change_between(entry_a.get("actual"), entry_b.get("actual"),
+                                    entry_b.get("unit")))
+        row["direction_assessment"] = _movement_verdict(
+            row.get("change_yoy_percent", row.get("change_yoy_pp")), entry_b.get("polarity"))
+        rows.append(row)
+
+    if not rows:
+        return payload_b, citations_b
+
+    verdicts = [r.get("direction_assessment") for r in rows]
+    n_improved, n_worsened = verdicts.count("improved"), verdicts.count("worsened")
+    facts = {
+        "overview_comparison": _round_facts(rows),
+        "window_a": _window_label(period_a), "window_b": _window_label(period_b),
+        "n_improved": n_improved, "n_worsened": n_worsened,
+        "mixed_signals": bool(n_improved and n_worsened),
+    }
+    if missing:
+        facts["not_in_both"] = missing
+    return {"ok": True, "facts": facts}, citations_a + citations_b
+
+
 def _macro_overview(language="en", period=None):
     """Fixes F-007/F-018: a deterministic curated overview instead of silently
     falling back to a single indicator.
@@ -3152,8 +3255,8 @@ def _macro_overview(language="en", period=None):
 # greeting, a refusal, a definition or a catalogue listing gives the user a
 # button that reveals nothing they were not already shown.
 _READABLE_FACT_KEYS = {"actual", "series", "ranked", "rows", "ranked_periods",
-                       "overview", "high_value", "value_a", "value_start",
-                       "ranked_indicators", "increasing"}
+                       "overview", "overview_comparison", "high_value", "value_a",
+                       "value_start", "ranked_indicators", "increasing"}
 
 
 def is_readable(payload: dict) -> bool:
