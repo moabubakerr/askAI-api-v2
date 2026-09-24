@@ -790,11 +790,8 @@ def handle_message(user_message: str, conversation_context: str = "",
             intent["indicator_phrase"] = intent.get("indicator_phrase") or user_message
 
     if ctype == "macro_overview":
-        payload, citations = _macro_overview(language, period=period)
-        if payload.get("ok") and wants_chart(user_message, ctype):
-            payload["chart"] = build_chart_spec(ctype, payload["facts"], "Economic Overview", None, None)
-        return _finish(payload, language, session_state, citations,
-                        question=user_message)
+        return _answer_macro(user_message, language, period, session_state,
+                              is_followup=False)
 
     # --- everything below needs an indicator resolved first ---
     indicator_phrase = intent.get("indicator_phrase")
@@ -1023,35 +1020,8 @@ def handle_message(user_message: str, conversation_context: str = "",
                           and (not stated_phrase
                                or names_nothing_in_catalogue(stated_phrase)))
         if _ECONOMY_WORD.search(user_message or "") or macro_followup:
-            # Two windows on screen and one question. "Compare it with 2022",
-            # after an overview of 2025, names the second half of a comparison
-            # whose first half is the answer above it — so both are given, side
-            # by side, instead of re-running the overview at the new window and
-            # leaving the reader to hold the old one in their head.
-            previous = _remembered_window(session_state)
-            if macro_followup and previous and _window_label(period):
-                earlier, later = sorted(
-                    (previous, period), key=lambda w: (w.start_date or w.end_date))
-                payload, citations = _macro_comparison(earlier, later, language)
-            else:
-                payload, citations = _macro_overview(language, period=period)
-            if payload.get("ok"):
-                _remember_window(session_state, period)
-                if wants_chart(user_message, "macro_overview"):
-                    payload["chart"] = build_chart_spec("macro_overview", payload["facts"],
-                                                         "Economic Overview", None, None)
-                # Record WHAT was answered, not what the router proposed.
-                #
-                # This is the whole reason "compare it with 2025" kept failing
-                # after a working overview: the turn before had reached the
-                # overview through this same fallback, last_ctype still held the
-                # route the router had guessed, and the follow-up's test for "was
-                # the last answer about the economy" looked at that and found
-                # something else. An answer that does not record itself cannot be
-                # followed up.
-                session_state["last_ctype"] = "macro_overview"
-                return _finish(payload, language, session_state, citations,
-                                question=user_message)
+            return _answer_macro(user_message, language, period, session_state,
+                                  is_followup=macro_followup)
         # "What is the GDP forecast 2026" was refused with "I couldn't find an
         # indicator matching 'GDP forecast'", which blames the wording. The
         # wording is fine; the gap is that this system does not forecast and
@@ -3141,6 +3111,49 @@ def _diversification_overview(language="en"):
         # above, not something to report to a user who never named them.
         payload["facts"].pop("not_found", None)
     return payload, citations
+
+
+def _answer_macro(user_message: str, language: str, period, session_state: dict,
+                   is_followup: bool):
+    """Every macro answer, however the turn arrived at one.
+
+    There were two places that answered with the overview — the route the
+    router picks, and the fallback for a question it could not place — and they
+    had drifted apart the moment either gained anything. The fallback learned to
+    remember which window it covered, so a follow-up could compare against it;
+    the main route did not, so a perfectly normal "what was the economy like in
+    2022" left nothing behind and the follow-up after it had no first half to
+    compare with. Neither is more canonical than the other, so they are one
+    function.
+
+    is_followup says whether the SECOND window of a comparison is what this
+    message named. A question that names the economy outright starts again; one
+    that only names a period continues.
+    """
+    previous = _remembered_window(session_state)
+    if is_followup and previous and _window_label(period):
+        # Two windows on screen and one question. "Compare it with 2022", after
+        # an overview of 2025, names the second half of a comparison whose first
+        # half is the answer above it — so both are given, side by side, rather
+        # than re-running the overview at the new window and leaving the reader
+        # to hold the old one in their head.
+        earlier, later = sorted((previous, period),
+                                 key=lambda w: (w.start_date or w.end_date))
+        payload, citations = _macro_comparison(earlier, later, language)
+    else:
+        payload, citations = _macro_overview(language, period=period)
+    if payload.get("ok"):
+        if wants_chart(user_message, "macro_overview"):
+            payload["chart"] = build_chart_spec("macro_overview", payload["facts"],
+                                                 "Economic Overview", None, None)
+        # What was answered, and over what. Both are read by the next turn: the
+        # computation so a follow-up knows the subject was the economy, the
+        # window so it has something to compare against. Recorded here rather
+        # than at either call site, which is how they came to disagree.
+        session_state["last_ctype"] = "macro_overview"
+        _remember_window(session_state, period)
+    return _finish(payload, language, session_state, citations,
+                    question=user_message)
 
 
 def _macro_comparison(period_a, period_b, language="en"):
