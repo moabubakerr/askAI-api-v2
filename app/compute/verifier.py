@@ -9,6 +9,7 @@ fall back to a template-rendered answer built directly from the facts
 payload (see render_template_fallback), which has no LLM in the loop at all.
 """
 import re
+from collections import Counter
 from decimal import Decimal
 from typing import Optional
 
@@ -65,6 +66,55 @@ def _normalize(value) -> str:
         return str(value)
     # Normalize both "1935" and "1935.0" to the same key; keep reasonable precision
     return f"{f:.4f}".rstrip("0").rstrip(".")
+
+
+# Scripts this product writes in. Anything else in an answer is the model having
+# come off the rails, not a legitimate indicator name.
+_FOREIGN_SCRIPT = re.compile(r"[　-〿぀-ヿ一-鿿가-힯Ѐ-ӿ]")
+
+# How many times a line may repeat before the answer is a loop rather than a
+# list. Two identical lines happen — "no reading" against several indicators.
+MAX_LINE_REPEATS = 3
+
+
+def looks_degenerate(text: str) -> Optional[str]:
+    """Whether the model came off the rails, as opposed to being wrong.
+
+    A composed answer went out that restated itself eight times, drifted into
+    Chinese, and narrated its own attempts to correct the language: "最终版本",
+    final version, over and over. Every existing guard passed it. The numbers
+    were all in the payload so the verifier was satisfied; Arabic was present so
+    the language check was satisfied. Neither asks whether the text is SANE,
+    because until now nothing produced text that was not.
+
+    Two signals, both cheap and both unambiguous. A script this product does not
+    write in cannot be an indicator name or a country. And a line repeated past
+    the point where a list explains it is a loop.
+
+    Returns the reason, for the rejection log, or None.
+    """
+    if not text:
+        return None
+    if _FOREIGN_SCRIPT.search(text):
+        return "answer contains a script this product does not write in"
+    lines = [ln.strip() for ln in text.splitlines() if len(ln.strip()) > 20]
+    if lines:
+        most = Counter(lines).most_common(1)[0]
+        if most[1] > MAX_LINE_REPEATS:
+            return f"answer repeats the same line {most[1]} times"
+    return None
+
+
+def writes_own_sources(text: str) -> bool:
+    """Whether the model wrote a citations footer of its own.
+
+    Rule 10 forbids it and the real footer is appended deterministically after,
+    so one in the draft means the reader gets two — and the model's is the one
+    that can be wrong. Matched at the start of a line so an answer that merely
+    mentions a source in passing is left alone.
+    """
+    return bool(re.search(r"(?m)^\s*(\*{0,2})(sources|المصادر)\s*:?\s*\1\s*$", text or "",
+                           re.IGNORECASE))
 
 
 def allowed_numbers(facts_payload: dict, rounding_tolerance_decimals: int = 1) -> set[str]:

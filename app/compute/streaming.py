@@ -33,7 +33,10 @@ final check also sees the answer as a whole.
 import re
 from typing import Iterator, Optional
 
-from app.compute.verifier import NUMBER_PATTERN, allowed_numbers, is_allowed_number
+from collections import Counter
+
+from app.compute.verifier import (NUMBER_PATTERN, MAX_LINE_REPEATS, allowed_numbers,
+                                   is_allowed_number, looks_degenerate)
 
 # Where a unit may end. A blank line closes a paragraph; a newline closes a
 # bullet; a sentence-ending punctuation mark FOLLOWED BY WHITESPACE closes a
@@ -94,6 +97,7 @@ class AnswerGate:
     def __init__(self, facts_payload: dict):
         self._allowed = allowed_numbers(facts_payload)
         self._buffer = ""
+        self._seen = Counter()
         self.released = ""
         # The first number that did not trace back to the payload, if any. Set
         # means the stream was abandoned: whatever has been released is valid,
@@ -107,6 +111,28 @@ class AnswerGate:
                 return match
         return None
 
+    def _sane(self, unit: str) -> Optional[str]:
+        """Whether this unit shows the model has come off the rails.
+
+        Checked per unit and not only at the end, because the end is too late
+        when the text is already on screen. A composed answer once restated
+        itself eight times and drifted into Chinese; streamed, the reader would
+        have watched it happen.
+
+        Repetition is counted across the whole answer rather than within one
+        unit, which is the only way to see a loop — each pass through it looks
+        perfectly reasonable on its own.
+        """
+        broken = looks_degenerate(unit)
+        if broken:
+            return broken
+        key = " ".join(unit.split())
+        if len(key) > 20:
+            self._seen[key] += 1
+            if self._seen[key] > MAX_LINE_REPEATS:
+                return f"answer repeats the same line {self._seen[key]} times"
+        return None
+
     def push(self, piece: str) -> Iterator[str]:
         """Takes a raw fragment; yields whatever is now safe to show."""
         if self.rejected:
@@ -116,7 +142,7 @@ class AnswerGate:
             unit, rest = self._split()
             if unit is None:
                 return
-            offender = self._numbers_clear(unit)
+            offender = self._numbers_clear(unit) or self._sane(unit)
             if offender is not None:
                 # Caught before display. The buffer is dropped rather than
                 # released — this is the whole point of holding it.
@@ -165,7 +191,7 @@ class AnswerGate:
         if self.rejected or not self._buffer:
             return
         tail, self._buffer = self._buffer, ""
-        offender = self._numbers_clear(tail)
+        offender = self._numbers_clear(tail) or self._sane(tail)
         if offender is not None:
             self.rejected = offender
             return

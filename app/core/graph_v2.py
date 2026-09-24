@@ -38,7 +38,8 @@ from app.resolvers.period_resolver import (parse_period_expression, parse_explic
                                             granularity_from_labels)
 from app.db import retriever
 from app.compute import engine as compute
-from app.compute.verifier import verify_numbers, render_template_fallback
+from app.compute.verifier import (verify_numbers, render_template_fallback,
+                                   looks_degenerate, writes_own_sources)
 from app.compute.citations import Citation, citations_for_rows, render_sources_footer, citations_to_dicts
 from app.compute.chart_builder import build_chart_spec
 from app.compute.chart_request import wants_chart
@@ -317,6 +318,13 @@ def handle_message(user_message: str, conversation_context: str = "",
     if history:
         session_state["_history"] = history
     intent = extract_intent(user_message, conversation_context)
+    # What the message ITSELF said, before anything was inherited into it. The
+    # test for "this message carries an instruction and nothing else" has to ask
+    # the extraction, not the carried intent — carry_forward fills the very
+    # fields that would make it look like the message named something.
+    stated = {k: intent.get(k) for k in
+              ("indicator_phrase", "countries_mentioned", "country_group_mentioned",
+               "period_expression")}
     # A follow-up states only what changed. Inherit the rest from the previous
     # turn before anything is resolved, so "and for Saudi Arabia?" keeps the
     # earlier indicator AND period instead of only the indicator.
@@ -339,8 +347,15 @@ def handle_message(user_message: str, conversation_context: str = "",
     # بالعربي" with nothing before it IS small talk — there is no answer to
     # restate — and only the session knows whether there is. That is the one
     # thing a rule here has that the router does not.
-    if (ctype == "general_chat"
-            and (intent.get("answer_language") or intent.get("answer_length"))
+    #
+    # Not gated on general_chat. The router calls this a greeting sometimes and
+    # a data question other times — after an article answer, "جاوب بالعربي" was
+    # sent to the indicator resolver and came back "no indicator matches 'جاوب
+    # بالعربي'". Which wrong route it took does not matter; what matters is that
+    # the message carries an instruction and nothing else, which is exactly what
+    # the empty fields below say.
+    if ((intent.get("answer_language") or intent.get("answer_length"))
+            and not any(stated.values())
             and session_state.get("last_ctype")):
         ctype = session_state["last_ctype"]
         intent["is_followup"] = True
@@ -2836,6 +2851,21 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
         if clean and not answers_in_language(draft, language):
             clean = False
             payload["_wrong_language_draft"] = True
+        # Whether the text is SANE, which nothing above asks. An answer went out
+        # that restated itself eight times, drifted into Chinese and narrated its
+        # own attempts to fix the language — and passed every check, because its
+        # numbers were in the payload and it did contain Arabic.
+        if clean:
+            broken = looks_degenerate(draft)
+            if broken:
+                clean = False
+                offending = list(offending) + [broken]
+        # A sources footer the model wrote itself. Rule 10 forbids it and the
+        # real one is appended below, so the reader would get two — and the
+        # model's is the one that can be wrong.
+        if clean and writes_own_sources(draft):
+            clean = False
+            offending = list(offending) + ["answer wrote its own sources footer"]
         answer = draft if clean else render_template_fallback(payload, language)
         if not clean:
             payload["_verifier_rejected_numbers"] = offending  # for logging/debugging only
