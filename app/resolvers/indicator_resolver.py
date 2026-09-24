@@ -151,6 +151,64 @@ def _discriminating_terms() -> frozenset:
     return frozenset(w for w, n in counts.items() if n <= ceiling)
 
 
+@lru_cache(maxsize=1)
+def _catalogue_vocabulary() -> frozenset:
+    """Every word that appears in ANY indicator name.
+
+    Different question from _discriminating_terms, which asks which words tell
+    indicators APART. This asks whether a word belongs to the catalogue's
+    vocabulary at all — whether it could be part of some indicator's name,
+    however common.
+    """
+    words = set()
+    try:
+        catalog = _fetch_catalog()
+    except Exception:
+        return frozenset()
+    for row in catalog:
+        for name in (row.get("name_en"), row.get("name_ar")):
+            words.update(re.findall(r"[\w؀-ۿ]{3,}", (name or "").lower()))
+    return frozenset(words)
+
+
+def names_nothing_in_catalogue(phrase: str) -> bool:
+    """Whether a phrase attempts no indicator name this catalogue could hold.
+
+    "What is the latest recorded value?" — the canonical follow-up this system
+    was built for, quoted in conversation.py as QC finding F-030 — was refused
+    as the name of an indicator. has_identifying_content passes it, because
+    "latest" and "recorded" are real words that survive the noise filter; it
+    just has no way to know they are not the sort of word an indicator is
+    called.
+
+    The catalogue knows. A phrase whose every word is absent from all 583
+    indicator names is not a failed attempt at naming one, it is scaffolding
+    around a question about whatever is already being discussed.
+
+    This is deliberately NOT a list of filler words. "Solar energy share" is
+    also not in the catalogue as a name, but "energy" and "share" are
+    catalogue words, so it reads as a genuine attempt and still earns the
+    refusal that says SCAI publishes no such indicator — which is the answer
+    that failure needs, and the opposite of silently answering about the
+    previous one.
+    """
+    vocabulary = _catalogue_vocabulary()
+    if not vocabulary:
+        return False
+    cleaned = normalize_indicator_phrase(phrase or "").lower()
+    # Every token, at any length, so an empty phrase can be told apart from one
+    # made entirely of fragments. "ir" — the typo for "it" — has no word long
+    # enough to be a catalogue name, which is exactly the point: it names
+    # nothing, and requiring three letters before counting it made it look as
+    # though it named something.
+    tokens = re.findall(r"[\w؀-ۿ]+", cleaned)
+    if not tokens:
+        return False
+    candidates = [w for w in tokens
+                  if len(w) >= 3 and w not in _CONTENTLESS and not w.isdigit()]
+    return not any(w in vocabulary for w in candidates)
+
+
 def _dropped_discriminators(phrase: str, matched_name: str) -> list[str]:
     """Words the question used, the catalogue discriminates on, and the match
     does not carry."""
@@ -598,6 +656,10 @@ def clear_catalog_cache() -> None:
     # indicator added with a new distinction in its name is not one this can
     # discriminate on until it is re-read.
     _discriminating_terms.cache_clear()
+    # Same provenance, same staleness: an indicator added with a word no other
+    # name uses is not part of the vocabulary until this is re-read, and a
+    # question using that word would read as naming nothing.
+    _catalogue_vocabulary.cache_clear()
 
 
 def _fetch_catalog_uncached() -> list[dict]:

@@ -29,7 +29,8 @@ from app.core.messages import (msg, detect_language, answers_in_language,
                                 language_request_in_text)
 from app.resolvers.indicator_resolver import (resolve_indicator, has_usable_definition,
                                                ResolutionResult,
-                                               resembles_catalogue_name, has_identifying_content)
+                                               resembles_catalogue_name, has_identifying_content,
+                                               names_nothing_in_catalogue)
 from app.resolvers.country_resolver import resolve_countries, display_country
 from app.resolvers.period_resolver import (parse_period_expression, parse_explicit_frequency,
                                             choose_granularity, parse_period_pair,
@@ -954,17 +955,33 @@ def handle_message(user_message: str, conversation_context: str = "",
     # misnamed a metric is the system telling them their question was
     # unrecognisable when it was not.
     #
-    # Deliberately narrow, because the alternative failure is worse: silently
+    # The same failure at full length: "what is the latest recorded value?",
+    # asked straight after a definition of Inflation, was refused as the name of
+    # an indicator. That is the canonical follow-up this system was built for —
+    # conversation.py quotes it as QC finding F-030 — and it was failing because
+    # the test here was the phrase's LENGTH, which "latest recorded value" is
+    # not short enough to pass.
+    #
+    # Length was always the wrong question. The right one is whether the phrase
+    # attempts a name this catalogue could hold, and the catalogue can answer
+    # that: not one of "latest", "recorded" or "value" appears in any of the 583
+    # indicator names, so the phrase names nothing and is scaffolding around a
+    # question about whatever is already under discussion.
+    #
+    # Still narrow, because the alternative failure is worse — silently
     # answering about the previous indicator when the user really did name a new
-    # one that this system does not carry. So it only fires on a fragment too
-    # short to be a name — "ir", "it", "that", a stray letter — never on
-    # something like "solar energy share", which IS a real attempt at a name and
-    # deserves the refusal that says so.
+    # one this system does not carry. "Solar energy share" is not a catalogue
+    # name either, but "energy" and "share" ARE catalogue words, so it reads as
+    # a genuine attempt and still earns the refusal that says so.
+    # Not gated on is_followup. That is the router's field, it is what failed
+    # on this very question, and it adds nothing here: a phrase that names
+    # nothing the catalogue holds, asked while an indicator is under discussion,
+    # IS a follow-up whatever the router called it. The remembered indicator is
+    # the real gate — it exists only within the decay window, so there is no
+    # subject to fall back to once the conversation has moved on.
     if (resolution.status not in ("resolved", "inactive")
-            and intent.get("is_followup")
             and session_state.get("last_indicator_name")
-            and len((indicator_phrase or "").split()) <= 2
-            and len((indicator_phrase or "").strip()) <= 6):
+            and names_nothing_in_catalogue(indicator_phrase or "")):
         indicator_phrase = session_state["last_indicator_name"]
         resolution = resolve_indicator(indicator_phrase,
                                         require_data=(ctype != "definition"),
