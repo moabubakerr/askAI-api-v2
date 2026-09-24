@@ -662,8 +662,20 @@ def handle_message(user_message: str, conversation_context: str = "",
         # question is about the writing.
         topic = intent.get("indicator_phrase") or user_message
         if not _explicitly_asks_for_writing(user_message):
-            probe = resolve_indicator(topic, require_data=True, language=language)
-            if (probe.status == "resolved" and probe.match
+            # Probed against the model's topic AND the message as written, best
+            # score wins. The topic alone made this test depend on how the
+            # router happened to paraphrase the question, and the router sees the
+            # transcript — so the SAME question resolved differently depending on
+            # what had been asked before it. "Does Qatar export anything beside
+            # oil and gas" came back from the catalogue as Non-Hydrocarbon
+            # Exports in one session and from an article in the next, with
+            # nothing about the question having changed.
+            #
+            # The message is often the better probe of the two: "beside oil and
+            # gas" sits closer to "Non-Hydrocarbon Exports as Share of Total
+            # Exports" than a paraphrase that has dropped the contrast.
+            probe, topic = _best_indicator_probe([topic, user_message], language)
+            if (probe and probe.status == "resolved" and probe.match
                     and probe.match.confidence >= CONFIDENT_MATCH):
                 ctype = "latest_value"
                 intent["indicator_phrase"] = topic
@@ -1726,6 +1738,36 @@ _ASKS_FOR_FORECAST = re.compile(
     r"|توقع|توقعات|تنبؤ|إسقاط|المتوقع",
     re.IGNORECASE,
 )
+
+
+def _best_indicator_probe(phrases: list, language: str = "en"):
+    """The strongest resolution among several wordings of the same question.
+
+    Returns (result, phrase) for whichever scored highest, or (None, first).
+
+    Exists because a routing decision that probes ONE phrasing inherits every
+    wobble in how that phrasing was produced. The intent agent paraphrases the
+    question, and it sees the transcript while doing so, which makes its
+    paraphrase depend on what was asked earlier — so a test built on it gives
+    the same question different answers in different sessions.
+
+    Duplicates and blanks are skipped, so the common case where the model simply
+    echoed the message costs one lookup, not two.
+    """
+    best, best_phrase = None, (phrases[0] if phrases else "")
+    seen = set()
+    for phrase in phrases:
+        text = (phrase or "").strip()
+        key = text.lower()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        result = resolve_indicator(text, require_data=True, language=language)
+        if result.status != "resolved" or not result.match:
+            continue
+        if best is None or result.match.confidence > best.match.confidence:
+            best, best_phrase = result, text
+    return best, best_phrase
 
 
 def _asks_for_forecast(text: str) -> bool:
