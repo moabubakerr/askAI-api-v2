@@ -1012,14 +1012,31 @@ def handle_message(user_message: str, conversation_context: str = "",
         # which after a macro overview is whatever was being discussed before
         # it — so the carried value would hide the fact that this message names
         # no indicator at all.
+        #
+        # "It" also has to survive the test. The router fills indicator_phrase
+        # with whatever noun the message contains, and "it" is a noun — so a
+        # phrase that names nothing the catalogue holds counts as naming
+        # nothing, the same test the rescue above uses.
+        stated_phrase = (stated.get("indicator_phrase") or "").strip()
         macro_followup = (session_state.get("last_ctype") == "macro_overview"
-                          and not (stated.get("indicator_phrase") or "").strip())
+                          and (not stated_phrase
+                               or names_nothing_in_catalogue(stated_phrase)))
         if _ECONOMY_WORD.search(user_message or "") or macro_followup:
             payload, citations = _macro_overview(language, period=period)
             if payload.get("ok"):
                 if wants_chart(user_message, "macro_overview"):
                     payload["chart"] = build_chart_spec("macro_overview", payload["facts"],
                                                          "Economic Overview", None, None)
+                # Record WHAT was answered, not what the router proposed.
+                #
+                # This is the whole reason "compare it with 2025" kept failing
+                # after a working overview: the turn before had reached the
+                # overview through this same fallback, last_ctype still held the
+                # route the router had guessed, and the follow-up's test for "was
+                # the last answer about the economy" looked at that and found
+                # something else. An answer that does not record itself cannot be
+                # followed up.
+                session_state["last_ctype"] = "macro_overview"
                 return _finish(payload, language, session_state, citations,
                                 question=user_message)
         # "What is the GDP forecast 2026" was refused with "I couldn't find an
