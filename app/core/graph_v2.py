@@ -1001,7 +1001,20 @@ def handle_message(user_message: str, conversation_context: str = "",
         # growth", one word away, still reaches Real GDP. Here nothing resolved,
         # so there is no indicator to prefer and no such care is needed — the
         # word "economy" and a failed lookup are between them the whole case.
-        if _ECONOMY_WORD.search(user_message or ""):
+        #
+        # Or a follow-up to one. "Compare it with 2022", straight after "what
+        # was Qatar's economy like in 2023", was refused and told to name a
+        # metric — the four it had just listed. "It" is the economy, and the
+        # message says so only by continuing the turn before; there is no word
+        # in it for a pattern to find, which is why last_ctype is the test.
+        # Tested against what the MESSAGE said, not the carried intent:
+        # carry_forward fills indicator_phrase from the last indicator named,
+        # which after a macro overview is whatever was being discussed before
+        # it — so the carried value would hide the fact that this message names
+        # no indicator at all.
+        macro_followup = (session_state.get("last_ctype") == "macro_overview"
+                          and not (stated.get("indicator_phrase") or "").strip())
+        if _ECONOMY_WORD.search(user_message or "") or macro_followup:
             payload, citations = _macro_overview(language, period=period)
             if payload.get("ok"):
                 if wants_chart(user_message, "macro_overview"):
@@ -2675,9 +2688,20 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
         # Honour the period the question asked for. Each indicator is then read
         # at ITS latest reading WITHIN that window, which is why a 2023 question
         # yields 2023-Q4 for a quarterly series and 2023-12 for a monthly one.
-        rows = retriever.get_series(match.indicator_detail_id, published_id, gran,
-                                     start_date=getattr(period, "start_date", None),
-                                     end_date=getattr(period, "end_date", None))
+        # The whole series, then the window taken out of it in Python.
+        #
+        # Fetching the window from the database left nothing outside it to
+        # compare against: a 2023 question retrieved only 2023, so the reading a
+        # year earlier was not there to be found and the answer said "down from
+        # a year earlier (-3.57% YoY)" beside an empty column. The change came
+        # from SCAI's own figure on the 2023 row and was right; the value it
+        # moved FROM had been filtered away, so the claim had nothing behind it.
+        all_rows = retriever.get_series(match.indicator_detail_id, published_id, gran)
+        rows = [r for r in all_rows
+                if (not getattr(period, "start_date", None)
+                    or (r.get("period_date") and r["period_date"] >= period.start_date))
+                and (not getattr(period, "end_date", None)
+                     or (r.get("period_date") and r["period_date"] <= period.end_date))]
         if period is not None:
             rows = _apply_last_n_years(rows, period)
         latest = compute.latest_value(rows)
@@ -2688,7 +2712,9 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
             # no indicator at all. Those are different facts and the difference
             # matters: "Trade Balance has no Q1 2026 reading, its series ends at
             # 2025-Q4" is useful, "Trade Balance was not found" is wrong.
-            covers = retriever.get_series(match.indicator_detail_id, published_id, gran)
+            # all_rows is the full series, already fetched above — this used to
+            # re-query for it.
+            covers = all_rows
             out_of_range.append({
                 "indicator": match.display_name(language),
                 "asked_as": phrase,
@@ -2721,7 +2747,9 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
             # is a claim the reader has to take on trust; the pair of values is
             # the evidence for it, and it is what "show me before and after"
             # asks for.
-            prior = _find_row_by_period(rows, year_earlier_label(
+            # Looked up in the FULL series, not the window: the reading a year
+            # before the window's first period is by definition outside it.
+            prior = _find_row_by_period(all_rows, year_earlier_label(
                 latest.facts.get("period_label")))
             # ...unless the question named a SPAN, in which case the two ends of
             # that span are the comparison it asked for.
