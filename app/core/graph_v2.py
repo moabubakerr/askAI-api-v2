@@ -1110,6 +1110,27 @@ def handle_message(user_message: str, conversation_context: str = "",
     implied_gran = granularity_from_labels(period.raw or user_message)
     if not explicit_gran and implied_gran in available_gran:
         granularity = implied_gran
+        # ...unless nothing is published at that granularity INSIDE the window.
+        #
+        # A year implies the yearly series, which is right whenever the yearly
+        # row exists. For the CURRENT year it does not: the year is not over.
+        # "قارن نسبة التضخم بين قطر وسنغافورة لسنة 2026" was refused — no
+        # approved data for either country in 2026 — while the same question
+        # without the year answered from April 2026 for both. The data was
+        # there the whole time, one granularity down.
+        #
+        # Falling back rather than refusing matches what the multi-indicator
+        # snapshot already does with a window: read each series at its latest
+        # reading WITHIN it, so a 2023 question gives 2023-Q4 for a quarterly
+        # series and 2023-12 for a monthly one. Refusing instead tells the
+        # reader SCAI published nothing that year, which is a claim about the
+        # data rather than about the shape of the query.
+        if (period.start_date or period.end_date) and not retriever.get_series(
+                match.indicator_detail_id, published_detail_id, granularity,
+                start_date=period.start_date, end_date=period.end_date):
+            finer = choose_granularity(None, {g for g in available_gran if g != granularity})
+            if finer:
+                granularity = finer
     else:
         granularity = choose_granularity(explicit_gran, available_gran)
 
