@@ -325,6 +325,23 @@ def handle_message(user_message: str, conversation_context: str = "",
     stated = {k: intent.get(k) for k in
               ("indicator_phrase", "countries_mentioned", "country_group_mentioned",
                "period_expression")}
+    # The frequency THIS question names, filled in where the router missed it.
+    #
+    # Before carry_forward, and that ordering is the whole point. It has to run
+    # above the block that records what the turn was about, or a frequency read
+    # from the text is never remembered: "List Qatar's QUARTERLY GDP values for
+    # 2024 and 2025" selected the quarterly series and stored nothing, so the
+    # follow-up "بالعربي, لسنه 2021 و 2023" — which names no frequency of its own
+    # — had none to inherit and silently answered in yearly figures. A
+    # conversation about quarters does not stop being about quarters because the
+    # next message only changes the years.
+    #
+    # And it has to run BEFORE the inheritance, not after. carry_forward fills
+    # this slot only when it is empty, so a frequency taken from the message
+    # blocks the old one; reading it afterwards instead let "and monthly?"
+    # inherit quarterly and ignore the word the user had just typed.
+    if not intent.get("explicit_frequency"):
+        intent["explicit_frequency"] = frequency_in_text(user_message)
     # A follow-up states only what changed. Inherit the rest from the previous
     # turn before anything is resolved, so "and for Saudi Arabia?" keeps the
     # earlier indicator AND period instead of only the indicator.
@@ -1097,11 +1114,9 @@ def handle_message(user_message: str, conversation_context: str = "",
     # found", regardless of indicator or period.
     published_detail_id = match.published_detail_id if match.is_published else None
     available_gran = retriever.get_available_granularities(published_detail_id, match.indicator_detail_id)
-    # The model's reading first, the question itself as the backstop. The model
-    # leaves this empty often enough that a question naming its frequency in the
-    # second word was answered at another one — see frequency_in_text.
-    explicit_gran = (parse_explicit_frequency(intent.get("explicit_frequency"))
-                     or frequency_in_text(user_message))
+    # Already filled from the question in handle_message where the router left
+    # it empty, so this is one source again and a follow-up can inherit it.
+    explicit_gran = parse_explicit_frequency(intent.get("explicit_frequency"))
     # A named period implies its own granularity, and it is stronger evidence
     # than the default. Without this the finest series always won: "GDP for
     # 2023" returned 170.55, which is Real GDP in 2023-Q4, while the published
