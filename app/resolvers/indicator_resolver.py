@@ -256,10 +256,22 @@ def _has_contradiction(phrase: str, matched_name: str) -> bool:
     # General rather than a list of known qualifiers — "non-oil", "non-financial",
     # "non-resident" and whatever the catalogue grows next all behave the same,
     # and enumerating them would be one short every time.
-    for match in _NEGATED.finditer(phrase_l):
-        subject = next((g for g in match.groups() if g), "")
-        if subject and subject not in matched_l:
-            return True
+    #
+    # What matters is whether the match carries a negation AT ALL, not whether
+    # it negates the same word. "How much of Qatar's exports are non-oil?"
+    # matched "Non-Hydrocarbon Exports (share of total exports)" — the right
+    # indicator — and was refused, because "oil" does not appear in a name that
+    # says "Hydrocarbon". Non-oil and non-hydrocarbon are one restriction in two
+    # vocabularies, and demanding the word survive verbatim rejected the answer
+    # for using SCAI's own term for it.
+    #
+    # Reading it as "does the match drop the restriction" needs no synonyms and
+    # is the thing the rule was for: "Real GDP" negates nothing, so it dropped
+    # it; "Non-Hydrocarbon Exports" negates something, so it did not. A match
+    # that negates a genuinely different subject is caught by the discriminating
+    # terms below, which is where that comparison belongs.
+    if _NEGATED.search(phrase_l) and not _NEGATED.search(matched_l):
+        return True
 
     # And a qualifier that is not a negation but narrows the measure just as
     # much: GDP per capita is not GDP. Which words those are is read from the
