@@ -327,6 +327,28 @@ def handle_message(user_message: str, conversation_context: str = "",
     performance_followup = False
 
     ctype, scope_pinned = decide_route(user_message, intent, session_state)
+    # An instruction about how to WRITE the answer, mistaken for small talk.
+    #
+    # "جاوب بالعربي" was answered "على الرحب والسعة — اسألني عن أي شيء آخر": a
+    # pleasantry in reply to an instruction, which tells the user their request
+    # was not understood and then does not carry it out. The same trap sits under
+    # "in short" said on its own.
+    #
+    # The router is told about these in its prompt and this is not second-
+    # guessing it: greeting or not cannot be decided from the message alone. "جاوب
+    # بالعربي" with nothing before it IS small talk — there is no answer to
+    # restate — and only the session knows whether there is. That is the one
+    # thing a rule here has that the router does not.
+    if (ctype == "general_chat"
+            and (intent.get("answer_language") or intent.get("answer_length"))
+            and session_state.get("last_ctype")):
+        ctype = session_state["last_ctype"]
+        intent["is_followup"] = True
+        # carry_forward has already run, so the slots it skipped while this
+        # looked like a greeting have to be filled now. "Answer the last question
+        # in Arabic" is six words and matches none of the short-follow-up shapes,
+        # so without this it would inherit the computation and no subject.
+        intent = carry_forward(intent, session_state, user_message)
     # A follow-up that only swaps the subject keeps the question being asked —
     # "What does inflation mean?" then "what about GDP" is asking what GDP
     # means, not what it is worth. That decision is the intent agent's, not a
@@ -360,6 +382,19 @@ def handle_message(user_message: str, conversation_context: str = "",
     language = detect_language(user_message, intent.get("language"))
     if session_state.get("last_language") and not carries_language_signal(user_message):
         language = session_state["last_language"]
+    # An explicit instruction outranks both. Script says what the QUESTION is in;
+    # this says what the ANSWER should be in, and they are different things —
+    # "answer in Arabic", typed in English, means the answer is Arabic.
+    #
+    # It persists, for the same reason answer_length does: someone who asks once
+    # to be answered in Arabic means it for the conversation, not for one turn.
+    # And it decays with the other slots, so an instruction given about a subject
+    # the user has long left does not govern a new one forever.
+    asked_language = str(intent.get("answer_language") or "").strip().lower()
+    if asked_language in ("en", "ar"):
+        remember(session_state, "answer_language", asked_language)
+    if session_state.get("answer_language"):
+        language = session_state["answer_language"]
     session_state["last_language"] = language
 
     # Remember what this turn was about, whatever happens below, so the next

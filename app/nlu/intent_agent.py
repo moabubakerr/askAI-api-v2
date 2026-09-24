@@ -60,6 +60,7 @@ Output ONLY JSON with this exact shape:
   "order": "best" | "worst" | null,
   "direction_asked": "up" | "down" | null,
   "answer_length": "brief" | "detailed" | null,
+  "answer_language": "en" | "ar" | null,
   "language": "en" | "ar",
   "is_followup": true|false,
   "followup_reference": "<what the follow-up refers back to, e.g. 'same indicator, different period', or null>"
@@ -282,6 +283,22 @@ Rules:
   and do NOT treat it as a new question about a different thing.
   If the question asks for both at once ("explain in more detail, briefly"),
   prefer "detailed" — it is asking for more, and the qualifier is about style.
+- "answer_language" is the language the user asked the ANSWER to be in, which is
+  not the same as the language they asked in. Like "answer_length" it says nothing
+  about the data: it never changes which indicator, period or country is meant.
+  "جاوب بالعربي", "أجب بالعربية", "بالعربي من فضلك", "answer in Arabic", "reply in
+  English", "رد بالإنجليزية", "in English please" — all set it. null when they said
+  nothing about it, which is almost always.
+  A message whose ONLY content is this is a FOLLOW-UP asking for the answer
+  already on screen, said again in another language. It sets answer_language, sets
+  is_followup=true, and leaves computation_type to be inherited and every other
+  field null. It is NOT "general_chat": "جاوب بالعربي" was answered "على الرحب
+  والسعة — اسألني عن أي شيء آخر" — a pleasantry in reply to an instruction,
+  which tells the user their request was not understood and does not carry it out.
+  "جاوب اخر سوال بالعربي" ("answer the last question in Arabic") is the same
+  request, saying out loud what the shorter form leaves implied.
+  Judge it by MEANING. A question that merely MENTIONS a language is not this:
+  "how many people speak English in Qatar" asks about data and sets it to null.
 - Do not invent countries, periods, or indicators the user did not mention.
 - A follow-up that names only a NEW SUBJECT keeps the computation_type of the turn
   it follows. The "Prior conversation" block annotates each turn with what it
@@ -342,6 +359,7 @@ def extract_intent(user_message: str, conversation_context: str = "") -> dict:
             "order": None,
             "direction_asked": None,
             "answer_length": None,
+            "answer_language": None,
             "language": "en",
             "is_followup": False,
             "followup_reference": None,

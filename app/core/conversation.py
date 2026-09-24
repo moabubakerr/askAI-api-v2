@@ -82,7 +82,10 @@ DECAYING_SLOTS = ("last_indicator_name", "last_indicator_detail_id", "last_count
                   # up: "give me on its own" four turns after the offer means
                   # something else, and there is nothing to return to.
                   "last_offered_indicators",
-                  "answer_length")
+                  # Both are instructions about how to WRITE the answer rather
+                  # than about what it says, and both outlive the turn that gave
+                  # them without outliving the subject they were given about.
+                  "answer_length", "answer_language")
 
 
 def turn_index(state: dict) -> int:
