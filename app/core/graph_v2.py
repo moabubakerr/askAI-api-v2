@@ -631,6 +631,12 @@ def handle_message(user_message: str, conversation_context: str = "",
             e["unit_en"] = display_unit(e.get("unit_en"), e.get("format"),
                                          language, e.get("unit_ar"))
             e["decimal_places"] = decimals_from_format(e.get("format"))
+            # The indicator's own Arabic name, beside its own Arabic unit. Only
+            # the unit was being switched here, so an Arabic answer about a
+            # sector read "Cost per Student: 45.2 ألف ر.ق" — the number and the
+            # unit localised, the subject not.
+            if is_arabic(language) and (e.get("indicator_ar") or "").strip():
+                e["indicator"] = e["indicator_ar"].strip()
         session_state["last_ctype"] = ctype
         if ctype == "scope_snapshot":
             result = compute.scope_snapshot(entries)
@@ -1047,19 +1053,19 @@ def handle_message(user_message: str, conversation_context: str = "",
 
         if not entries:
             payload = {"ok": False, "message": msg("no_analysis", language,
-                                                    indicator=match.name_en.strip())}
+                                                    indicator=match.display_name(language))}
             return _finish(payload, language, session_state, [],
                         question=user_message)
 
         citations = [Citation(indicator=match.name_en.strip(), data_source=match.data_source_en,
                                table="indicator_analysis", record_id=None,
                                period_label=entries[0]["period_label"], country="Qatar")]
-        payload = {"ok": True, "facts": {"indicator": match.name_en.strip(),
+        payload = {"ok": True, "facts": {"indicator": match.display_name(language),
                                           "unit": match.unit_en, "analysis": entries}}
         # Verbatim, and skip the Composer entirely: this is the Council's own
         # wording, and a model asked to "phrase" it would paraphrase it.
         body = "\n\n".join(
-            f"{match.name_en.strip()} — {e['period_label']}"
+            f"{match.display_name(language)} — {e['period_label']}"
             + (f" ({e['value']} {match.unit_en or ''})".rstrip() if e.get("value") is not None else "")
             + "\n" + "\n\n".join(e[k] for k in ("summary", "detailed", "npc_analysis", "benchmark")
                                    if e.get(k))
@@ -1097,11 +1103,11 @@ def handle_message(user_message: str, conversation_context: str = "",
         definition = strip_html(definition or "").strip()
         if not definition or definition == "-":
             payload = {"ok": False, "message": msg("no_definition", language,
-                                                     indicator=match.name_en.strip())}
+                                                     indicator=match.display_name(language))}
             return _finish(payload, language, session_state, [],
                         question=user_message)
         payload = {"ok": True, "facts": {
-            "indicator": match.name_en.strip(),
+            "indicator": match.display_name(language),
             "definition": definition,
             "unit": match.unit_en,
         }}
@@ -1177,10 +1183,10 @@ def handle_message(user_message: str, conversation_context: str = "",
         # no data at all.
         wanted = intent.get("explicit_frequency")
         if available_gran:
-            message = msg("no_data_at_frequency", language, indicator=match.name_en.strip(),
+            message = msg("no_data_at_frequency", language, indicator=match.display_name(language),
                            wanted=wanted, available=", ".join(sorted(available_gran)))
         else:
-            message = msg("no_data_at_all", language, indicator=match.name_en.strip())
+            message = msg("no_data_at_all", language, indicator=match.display_name(language))
         payload = {"ok": False, "message": message}
         return _finish(payload, language, session_state, [],
                         question=user_message)
@@ -2578,14 +2584,14 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
             # 2025-Q4" is useful, "Trade Balance was not found" is wrong.
             covers = retriever.get_series(match.indicator_detail_id, published_id, gran)
             out_of_range.append({
-                "indicator": match.name_en.strip(),
+                "indicator": match.display_name(language),
                 "asked_as": phrase,
                 "covers_from": covers[0]["period_label"] if covers else None,
                 "covers_to": covers[-1]["period_label"] if covers else None,
             })
             continue
         row = _find_row_by_period(rows, latest.facts.get("period_label"))
-        entry = {"indicator": match.name_en.strip(),
+        entry = {"indicator": match.display_name(language),
                  "unit": display_unit(match.unit_en, match.format, language, match.unit_ar),
                  "decimal_places": decimals_from_format(match.format),
                  # Which way is WELCOME for this indicator, as SCAI records it.

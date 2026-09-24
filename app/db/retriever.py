@@ -443,7 +443,8 @@ latest AS (
       AND (CAST(:end_date   AS date) IS NULL OR p.period_date <= CAST(:end_date   AS date))
     ORDER BY p.published_indicator_detail_id, p.period_date DESC
 )
-SELECT i.name_en AS indicator, i.indicator_id AS indicator_record_id,
+SELECT i.name_en AS indicator, i.name_ar AS indicator_ar,
+       i.indicator_id AS indicator_record_id,
        d.unit_en, d.unit_ar, d.format, d.polarity_en,
        -- What the DETAIL is called, and how many the indicator has. IsMain is
        -- not always the headline: Workforce (Economically Active) has four
