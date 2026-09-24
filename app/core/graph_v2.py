@@ -789,7 +789,7 @@ def handle_message(user_message: str, conversation_context: str = "",
             intent["indicator_phrase"] = intent.get("indicator_phrase") or user_message
 
     if ctype == "macro_overview":
-        payload, citations = _macro_overview(language)
+        payload, citations = _macro_overview(language, period=period)
         if payload.get("ok") and wants_chart(user_message, ctype):
             payload["chart"] = build_chart_spec(ctype, payload["facts"], "Economic Overview", None, None)
         return _finish(payload, language, session_state, citations,
@@ -988,6 +988,27 @@ def handle_message(user_message: str, conversation_context: str = "",
                                         language=language)
 
     if resolution.status != "resolved" and resolution.status != "inactive":
+        # A question about THE ECONOMY, which is not an indicator and never
+        # will be. "Compare Qatar's economy between 2023 and 2025" was told to
+        # "specify particular metrics such as inflation, Real GDP, trade
+        # balance" — the exact four the macro overview would have given
+        # unprompted, so the system knew the answer and asked the user to ask
+        # again in its own vocabulary.
+        #
+        # _asks_about_the_economy is stricter than this on purpose: it decides
+        # whether to PREFER the overview over a possible indicator, and needs
+        # both the subject and a word about its state so that "what is economic
+        # growth", one word away, still reaches Real GDP. Here nothing resolved,
+        # so there is no indicator to prefer and no such care is needed — the
+        # word "economy" and a failed lookup are between them the whole case.
+        if _ECONOMY_WORD.search(user_message or ""):
+            payload, citations = _macro_overview(language, period=period)
+            if payload.get("ok"):
+                if wants_chart(user_message, "macro_overview"):
+                    payload["chart"] = build_chart_spec("macro_overview", payload["facts"],
+                                                         "Economic Overview", None, None)
+                return _finish(payload, language, session_state, citations,
+                                question=user_message)
         # "What is the GDP forecast 2026" was refused with "I couldn't find an
         # indicator matching 'GDP forecast'", which blames the wording. The
         # wording is fine; the gap is that this system does not forecast and
@@ -2933,7 +2954,7 @@ def _diversification_overview(language="en"):
     return payload, citations
 
 
-def _macro_overview(language="en"):
+def _macro_overview(language="en", period=None):
     """Fixes F-007/F-018: a deterministic curated overview instead of silently
     falling back to a single indicator.
 
@@ -2944,7 +2965,13 @@ def _macro_overview(language="en"):
     period-on-period change at all, so "how is the economy doing right now?"
     could only list four levels and call that an answer.
     """
-    payload, citations = _indicator_snapshot(HEADLINE_NAMES, language=language)
+    # The period the question named, where it named one. "Compare Qatar's
+    # economy between 2023 and 2025" is a macro question with a window, and this
+    # used to take none — so the only macro answer available was "right now",
+    # whatever span was asked about. _indicator_snapshot already reads each
+    # series at its latest reading INSIDE a window; it was simply never given
+    # one from here.
+    payload, citations = _indicator_snapshot(HEADLINE_NAMES, language=language, period=period)
     if payload.get("ok"):
         # Tells the Composer this is the "how is the economy doing" question
         # rather than an arbitrary set of metrics, so it reports the movement
