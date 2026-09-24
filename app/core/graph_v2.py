@@ -2715,6 +2715,24 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
     # Each line carries its own decimal_places, so _round_facts rounds each to
     # its own precision rather than to one shared figure.
     payload = {"ok": True, "facts": {"overview": _round_facts(facts)}}
+    # The window the question named, stated in the payload.
+    #
+    # Each line already carries its own period, and that was assumed to be
+    # enough. It is not: asked "what about in 2023" after a macro overview, the
+    # Composer had four lines whose periods were not 2023, no statement of what
+    # had been asked for, and no way to say the two did not match — so it wrote
+    # "Real GDP: 181.49 Bn QAR in 2024-Q4, which is the closest available
+    # figure" over the year-earlier column, and "No data available for 2023"
+    # against a line whose series covers 2023 perfectly well. Both invented.
+    #
+    # Composer rule 19 is written around this key and fires once it is present:
+    # say which window was used, because a figure for the wrong period reads
+    # exactly like a figure for the right one. The scope routes have set it
+    # since that rule was added; the snapshot every macro and multi-indicator
+    # answer is built from never did.
+    asked_period = getattr(period, "raw", None) if period is not None else None
+    if asked_period:
+        payload["facts"]["as_of"] = asked_period
     # Ranking by movement, so "which experienced the largest decline?" can be
     # answered without the Composer ordering figures itself — the exact class
     # of work the QC report found it getting wrong (F-009). Only over the lines

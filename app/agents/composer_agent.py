@@ -316,6 +316,16 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    reading taken in it. Say so — "as of 2023, the most recent reading for each"
    — and then give each line with its own period_label. The two are not the
    same and a reader who is not told will assume the tighter one.
+   Each line's period_label is the period that line IS FOR, and no other figure
+   on it can be moved there. "previous_value" and "previous_period" are the
+   comparison, never a reading for the period the question named: asked about
+   2023, an answer reported "Real GDP: 181.49 Bn QAR in 2024-Q4, which is the
+   closest available figure" — the year-earlier column, relabelled as the
+   answer — and then wrote "No data available for 2023" against a line whose
+   series covers 2023. Do not move a figure to a period it is not for, and do
+   not describe one as "the closest available"; if the lines do not reach the
+   period asked about, the as_of sentence has already said which periods they
+   are for, and that is the whole of what you know.
 
 20. For a payload with "assessment" ("improving" | "deteriorating" | "unchanged"),
    the question asked whether the indicator is getting better or worse. STATE
