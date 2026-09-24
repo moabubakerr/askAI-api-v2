@@ -425,6 +425,23 @@ def handle_message(user_message: str, conversation_context: str = "",
     asked_language = str(intent.get("answer_language") or "").strip().lower()
     if asked_language in ("en", "ar"):
         remember(session_state, "answer_language", asked_language)
+    elif (session_state.get("answer_language")
+            and carries_language_signal(user_message)
+            and detect_language(user_message) != session_state["answer_language"]):
+        # ...until the user writes a question in the other language themselves.
+        #
+        # "بالعربي" set this and kept it, so "which 3 countries have the lowest
+        # inflation" — typed in English, several turns later — came back in
+        # Arabic. The preference was a real instruction and outlived its
+        # occasion: someone typing a full question in English is telling us
+        # which language they want more plainly than a request three turns ago.
+        #
+        # Only against a message with enough script to be sure of. A bare "2024"
+        # or "top 3" says nothing about language, and dropping the preference on
+        # those would undo it by accident — which is the whole reason
+        # carries_language_signal exists.
+        session_state.pop("answer_language", None)
+        (session_state.get("_slot_turns") or {}).pop("answer_language", None)
     if session_state.get("answer_language"):
         language = session_state["answer_language"]
     session_state["last_language"] = language
