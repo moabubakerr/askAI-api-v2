@@ -331,7 +331,8 @@ def trend(rows: list[dict], unit: Optional[str] = None) -> ComputeResult:
     return ComputeResult(True, facts=facts)
 
 
-def period_ranking(rows: list[dict], descending: bool = True) -> ComputeResult:
+def period_ranking(rows: list[dict], descending: bool = True,
+                    limit: Optional[int] = None) -> ComputeResult:
     """Ranks the retrieved periods by value — F-009: "List Qatar's quarterly GDP
     values for 2024 and 2025 and rank them from highest to lowest."
 
@@ -344,11 +345,23 @@ def period_ranking(rows: list[dict], descending: bool = True) -> ComputeResult:
     if not valid:
         return ComputeResult(False, message="No approved data points were found for this indicator/period.")
     ranked = sorted(valid, key=lambda r: r["actual"], reverse=descending)
-    return ComputeResult(True, facts={
-        "ranked_periods": [{"period_label": r["period_label"], "actual": r["actual"]} for r in ranked],
+    # "Top 3" asked of a period ranking was returning every period. The intent
+    # agent fills `limit` for exactly this and scope_performance honoured it
+    # while this route never read it, so the same three words worked on a sector
+    # and did nothing on a series.
+    shown = ranked[:limit] if limit else ranked
+    facts = {
+        "ranked_periods": [{"period_label": r["period_label"], "actual": r["actual"]} for r in shown],
         "order": "highest_to_lowest" if descending else "lowest_to_highest",
-        "n_points": len(ranked),
-    })
+        "n_points": len(shown),
+    }
+    # Said out loud when the list was cut, on the same reasoning as
+    # scope_performance: presenting three rows as though they were the whole
+    # ranking describes a different series from the real one.
+    if len(shown) < len(ranked):
+        facts["n_ranked"] = len(ranked)
+        facts["n_shown"] = len(shown)
+    return ComputeResult(True, facts=facts)
 
 
 def country_comparison(series_by_country: dict[str, list[dict]], period_label: Optional[str] = None) -> ComputeResult:
@@ -377,13 +390,20 @@ def country_comparison(series_by_country: dict[str, list[dict]], period_label: O
 
 
 def country_ranking(series_by_country: dict[str, list[dict]], period_label: Optional[str] = None,
-                     ascending: bool = True) -> ComputeResult:
+                     ascending: bool = True, limit: Optional[int] = None) -> ComputeResult:
     """Fixes F-027: ranking needs an explicit common period across countries;
     if none is given, use the latest period common to ALL of them and say so."""
     comparison = country_comparison(series_by_country, period_label)
     if not comparison.ok:
         return comparison
     rows = sorted(comparison.facts["rows"], key=lambda r: r["actual"], reverse=not ascending)
+    # "The three countries with the lowest inflation" listed every benchmark
+    # country. Cutting happens AFTER the sort and after the extremum below is
+    # decided from the full set, so the leader is the leader of the ranking and
+    # not merely of the part shown.
+    ranked_total = len(rows)
+    if limit:
+        rows = rows[:limit]
     facts = {
         "ranked": rows,
         "countries_with_no_data": comparison.facts["countries_with_no_data"],
@@ -399,16 +419,24 @@ def country_ranking(series_by_country: dict[str, list[dict]], period_label: Opti
     #
     # The reading is still returned. What is withheld is the claim about where
     # it ranks.
-    if len(rows) >= 2:
+    #
+    # Tested against how many countries were RANKED, not how many are shown.
+    # "Which country has the lowest inflation" is a ranking cut to one, and
+    # judging by the cut list would report the winner of a real comparison as
+    # the only country that has any data at all.
+    if ranked_total >= 2:
         # WHICH END answers the question. The list was sorted correctly and
         # carried no statement of what the sort meant, so a follow-up to "which
         # country had the LOWEST inflation" was written up as "Qatar had the
         # highest" — the right table under the wrong sentence. The first row is
         # the answer; say so rather than leaving it to be inferred.
         facts["extremum"] = "lowest" if ascending else "highest"
-        facts["leader"] = rows[0]
+        facts["leader"] = rows[0] if rows else None
     elif rows:
         facts["only_country_with_data"] = rows[0]["country"]
+    if len(rows) < ranked_total:
+        facts["n_ranked"] = ranked_total
+        facts["n_shown"] = len(rows)
     return ComputeResult(True, facts=facts)
 
 

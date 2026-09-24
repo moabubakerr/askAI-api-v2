@@ -1335,7 +1335,8 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
                               "a {dir} figure is the better outcome.").format(
                 ind=indicator_name.strip(), dir="lower" if decreasing else "higher")
             note = f"{note} {note_direction}" if note else note_direction
-        result = (compute.country_ranking(series_by_country, period_label, ascending=ascending)
+        result = (compute.country_ranking(series_by_country, period_label, ascending=ascending,
+                                           limit=_clean_limit(intent.get("limit")))
                   if ctype == "country_ranking"
                   else compute.country_comparison(series_by_country, period_label))
 
@@ -1543,7 +1544,8 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
         # extremum "min" means lowest-first; anything else (including the usual
         # "highest to lowest" phrasing, and the null default) means highest-first.
         descending = intent.get("extremum") != "min"
-        result = compute.period_ranking(rows, descending=descending)
+        result = compute.period_ranking(rows, descending=descending,
+                                         limit=_clean_limit(intent.get("limit")))
         # Cite every row that appears in the ranking, not just the winner —
         # each listed figure is a claim of its own.
         return _wrap(result, unit, indicator_name=indicator_name, decimals=decimals), citations_for_rows(rows, indicator_name, data_source_en)

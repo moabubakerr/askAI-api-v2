@@ -62,8 +62,7 @@ Output ONLY JSON with this exact shape:
   "answer_length": "brief" | "detailed" | null,
   "answer_language": "en" | "ar" | null,
   "language": "en" | "ar",
-  "is_followup": true|false,
-  "followup_reference": "<what the follow-up refers back to, e.g. 'same indicator, different period', or null>"
+  "is_followup": true|false
 }}
 
 Rules:
@@ -362,5 +361,4 @@ def extract_intent(user_message: str, conversation_context: str = "") -> dict:
             "answer_language": None,
             "language": "en",
             "is_followup": False,
-            "followup_reference": None,
         }

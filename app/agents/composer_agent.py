@@ -144,6 +144,11 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    compared, and "unchanged" is a claim about two readings. If the question
    asked whether something rose or fell, the answer is that one reading cannot
    say — not "no".
+12b. "n_shown" smaller than "n_ranked" on any ranked list — periods or
+   countries — means the list was CUT to the number the user asked for. Say so:
+   "the three lowest of eight countries that report it". Presenting three rows
+   as though they were the whole ranking describes a different set from the real
+   one, and the reader has no way to tell.
 13. For a country RANKING the payload carries "extremum" ("lowest" or
    "highest") and "leader" — the row that answers the question. Lead with the
    leader and say which end it is: "Oman had the lowest inflation in December
