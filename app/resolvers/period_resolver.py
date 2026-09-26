@@ -51,17 +51,33 @@ def parse_explicit_frequency(explicit_frequency: Optional[str]) -> Optional[str]
     return None
 
 
-# The three granularities this data has, named. Longest alternatives first so
-# "quarterly" is not matched as "quarter" inside a different phrase.
+# The three granularities this data has, named.
+#
+# The BARE nouns — "year", "quarter", "months" — are deliberately absent, and
+# that absence is the whole point. They name a WINDOW far more often than a
+# series: "what was Real GDP in Q4 2025, and what was it one year earlier?"
+# contains the word "year" and asks for nothing yearly at all. Reading it as a
+# frequency selected the yearly series, so the comparison looked for 2024-Q4 and
+# 2025-Q4 in a series whose labels are bare years, found neither, and answered
+# "No approved data point found for 2024-Q4" about a quarter the data holds.
+#
+# What is left is the vocabulary that can only mean a frequency: the -ly
+# adjectives, "annual(ly)", and the explicit "per/by/each/every <unit>" forms.
+# "List Qatar's quarterly GDP values for 2024 and 2025" — the question this
+# function was written for — still reads as quarterly.
 _FREQUENCY_WORDS = (
     # Arabic attaches the definite article between the two words of the
     # compound — "ربع السنوي" as often as "ربع سنوي" — and checking only the
     # bare form let the trailing "السنوي" match the YEARLY pattern below, so a
     # question asking for quarters was read as asking for years.
     ("quarterly",
-     r"quarter(?:ly|s)?\b|per\s+quarter|by\s+quarter|ربع\s*(?:ال)?سنوي(?:ة|ا)?|ربعي(?:ة|ا)?"),
-    ("monthly", r"month(?:ly|s)?\b|per\s+month|by\s+month|شهري(?:ة|ا)?"),
-    ("yearly", r"year(?:ly)?\b|annual(?:ly)?\b|per\s+year|by\s+year|سنوي(?:ة|ا)?"),
+     r"quarterly\b|quarter[\s-]by[\s-]quarter\b|(?:per|by|each|every)\s+quarter\b"
+     r"|ربع\s*(?:ال)?سنوي(?:ة|ا)?|ربعي(?:ة|ا)?"),
+    ("monthly",
+     r"monthly\b|month[\s-]by[\s-]month\b|(?:per|by|each|every)\s+month\b|شهري(?:ة|ا)?"),
+    ("yearly",
+     r"yearly\b|year[\s-]by[\s-]year\b|annual(?:ly)?\b|(?:per|by|each|every)\s+year\b"
+     r"|سنوي(?:ة|ا)?"),
 )
 _FREQUENCY_IN_TEXT = [(gran, re.compile(pattern, re.IGNORECASE))
                       for gran, pattern in _FREQUENCY_WORDS]

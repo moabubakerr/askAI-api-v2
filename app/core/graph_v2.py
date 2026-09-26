@@ -172,6 +172,36 @@ def _capabilities_answer(language: str) -> tuple[dict, list[Citation]]:
     return payload, citations
 
 
+# Questions about the assistant rather than about the data. "ASK AI" is this
+# product's own name, and a user who types it is asking what it does — there is
+# nothing in the indicator catalogue or the article corpus that answers it, and
+# both were tried.
+_ABOUT_THE_ASSISTANT = re.compile(
+    r"\bask[\s-]*ai\b"
+    r"|\b(this|the)\s+(chat|chatbot|bot|assistant|tool|dashboard)\b"
+    r"|\bwhat\s+(can|could|do)\s+(you|i|we)\b.{0,40}?"
+    r"\b(do|ask|explore|cover|help|support|find|see|use)\b"
+    r"|\bwhat\s+(kind|sort|type)s?\s+of\s+(question|thing|topic)"
+    r"|\bwhat\s+(questions|topics|subjects)\b.{0,20}?\b(can|do|are)\b"
+    r"|\bhow\s+(can|do|does)\s+(you|it|this)\b.{0,30}?\bhelp\b"
+    r"|\bwhat\s+are\s+you\s+(for|able)\b"
+    r"|ماذا يمكنك|ما الذي يمكنك|كيف تساعدني|كيف يمكنك مساعدتي|ما نوع الأسئلة",
+    re.IGNORECASE)
+
+
+def _asks_about_this_assistant(text: str) -> bool:
+    """Whether the question is about what this assistant can do.
+
+    Gated on the message naming nothing the catalogue holds, so the answer to
+    "how can you help me with inflation" is still inflation. The capability
+    answer is for the question that names no subject at all — which is exactly
+    the question a new user asks first.
+    """
+    if not text or not _ABOUT_THE_ASSISTANT.search(text):
+        return False
+    return names_nothing_in_catalogue(text)
+
+
 def decide_route(user_message: str, intent: dict, session_state: dict) -> tuple[str, bool]:
     """Which computation the question gets, and whether a pattern here decided it.
 
@@ -193,6 +223,21 @@ def decide_route(user_message: str, intent: dict, session_state: dict) -> tuple[
     """
     ctype = intent.get("computation_type", "out_of_scope")
     scope_pinned = False
+
+    # A question about THIS assistant, which is the one subject the catalogue
+    # cannot be searched for and the router keeps sending somewhere else.
+    # "What can I explore here?" was answered "No indicators found matching
+    # 'here'"; "What kind of questions do you support?" got the thanks-for-
+    # asking pleasantry; "How does ASK AI help me" was answered from an article
+    # about Qatar's AI investments, because the product's own name is not in any
+    # data it serves. All three have one answer, and it is already written.
+    #
+    # An override rather than a rescue, because the routes it corrects are
+    # confident wrong ones, not refusals. The narrow gate is
+    # names_nothing_in_catalogue: "how can you help me with inflation" names an
+    # indicator and stays a data question.
+    if ctype != "capabilities" and _asks_about_this_assistant(user_message):
+        ctype = "capabilities"
 
     # The model decides. Every pattern that used to override it here is gone,
     # and the eval is why: across 90 questions the eight of them rescued five
@@ -363,6 +408,20 @@ def handle_message(user_message: str, conversation_context: str = "",
     # the direction comes from the indicator's polarity rather than from a
     # superlative the user never used.
     performance_followup = False
+
+    # What the PREVIOUS turn computed, held before this turn overwrites it.
+    #
+    # session_state["last_ctype"] is rewritten a few lines below, and the two
+    # follow-up tests further down — the complement continuation, and the macro
+    # one — were reading it AFTER that, so both were comparing this turn's route
+    # against itself. "How is Qatar's economy doing right now?" followed by "Why
+    # do you say that?" therefore had no way to know the economy was the
+    # subject: the macro test asked whether the last computation was the
+    # overview, and by the time it asked, the last computation was whatever the
+    # router had just proposed for "Why do you say that". The answer was "No
+    # indicator in SCAI's approved data matches 'Why do you say that'" — the
+    # system disowning the four figures it had printed one message earlier.
+    previous_ctype = session_state.get("last_ctype")
 
     ctype, scope_pinned = decide_route(user_message, intent, session_state)
     # An instruction about how to WRITE the answer, mistaken for small talk.
@@ -597,6 +656,28 @@ def handle_message(user_message: str, conversation_context: str = "",
             period = from_message
             session_state["last_period_expression"] = user_message
 
+    # "So is Qatar improving overall on these rankings?" — a question about the
+    # indicators already answered, not about a group in the catalogue. The
+    # router reads it as a group ranking, which needs a sector or an indicator
+    # type, and there is none: the group is the last few answers. Taken before
+    # the scope family below, because that branch's only reply to a group it
+    # cannot name is a refusal that asks the user to name one.
+    recent_indicators = session_state.get("recent_indicators") or []
+    if len(recent_indicators) > 1 and _asks_across_recent(user_message):
+        payload, citations = _indicator_snapshot(recent_indicators, language, period)
+        if payload.get("ok") and payload["facts"].get("overview"):
+            payload["facts"]["overview_kind"] = "recent"
+            verdicts = [e.get("direction_assessment") for e in payload["facts"]["overview"]]
+            payload["facts"]["n_improved"] = verdicts.count("improved")
+            payload["facts"]["n_worsened"] = verdicts.count("worsened")
+            payload["facts"]["mixed_signals"] = bool(payload["facts"]["n_improved"]
+                                                      and payload["facts"]["n_worsened"])
+            remember(session_state, "last_metrics",
+                      [e["indicator"] for e in payload["facts"]["overview"]])
+            session_state["last_ctype"] = "multi_indicator"
+            return _finish(payload, language, session_state, citations,
+                            question=user_message)
+
     if ctype in ("scope_performance", "scope_direction", "scope_snapshot"):
         # The group can come from this message ("best performing education
         # indicators", "which national indicators are rising") or, far more
@@ -811,7 +892,7 @@ def handle_message(user_message: str, conversation_context: str = "",
     # previous indicator. Without this it named neither, and a complement
     # question became a latest-value lookup.
     elif (_is_figure_followup(user_message)
-            and session_state.get("last_ctype") == "complement_share"
+            and previous_ctype == "complement_share"
             and session_state.get("last_indicator_name")):
         indicator_phrase = session_state["last_indicator_name"]
         ctype = "complement_share"
@@ -1016,7 +1097,7 @@ def handle_message(user_message: str, conversation_context: str = "",
         # phrase that names nothing the catalogue holds counts as naming
         # nothing, the same test the rescue above uses.
         stated_phrase = (stated.get("indicator_phrase") or "").strip()
-        macro_followup = (session_state.get("last_ctype") == "macro_overview"
+        macro_followup = (previous_ctype == "macro_overview"
                           and (not stated_phrase
                                or names_nothing_in_catalogue(stated_phrase)))
         if _ECONOMY_WORD.search(user_message or "") or macro_followup:
@@ -1058,6 +1139,15 @@ def handle_message(user_message: str, conversation_context: str = "",
     _stage(session_state, "resolved", indicator=match.name_en)
     remember(session_state, "last_indicator_detail_id", match.indicator_detail_id)
     remember(session_state, "last_indicator_name", match.name_en)
+    # ...and the few before it. "How is Qatar doing on competitiveness?", then
+    # "and economic complexity?", then "so is Qatar improving overall on these
+    # rankings?" — the third question is about the first two together, and only
+    # the most recent one was ever kept, so it had nothing to be "these". The
+    # answer was "tell me which group to rank", asking the user to name a
+    # catalogue grouping for two indicators they had just been shown.
+    recent = [n for n in (session_state.get("recent_indicators") or [])
+              if n != match.name_en]
+    remember(session_state, "recent_indicators", (recent + [match.name_en])[-4:])
     session_state.pop("last_metrics", None)
 
     # Definitional questions ("what is inflation?", F-030's "what does
@@ -2452,6 +2542,28 @@ def _asks_for_complement_share(text: str) -> bool:
     return bool(text and _COMPLEMENT_ASK.search(text))
 
 
+# A question asked of the indicators already on screen, collectively.
+_ACROSS_RECENT = re.compile(
+    r"\b(these|those|them|both|either|overall|in general|across the board|"
+    r"all of (them|these|those))\b"
+    r"|هذه المؤشرات|هذين|كلاهما|بشكل عام|بشكل إجمالي",
+    re.IGNORECASE)
+
+
+def _asks_across_recent(text: str) -> bool:
+    """Whether the question asks how the LAST FEW indicators are doing together.
+
+    Both halves are required. A collective word on its own ("what about those
+    in 2024") is a period follow-up, and a direction word on its own is a
+    question about one indicator; it is the pair that says "take what you have
+    just told me and read it as a set".
+    """
+    if not text or not _ACROSS_RECENT.search(text):
+        return False
+    return bool(_asks_if_improving(text) or _RISING_ONLY.search(text)
+                or _FALLING_ONLY.search(text))
+
+
 def _asks_if_improving(text: str) -> bool:
     """"Is X improving or deteriorating?" — a question about direction of travel.
 
@@ -3113,6 +3225,40 @@ def _diversification_overview(language="en"):
     return payload, citations
 
 
+# "Which one has fallen the most?" — a superlative asked OF the answer above it,
+# not of the catalogue.
+_EXTREME_MOVE = re.compile(
+    r"\b(most|biggest|largest|greatest|sharpest|steepest|fastest|worst|best)\b"
+    r"|أكبر|أسوأ|أشد|الأكثر",
+    re.IGNORECASE)
+
+
+def _note_largest_move(payload: dict, text: str) -> None:
+    """Names the indicator that moved furthest, when that is what was asked.
+
+    The overview already carries change_ranking — every headline indicator
+    ordered by its year-on-year move — so the answer to "which one has fallen
+    the most?" is in the payload either way. What was missing is any sign that
+    the question asked for ONE of them: handed four rows, the Composer reads out
+    four rows, which is the previous answer again rather than a reply to this
+    one.
+
+    Which end is wanted comes from the question's own direction word. "Fallen
+    the most" is the bottom of the ranking, "grown the most" the top; a bare
+    superlative with no direction leaves this alone rather than guessing.
+    """
+    ranking = (payload.get("facts") or {}).get("change_ranking") or []
+    if not (ranking and text and _EXTREME_MOVE.search(text)):
+        return
+    falling, rising = bool(_FALLING_ONLY.search(text)), bool(_RISING_ONLY.search(text))
+    if falling == rising:
+        return
+    # change_ranking is sorted ascending, so the first entry is the steepest
+    # fall and the last the strongest gain.
+    payload["facts"]["largest_move"] = ranking[0] if falling else ranking[-1]
+    payload["facts"]["largest_move_direction"] = "fell" if falling else "rose"
+
+
 def _answer_macro(user_message: str, language: str, period, session_state: dict,
                    is_followup: bool):
     """Every macro answer, however the turn arrived at one.
@@ -3143,6 +3289,7 @@ def _answer_macro(user_message: str, language: str, period, session_state: dict,
     else:
         payload, citations = _macro_overview(language, period=period)
     if payload.get("ok"):
+        _note_largest_move(payload, user_message)
         if wants_chart(user_message, "macro_overview"):
             payload["chart"] = build_chart_spec("macro_overview", payload["facts"],
                                                  "Economic Overview", None, None)

@@ -231,11 +231,29 @@ def _same_word(a: str, b: str) -> bool:
 
 def _dropped_discriminators(phrase: str, matched_name: str) -> list[str]:
     """Words the question used, the catalogue discriminates on, and the match
-    does not carry."""
+    does not carry.
+
+    Read from the NORMALIZED phrase, and with the contentless words removed.
+    Both were missing, and between them they refused a question the data
+    answers: "What happened to Qatar's trade balance in Q1 2026?" matched
+    "Trade Balance (Goods & Services)" — exactly right — and was rejected,
+    because "qatar" appears in 17 catalogue names and "2026" in one, so the
+    country and the year counted as two distinctions the match had dropped.
+
+    Neither is a distinction. The country is in every question about this
+    dataset and separates no indicator in it; a year names a period, not a
+    measure; and the words in _CONTENTLESS are already declared unable to
+    identify an indicator — "and", "one", "year" and "value" cannot be evidence
+    that the match measures something else. normalize_indicator_phrase strips
+    the first two for the same reason the matcher uses it, so this rule now
+    sees the phrase the match was made on rather than the raw question.
+    """
     matched_words = set(re.findall(r"[\w؀-ۿ]{3,}", matched_name.lower()))
     terms = _discriminating_terms()
-    return [w for w in re.findall(r"[\w؀-ۿ]{3,}", (phrase or "").lower())
-            if w in terms and not any(_same_word(w, m) for m in matched_words)]
+    words = re.findall(r"[\w؀-ۿ]{3,}", normalize_indicator_phrase(phrase or "").lower())
+    return [w for w in words
+            if w in terms and w not in _CONTENTLESS and not w.isdigit()
+            and not any(_same_word(w, m) for m in matched_words)]
 
 
 def _has_contradiction(phrase: str, matched_name: str) -> bool:
