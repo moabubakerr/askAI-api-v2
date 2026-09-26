@@ -52,6 +52,21 @@ class Settings(BaseSettings):
     ADMIN_PAGE_SIZE: int = 50
     ADMIN_MAX_PAGE_SIZE: int = 500
 
+    # --- Oxford Economics (external, off-premises) ---
+    # The ONE thing in this file that leaves the network. A question routed to
+    # Oxford is sent verbatim to their cloud, so this is off unless a key is
+    # set: an empty key is a missing decision, not a decision to send user
+    # questions to a third party. /ask refuses source=oxford without it.
+    #
+    # The header is `Api-Key`, confirmed against the live service — `x-api-key`
+    # returns 401.
+    OXFORD_MCP_URL: str = "https://services.oxfordeconomics.com/mcp"
+    OXFORD_API_KEY: str = ""
+    # Generous on purpose. Measured round-trips are ~20s; their server does its
+    # own retrieval and composition before replying, so a 30s ceiling would
+    # time out answers that were about to arrive.
+    OXFORD_TIMEOUT_S: float = 120.0
+
     # --- App ---
     APP_ENV: str = "on_prem"
     LOG_LEVEL: str = "INFO"

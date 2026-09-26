@@ -89,6 +89,15 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ADMIN123}
       ADMIN_SESSION_HOURS: ${ADMIN_SESSION_HOURS:-8}
 
+      # --- Oxford Economics. The one service here that talks to the public
+      # internet: POST /ask with source=oxford or combined sends the question
+      # to their cloud. Unset, those two return 503 and nothing leaves the VM.
+      # Both networks above are ordinary bridges (not internal: true), so
+      # egress already works — this key is the only switch.
+      OXFORD_MCP_URL: ${OXFORD_MCP_URL:-https://services.oxfordeconomics.com/mcp}
+      OXFORD_API_KEY: ${OXFORD_API_KEY:-}
+      OXFORD_TIMEOUT_S: ${OXFORD_TIMEOUT_S:-120}
+
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "${API_PORT:-18000}:8000"

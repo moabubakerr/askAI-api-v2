@@ -13,12 +13,15 @@ import threading
 import time
 import uuid
 
+from concurrent.futures import ThreadPoolExecutor
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Literal, Optional
 
 from app.core.graph_v2 import handle_message
+from app.providers import oxford
 from app.core.reading import read_message
 from app.core.conversation import conversations
 from app.core.messages import detect_language
@@ -276,6 +279,183 @@ def chat_endpoint(req: ChatRequest, request: Request):
         # with extra steps.
         "X-Accel-Buffering": "no",
     })
+
+
+# --------------------------------------------------------------------------
+# /ask — the same question, put to a chosen answerer.
+# --------------------------------------------------------------------------
+
+class AskRequest(ChatRequest):
+    """A /chat request plus who should answer it."""
+    source: Literal["scai", "oxford", "combined"] = "scai"
+    # Which Oxford tool to use. "auto" reads the question: analytical wording
+    # ("why", "outlook", "risks") goes to their research tool, everything else
+    # to their data tool. "both" is a deliberate choice, not a default — each
+    # tool call is a separate ~20s round-trip to the vendor.
+    oxford_mode: Literal["auto", "data", "analysis", "both"] = "auto"
+
+
+class SourceAnswer(BaseModel):
+    """One answerer's attempt, successful or not.
+
+    A failure is a field on this object rather than an HTTP error, because in
+    the combined case the other half may well have succeeded and a 502 would
+    throw away a good answer to report a bad one.
+    """
+    source: str
+    ok: bool
+    answer: str = ""
+    error: Optional[str] = None
+    latency_ms: int = 0
+    message_id: str = ""
+    # NEVER true for Oxford. `verified` in this product means "every figure in
+    # this text was checked against the rows the pipeline retrieved". Oxford's
+    # answer is prose they composed over data we do not hold, so there is
+    # nothing to check it against — the honest value is false, not "assumed
+    # fine because it came from a reputable vendor".
+    #
+    # False here is a LABEL, never a filter. Oxford's answer is shown exactly
+    # as they sent it, including a figure that looks wrong; this flag is how
+    # the reader is told which of the two answers carries our guarantee. The
+    # fix for a bad Oxford number is a conversation with Oxford, not a quiet
+    # edit on the way to the screen.
+    verified: bool = False
+    readable: bool = False
+    facts_payload: dict = {}
+    chart: Optional[dict] = None
+    # Oxford only: which of their two tools produced the text above.
+    tools_used: list = []
+
+
+class AskResponse(BaseModel):
+    """Both halves, kept apart.
+
+    `answer` is a rendered convenience for a caller that has one text area to
+    fill. The attributed per-source blocks are the real payload, and a
+    comparison UI should render those rather than split `answer` back apart.
+
+    Combined answers are deliberately NOT merged into one voice. Blending an
+    Oxford figure into SCAI's prose would launder an unverifiable number into
+    the one place in this product that promises every number is sourced, and a
+    reader would have no way to tell which house said what.
+    """
+    source: str
+    message_id: str = ""
+    answer: str
+    scai: Optional[SourceAnswer] = None
+    oxford: Optional[SourceAnswer] = None
+
+
+def _scai_answer(req: AskRequest, endpoint: str) -> SourceAnswer:
+    try:
+        result, message_id, latency_ms = _run_chat(req, endpoint=endpoint)
+    except Exception as exc:  # noqa: BLE001 — one half failing is reportable, not fatal
+        return SourceAnswer(source="scai", ok=False, error=str(exc))
+    body = _chat_body(result, message_id)
+    return SourceAnswer(source="scai", ok=True, latency_ms=latency_ms, **body)
+
+
+def _oxford_answer(req: AskRequest, endpoint: str) -> SourceAnswer:
+    started = time.perf_counter()
+    message_id = str(uuid.uuid4())
+    language = _language_of(req.message)
+    try:
+        result = oxford.ask(req.message, language=language,
+                            session_id=req.session_id, mode=req.oxford_mode)
+    except oxford.OxfordError as exc:
+        return SourceAnswer(source="oxford", ok=False, error=str(exc),
+                            latency_ms=int((time.perf_counter() - started) * 1000))
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    # Logged like any other turn so /admin/stats can compare the two sources on
+    # latency and volume — which is the question a trial of this exists to
+    # answer. The sentinel is what makes the `verified` column false; there is
+    # no payload for the verifier to have checked.
+    message_log.log(message_id=message_id, session_id=req.session_id, endpoint=endpoint,
+                     question=req.message, answer=result["answer"],
+                     payload={"_verifier_rejected_numbers":
+                              "n/a - composed by Oxford Economics, not from our data"},
+                     language=language, readable=False, latency_ms=latency_ms)
+    return SourceAnswer(source="oxford", ok=True, answer=result["answer"],
+                        latency_ms=latency_ms, message_id=message_id,
+                        tools_used=result["tools_used"])
+
+
+def _combined_text(scai: SourceAnswer, ox: SourceAnswer) -> str:
+    """The two answers under their own names.
+
+    Attribution is in the body, not only in the JSON keys, so that a frontend
+    which renders `answer` as-is still tells the reader who said what.
+    """
+    blocks = []
+    for part, title in ((scai, "SCAI"), (ox, "Oxford Economics")):
+        body = part.answer if part.ok else f"_No answer: {part.error}_"
+        blocks.append(f"## {title}\n\n{body}")
+    return "\n\n---\n\n".join(blocks)
+
+
+@app.post("/ask", response_model=AskResponse)
+def ask_endpoint(req: AskRequest):
+    """One question, answered by SCAI, by Oxford Economics, or by both.
+
+    Same body as /chat with a `source` field added, so a frontend already
+    talking to /chat changes a URL and adds one key.
+
+    WHAT LEAVES THE BUILDING: source=oxford and source=combined send the user's
+    question verbatim to Oxford's cloud. Everything else in this product stays
+    on-premises, so that is a per-request choice a person makes, never a
+    fallback the server takes on their behalf — a SCAI answer that fails is
+    reported as failed rather than quietly re-asked off-site.
+
+    Both halves of a combined request run at once. Oxford takes ~20s on its
+    own, so running them in series would make the combined answer slower than
+    the sum of what a user would have waited for either.
+    """
+    if req.source in ("oxford", "combined") and not oxford.available():
+        # 503, not 500: the deployment is missing a key, which is a thing an
+        # operator fixes — and the frontend needs to know to hide the option.
+        raise HTTPException(status_code=503, detail={
+            "ok": False,
+            "message": "Oxford Economics is not configured on this deployment.",
+        })
+
+    if req.source == "scai":
+        scai = _scai_answer(req, "ask:scai")
+        return AskResponse(source="scai", message_id=scai.message_id,
+                           answer=scai.answer, scai=scai)
+
+    if req.source == "oxford":
+        ox = _oxford_answer(req, "ask:oxford")
+        if not ox.ok:
+            raise HTTPException(status_code=502, detail={"ok": False, "message": ox.error})
+        # Recorded with the session's state UNCHANGED. The transcript grows so
+        # a later turn can see what was asked, but Oxford's answer resolves
+        # none of our slots — writing it in as though it had would leave the
+        # next SCAI question inheriting an indicator nothing on our side ever
+        # looked up.
+        conversations.record(req.session_id, req.message, ox.answer,
+                              conversations.get_state(req.session_id),
+                              message_id=ox.message_id, language=_language_of(req.message))
+        return AskResponse(source="oxford", message_id=ox.message_id,
+                           answer=ox.answer, oxford=ox)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        scai_future = pool.submit(_scai_answer, req, "ask:combined-scai")
+        oxford_future = pool.submit(_oxford_answer, req, "ask:combined-oxford")
+        scai, ox = scai_future.result(), oxford_future.result()
+
+    if not scai.ok and not ox.ok:
+        raise HTTPException(status_code=502, detail={
+            "ok": False,
+            "message": f"Neither source answered. SCAI: {scai.error} Oxford: {ox.error}",
+        })
+    # The SCAI turn is already recorded by _run_chat, including the slot state
+    # this turn resolved. Oxford's text is deliberately not appended to that
+    # transcript: the next follow-up is resolved against our own pipeline's
+    # history, and two answers to one question in it makes "compare it to last
+    # year" ambiguous about which answer "it" came from.
+    return AskResponse(source="combined",
+                       message_id=scai.message_id or ox.message_id,
+                       answer=_combined_text(scai, ox), scai=scai, oxford=ox)
 
 
 @app.get("/session/{session_id}")
