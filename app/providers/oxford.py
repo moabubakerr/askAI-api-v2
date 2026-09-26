@@ -43,6 +43,7 @@ label it as Oxford's and must not report it as `verified`. See the note on
 AskResponse in app/api/main.py.
 """
 import json
+import re
 import uuid
 from typing import Optional
 
@@ -193,11 +194,74 @@ def _text_of(result: dict) -> str:
     where to decide they were not worth showing.
     """
     parts = [
-        block.get("text", "")
+        _plain_text(block.get("text", ""))
         for block in (result.get("content") or [])
         if block.get("type") == "text"
     ]
     return "\n\n".join(p for p in parts if p).strip()
+
+
+# Oxford composes its prose for a web client, so it arrives with markup in it —
+# "<br /> Qatar: Fiscal deterioration highlights near-term challenge, Sep, 2026."
+# is how it separates an answer from the report it came from. This surface
+# renders Markdown, not HTML, so those tags reached the reader as literal text.
+_HTML_BREAK = re.compile(r"(?i)<\s*br\s*/?\s*>|</\s*(?:p|div|li|tr|h[1-6])\s*>")
+_HTML_TAG = re.compile(r"<[^>]+>")
+
+
+def _plain_text(text: str) -> str:
+    """Oxford's answer with its markup rendered rather than printed.
+
+    A break tag is where Oxford ended a line, so it becomes a line break — the
+    citation it separates is meant to sit on its own. Every other tag is
+    dropped, not escaped: the text inside it is the answer, and the tag is
+    presentation for a viewer this one is not.
+
+    Deliberately narrow. This is the one thing besides non-text blocks that the
+    module does not pass through byte for byte, and it stops at markup — no
+    rewording, no trimming, no reflowing of what Oxford actually wrote.
+    """
+    if not text or "<" not in text:
+        return text or ""
+    cleaned = _HTML_BREAK.sub("\n", text)
+    cleaned = _HTML_TAG.sub("", cleaned)
+    # The tag often sits mid-sentence with a space either side, which leaves a
+    # line beginning with one once the tag becomes a newline.
+    cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
+    cleaned = re.sub(r"\n[ \t]+", "\n", cleaned)
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+
+# Whether the question already says which country it is about. Only the names
+# that appear in these questions: Qatar itself, the GCC neighbours it is
+# usually compared with, and the Arabic forms.
+_NAMES_A_COUNTRY = re.compile(
+    r"\b(qatar\w*|saudi|uae|emirat\w*|kuwait\w*|bahrain\w*|oman\w*|gcc|gulf|"
+    r"singapore\w*|norway|world\w*|glob\w*|region\w*|countr\w*|compare\w*|"
+    r"economies|nations?|international|everywhere|across)\b"
+    r"|قطر|السعودي|الإمارات|الامارات|الكويت|البحرين|عمان|الخليج|سنغافورة|العالم|الدول",
+    re.IGNORECASE)
+
+# Appended when it does not. Oxford covers every economy it models, so "what's
+# the real GDP value" is a question it can answer about two hundred countries —
+# and it did, returning a table led by Paraguay and Uzbekistan. This is a SCAI
+# product: a question that names no country is a question about Qatar, and the
+# asker should not have to say so every time.
+#
+# Worded as a default rather than a filter, and only added when the question is
+# silent, so "compare Qatar with Saudi Arabia" and "which economies grew
+# fastest" are left exactly as they were typed.
+_DEFAULT_COUNTRY_NOTE = (
+    " (If no country is specified in this question, answer about Qatar — "
+    "report Qatar's figures and Qatar's outlook, not a cross-country list.)"
+)
+
+
+def _with_default_country(question: str) -> str:
+    """Qatar, unless the asker named somewhere else."""
+    if not question or _NAMES_A_COUNTRY.search(question):
+        return question or ""
+    return question.strip() + _DEFAULT_COUNTRY_NOTE
 
 
 def call_tool(tool: str, question: str, language: str = "en",
@@ -207,7 +271,7 @@ def call_tool(tool: str, question: str, language: str = "en",
         {
             "name": tool,
             "arguments": {
-                "question": question,
+                "question": _with_default_country(question),
                 "language": (language or "en")[:2],
                 "conversationId": conversation_id(session_id),
             },
