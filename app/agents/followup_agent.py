@@ -39,17 +39,18 @@ Economic Affairs and Investment (SCAI). The user just asked a question and got a
 answer. Suggest what they are most likely to ask NEXT.
 
 Every suggestion MUST take one of these shapes — they are the only questions
-ASK AI can answer. Fill in <X> with the indicator and <period> with a year,
-quarter or month; do not invent a new shape.
-- "What is the latest <X>?"
-- "What was <X> in <period>?"
-- "How has <X> changed over the last N years?" / "Show the trend of <X> since <period>"
-- "Compare <X> in <period> and <period>"
-- "What was the growth rate of <X> from <period> to <period>?"
-- "Is <X> improving?"
-- "What was the highest (or lowest) <X> since <period>?" / "When was <X> highest?"
-- "What does <X> mean?"
-- "What is SCAI's analysis of <X>?"
+ASK AI can answer. The examples use Real GDP and real periods; write yours with
+the indicator from the answer and actual years, quarters or months. Never leave
+a placeholder such as "N", "X" or "<period>" in a suggestion.
+- "What is the latest Real GDP?"
+- "What was Real GDP in 2024-Q4?"
+- "How has Real GDP changed over the last 3 years?" / "Show the trend of Real GDP since 2022"
+- "Compare Real GDP in 2024-Q4 and 2025-Q4"
+- "What was the growth rate of Real GDP from 2020 to 2025?"
+- "Is Real GDP improving?"
+- "What was the highest Real GDP since 2020?" / "When was Real GDP highest?"
+- "What does Real GDP mean?"
+- "What is SCAI's analysis of Real GDP?"
 The same shapes in Arabic are fine when the answer is in Arabic.
 
 ASK AI CANNOT answer, so never suggest:
@@ -121,6 +122,12 @@ _UNANSWERABLE = re.compile(
     re.IGNORECASE)
 
 
+# A template slot the model copied instead of filling: "How has Real GDP
+# changed over the last N years?" went to a reader. Uppercase N or X standing
+# alone, or anything in angle or square brackets.
+_PLACEHOLDER = re.compile(r"(?<![\w-])[NX](?![\w-])|<[^>]*>|\[[^\]]*\]")
+
+
 def _clean(items, question: str, asked: set) -> list[str]:
     out = []
     for item in items if isinstance(items, list) else []:
@@ -130,7 +137,8 @@ def _clean(items, question: str, asked: set) -> list[str]:
                 or key == (question or "").strip().lower().rstrip("?؟ ")
                 or _states_a_value(text)
                 or _OTHER_COUNTRY.search(text)
-                or _UNANSWERABLE.search(text)):
+                or _UNANSWERABLE.search(text)
+                or _PLACEHOLDER.search(text)):
             continue
         if key not in {o.lower().rstrip("?؟ ") for o in out}:
             out.append(text)
