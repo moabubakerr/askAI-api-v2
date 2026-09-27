@@ -67,6 +67,12 @@ class Settings(BaseSettings):
     # time out answers that were about to arrive.
     OXFORD_TIMEOUT_S: float = 120.0
 
+    # --- Follow-up suggestions ---
+    # Up to three "you might also ask" questions after a data answer. One extra
+    # call to the router model per answered question; off turns it off
+    # everywhere without a deploy. See app/agents/followup_agent.py.
+    FOLLOW_UPS_ENABLED: bool = True
+
     # --- App ---
     APP_ENV: str = "on_prem"
     LOG_LEVEL: str = "INFO"

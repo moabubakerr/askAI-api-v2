@@ -21,6 +21,8 @@ from pydantic import BaseModel
 from typing import Literal, Optional
 
 from app.core.graph_v2 import handle_message
+from app.core.config import settings
+from app.agents.followup_agent import should_suggest, suggest_follow_ups
 from app.providers import oxford
 from app.core.reading import read_message
 from app.core.conversation import conversations
@@ -60,6 +62,9 @@ class ChatResponse(BaseModel):
     # offering it on a greeting, a refusal, a definition or a catalogue listing
     # gives the user a button that reveals nothing they were not already shown.
     readable: bool = False
+    # Up to three questions the reader might ask next. Empty whenever they
+    # would not help — render nothing then, not an empty "You might ask" box.
+    follow_ups: list[str] = []
 
 
 @app.get("/health")
@@ -174,6 +179,26 @@ def _run_chat(req: ChatRequest, progress=None, endpoint: str = "chat") -> tuple[
     return result, message_id, latency_ms
 
 
+def _follow_ups(req: ChatRequest, result: dict) -> list[str]:
+    """Suggested next questions for this answer, or [] when none would help.
+
+    Never raises: a failure here costs the reader the suggestions, not the
+    answer they asked for.
+    """
+    if not settings.FOLLOW_UPS_ENABLED:
+        return []
+    slots = result.get("turn_slots") or {}
+    if not should_suggest(result.get("facts_payload") or {}, slots.get("computation")):
+        return []
+    try:
+        return suggest_follow_ups(
+            req.message, result.get("answer_for_history") or result.get("answer") or "",
+            language=result.get("language") or _language_of(req.message),
+            history=conversations.recent_turns(req.session_id), subject=slots)
+    except Exception:  # noqa: BLE001 — see docstring
+        return []
+
+
 def _chat_body(result: dict, message_id: str) -> dict:
     """The response body, built once so the streamed and plain forms are equal.
 
@@ -228,10 +253,10 @@ def chat_endpoint(req: ChatRequest, request: Request):
     """
     if not _wants_stream(request):
         result, message_id, _ = _run_chat(req)
-        return ChatResponse(**_chat_body(result, message_id))
+        return ChatResponse(**_chat_body(result, message_id),
+                            follow_ups=_follow_ups(req, result))
 
     events: "queue.Queue[Optional[dict]]" = queue.Queue()
-    outcome: dict = {}
 
     # The pipeline announces everything through one callback; the event name it
     # gets on the wire is decided here. "delta" and "replace" are about the
@@ -248,13 +273,19 @@ def chat_endpoint(req: ChatRequest, request: Request):
     def work() -> None:
         try:
             result, message_id, _ = _run_chat(req, progress=emit, endpoint="chat-stream")
-            outcome["data"] = _chat_body(result, message_id)
+            events.put({"event": "answer", "data": _chat_body(result, message_id)})
+            # AFTER the answer, as its own event: suggestions cost a model call,
+            # and the reader should not wait for them to see what they asked.
+            follow_ups = _follow_ups(req, result)
+            if follow_ups:
+                events.put({"event": "follow_ups",
+                            "data": {"message_id": message_id, "follow_ups": follow_ups}})
         except Exception as exc:  # noqa: BLE001 — reported to the caller, see below
             # The stream has already returned 200, so an exception here cannot
             # become an HTTP error code. It is sent as an event instead: a
             # connection that simply stops tells the frontend nothing it can
             # distinguish from a network failure.
-            outcome["error"] = str(exc)
+            events.put({"event": "error", "data": {"message": str(exc)}})
         finally:
             events.put(None)
 
@@ -267,10 +298,6 @@ def chat_endpoint(req: ChatRequest, request: Request):
             if item is None:
                 break
             yield f"event: {item['event']}\ndata: {json.dumps(item['data'], default=str)}\n\n"
-        if "error" in outcome:
-            yield f"event: error\ndata: {json.dumps({'message': outcome['error']})}\n\n"
-        else:
-            yield f"event: answer\ndata: {json.dumps(outcome.get('data', {}), default=str)}\n\n"
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={
         "Cache-Control": "no-cache",
@@ -325,6 +352,9 @@ class SourceAnswer(BaseModel):
     chart: Optional[dict] = None
     # Oxford only: which of their two tools produced the text above.
     tools_used: list = []
+    # SCAI only: suggested next questions, as on /chat. Oxford gets none —
+    # a suggestion is a promise SCAI's pipeline can answer it.
+    follow_ups: list[str] = []
 
 
 class AskResponse(BaseModel):
@@ -346,13 +376,21 @@ class AskResponse(BaseModel):
     oxford: Optional[SourceAnswer] = None
 
 
-def _scai_answer(req: AskRequest, endpoint: str, progress=None) -> SourceAnswer:
+def _scai_run(req: AskRequest, endpoint: str, progress=None) -> tuple[SourceAnswer, Optional[dict]]:
+    """SCAI's half, plus the raw result the follow-up suggestions are built from."""
     try:
         result, message_id, latency_ms = _run_chat(req, progress=progress, endpoint=endpoint)
     except Exception as exc:  # noqa: BLE001 — one half failing is reportable, not fatal
-        return SourceAnswer(source="scai", ok=False, error=str(exc))
+        return SourceAnswer(source="scai", ok=False, error=str(exc)), None
     body = _chat_body(result, message_id)
-    return SourceAnswer(source="scai", ok=True, latency_ms=latency_ms, **body)
+    return SourceAnswer(source="scai", ok=True, latency_ms=latency_ms, **body), result
+
+
+def _scai_answer(req: AskRequest, endpoint: str, progress=None) -> SourceAnswer:
+    part, result = _scai_run(req, endpoint, progress=progress)
+    if result is not None:
+        part.follow_ups = _follow_ups(req, result)
+    return part
 
 
 def _oxford_answer(req: AskRequest, endpoint: str) -> SourceAnswer:
@@ -441,7 +479,8 @@ def _ask_stream(req: AskRequest) -> StreamingResponse:
     in ~20, and the JSON form holds SCAI's answer back until Oxford's arrives.
     Here each half is its own event — `scai` or `oxford`, carrying that half's
     SourceAnswer — in whichever order they finish, then one `answer` event
-    with the same body the JSON form returns.
+    with the same body the JSON form returns. SCAI's suggested next questions
+    follow its `scai` event as a `follow_ups` event, when there are any.
 
     SCAI's pipeline events (`stage`, `delta`, `replace`) are forwarded exactly
     as /chat streams them, so a frontend that already renders a /chat stream
@@ -457,20 +496,29 @@ def _ask_stream(req: AskRequest) -> StreamingResponse:
         else:
             events.put({"event": "stage", "data": {"stage": name, **(detail or {})}})
 
+    # Each job returns (SourceAnswer, result-or-None). SCAI's result is kept so
+    # its follow-up suggestions can be worked out AFTER its answer is on screen.
     jobs = {}
     if req.source in ("scai", "combined"):
-        jobs["scai"] = lambda: _scai_answer(req, f"ask:{req.source}-scai-stream", progress=emit)
+        jobs["scai"] = lambda: _scai_run(req, f"ask:{req.source}-scai-stream", progress=emit)
     if req.source in ("oxford", "combined"):
-        jobs["oxford"] = lambda: _oxford_answer(req, f"ask:{req.source}-oxford-stream")
+        jobs["oxford"] = lambda: (_oxford_answer(req, f"ask:{req.source}-oxford-stream"), None)
 
     parts: dict = {}
 
     def run(name: str) -> None:
+        result = None
         try:
-            parts[name] = jobs[name]()
+            parts[name], result = jobs[name]()
         except Exception as exc:  # noqa: BLE001 — both helpers catch, but a half must never hang the stream
             parts[name] = SourceAnswer(source=name, ok=False, error=str(exc))
         events.put({"event": name, "data": parts[name].model_dump()})
+        if result is not None:
+            parts[name].follow_ups = _follow_ups(req, result)
+            if parts[name].follow_ups:
+                events.put({"event": "follow_ups",
+                            "data": {"source": name, "message_id": parts[name].message_id,
+                                     "follow_ups": parts[name].follow_ups}})
 
     def finish() -> None:
         workers = [threading.Thread(target=run, args=(n,), daemon=True) for n in jobs]

@@ -98,6 +98,10 @@ services:
       OXFORD_API_KEY: ${OXFORD_API_KEY:-}
       OXFORD_TIMEOUT_S: ${OXFORD_TIMEOUT_S:-120}
 
+      # Suggested next questions after a data answer: one extra call to the
+      # model per answer. Set to false in .env to turn them off.
+      FOLLOW_UPS_ENABLED: ${FOLLOW_UPS_ENABLED:-true}
+
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "${API_PORT:-18000}:8000"

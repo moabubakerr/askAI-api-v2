@@ -49,9 +49,22 @@ Each `SourceAnswer`:
   "readable": false,             // SCAI only: show the "Read this for me" button
   "facts_payload": {},           // SCAI only
   "chart": null,                 // SCAI only
-  "tools_used": ["EconomicData"] // Oxford only
+  "tools_used": ["EconomicData"], // Oxford only
+  "follow_ups": []               // SCAI only — see below
 }
 ```
+
+### Suggested follow-up questions
+
+`follow_ups` holds up to three questions the user might ask next, in the
+answer's language. It is often **empty on purpose**: after a greeting, a
+refusal, a clarifying question, an instruction like "in short", or an answer
+that closes the subject. Render nothing when it is empty — no empty "You might
+also ask" box. Clicking one should send it as the next message, unchanged.
+
+The same field is on `/chat`'s JSON response. On either stream it arrives as a
+separate `follow_ups` event after the answer, so it never delays it:
+`{ "message_id": "…", "follow_ups": ["…"] }` (on `/ask` also `"source": "scai"`).
 
 ### Render the blocks, not `answer`
 
@@ -105,6 +118,7 @@ appears in a few seconds instead of waiting ~20s for Oxford's.
 |---|---|---|
 | `stage`, `delta`, `replace` | while SCAI works | same as `/chat`'s stream — reuse that code for the SCAI panel |
 | `scai` | SCAI finished | that half's `SourceAnswer` — fill the SCAI panel |
+| `follow_ups` | right after `scai`, only when there are suggestions | `{ source, message_id, follow_ups }` |
 | `oxford` | Oxford finished | that half's `SourceAnswer` — fill the Oxford panel |
 | `answer` | both finished | the full JSON body described above |
 | `error` | both failed (or `source=oxford` failed) | `{ "message": "…" }` |
