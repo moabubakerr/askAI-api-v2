@@ -194,7 +194,7 @@ def _text_of(result: dict) -> str:
     where to decide they were not worth showing.
     """
     parts = [
-        _plain_text(block.get("text", ""))
+        _without_button_hints(_plain_text(block.get("text", "")))
         for block in (result.get("content") or [])
         if block.get("type") == "text"
     ]
@@ -232,36 +232,54 @@ def _plain_text(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
-# Whether the question already says which country it is about. Only the names
-# that appear in these questions: Qatar itself, the GCC neighbours it is
-# usually compared with, and the Arabic forms.
-_NAMES_A_COUNTRY = re.compile(
-    r"\b(qatar\w*|saudi|uae|emirat\w*|kuwait\w*|bahrain\w*|oman\w*|gcc|gulf|"
-    r"singapore\w*|norway|world\w*|glob\w*|region\w*|countr\w*|compare\w*|"
-    r"economies|nations?|international|everywhere|across)\b"
-    r"|قطر|السعودي|الإمارات|الامارات|الكويت|البحرين|عمان|الخليج|سنغافورة|العالم|الدول",
-    re.IGNORECASE)
+# Oxford's web client has a visualization button beside each answer, and the
+# answer points to it: "For the full dataset, please click the visualization
+# button." This surface has no such button, so the sentence sends the reader
+# looking for something that is not there. Rule 3 in _ANSWER_RULES_NOTE asks
+# Oxford to leave it out; this drops it when they include it anyway.
+_BUTTON_SENTENCE = re.compile(
+    r"[ \t]*[^.\n]*\bvisuali[sz]ation button\b[^.\n]*\.?", re.IGNORECASE)
 
-# Appended when it does not. Oxford covers every economy it models, so "what's
+
+def _without_button_hints(text: str) -> str:
+    """Oxford's answer minus sentences pointing at a button this UI lacks.
+
+    Whole sentences only, and only ones naming the visualization button, so
+    the figures and commentary around them are untouched.
+    """
+    if not text or "button" not in text.lower():
+        return text or ""
+    cleaned = _BUTTON_SENTENCE.sub("", text)
+    cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+
+# Appended to every question. Oxford covers every economy it models, so "what's
 # the real GDP value" is a question it can answer about two hundred countries —
 # and it did, returning a table led by Paraguay and Uzbekistan. This is a SCAI
 # product: a question that names no country is a question about Qatar, and the
 # asker should not have to say so every time.
 #
-# Worded as a default rather than a filter, and only added when the question is
-# silent, so "compare Qatar with Saudi Arabia" and "which economies grew
-# fastest" are left exactly as they were typed.
-_DEFAULT_COUNTRY_NOTE = (
-    " (If no country is specified in this question, answer about Qatar — "
-    "report Qatar's figures and Qatar's outlook, not a cross-country list.)"
+# Worded as a conditional default and sent unconditionally, so Oxford's model —
+# not a word list here — judges whether a country was named, in either
+# language. "compare Qatar with Saudi Arabia" and "which economies grew
+# fastest" still get the countries they asked for.
+#
+# The markup rule asks Oxford not to send HTML in the first place; _plain_text
+# stays as the safety net for when it does anyway.
+_ANSWER_RULES_NOTE = (
+    " (Rules for this answer: 1) If no country or region is specified in this "
+    "question, answer about Qatar — report Qatar's figures and Qatar's outlook, "
+    "not a cross-country list. 2) Respond in plain text or Markdown only; do "
+    "not include any HTML tags such as <br />. 3) Do not tell the reader to "
+    "click a visualization button or any other button — this interface has "
+    "none.)"
 )
 
 
-def _with_default_country(question: str) -> str:
-    """Qatar, unless the asker named somewhere else."""
-    if not question or _NAMES_A_COUNTRY.search(question):
-        return question or ""
-    return question.strip() + _DEFAULT_COUNTRY_NOTE
+def _with_answer_rules(question: str) -> str:
+    """The question, plus the default-country, no-HTML and no-button rules."""
+    return (question or "").strip() + _ANSWER_RULES_NOTE
 
 
 def call_tool(tool: str, question: str, language: str = "en",
@@ -271,7 +289,7 @@ def call_tool(tool: str, question: str, language: str = "en",
         {
             "name": tool,
             "arguments": {
-                "question": _with_default_country(question),
+                "question": _with_answer_rules(question),
                 "language": (language or "en")[:2],
                 "conversationId": conversation_id(session_id),
             },
