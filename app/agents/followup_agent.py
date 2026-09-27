@@ -38,18 +38,27 @@ SYSTEM_PROMPT = """You are part of ASK AI, the AI assistant of Qatar's Supreme C
 Economic Affairs and Investment (SCAI). The user just asked a question and got an
 answer. Suggest what they are most likely to ask NEXT.
 
-ASK AI can answer, from SCAI's published data only:
-- the latest value of an indicator, or its value in a named period
-- how an indicator changed over a span (trend), or between two named periods
-- whether an indicator is improving or getting worse
-- the highest or lowest reading, and when it happened
-- rankings of periods, or of a sector's indicators against target
-- what an indicator means (definition)
-- SCAI's own analysis and published articles on a topic
+Every suggestion MUST take one of these shapes — they are the only questions
+ASK AI can answer. Fill in <X> with the indicator and <period> with a year,
+quarter or month; do not invent a new shape.
+- "What is the latest <X>?"
+- "What was <X> in <period>?"
+- "How has <X> changed over the last N years?" / "Show the trend of <X> since <period>"
+- "Compare <X> in <period> and <period>"
+- "What was the growth rate of <X> from <period> to <period>?"
+- "Is <X> improving?"
+- "What was the highest (or lowest) <X> since <period>?" / "When was <X> highest?"
+- "What does <X> mean?"
+- "What is SCAI's analysis of <X>?"
+The same shapes in Arabic are fine when the answer is in Arabic.
 
-It CANNOT forecast or project, and must never be asked what something WILL be.
-Never suggest comparing with another country, and never name one: most
-indicators are reported for Qatar alone.
+ASK AI CANNOT answer, so never suggest:
+- a threshold or condition: "when was X last higher than <period>", "how many
+  times did X exceed…", "how long has X been above…"
+- a cause or a reason: "why did X fall", "what drove X"
+- a forecast: what X WILL be, next year, by 2030
+- a comparison with another country — and never name one: most indicators are
+  reported for Qatar alone.
 
 Rules:
 1. At most 3 suggestions, each a short question (under 12 words) the USER would
@@ -98,6 +107,20 @@ _OTHER_COUNTRY = re.compile(
     re.IGNORECASE)
 
 
+# Question shapes the pipeline has no route for. "When was the last time
+# Government Revenues were higher than 2026-Q1?" was suggested, clicked, sent
+# to the period comparison and refused with "I need two specific periods to
+# compare" — a suggestion the product then could not answer. Also causes and
+# forecasts, which the prompt forbids for the same reason.
+_UNANSWERABLE = re.compile(
+    r"\blast\s+time\b|\b(higher|lower|greater|less|more|above|below)\s+than\b"
+    r"|\bhow\s+many\s+times\b|\bhow\s+long\b|\bexceed\w*\b|\bfall\s+below\b"
+    r"|\bwhy\b|\bwhat\s+(caused|drove|drives|causes)\b|\breason\b"
+    r"|\bwill\b|\bforecast\w*\b|\bproject\w*\b|\bnext\s+(year|quarter|month)\b|\bby\s+20\d{2}\b"
+    r"|آخر\s+مرة|أعلى\s+من|أقل\s+من|أكثر\s+من|كم\s+مرة|لماذا|ما\s+سبب|توقع\w*|العام\s+المقبل",
+    re.IGNORECASE)
+
+
 def _clean(items, question: str, asked: set) -> list[str]:
     out = []
     for item in items if isinstance(items, list) else []:
@@ -106,7 +129,8 @@ def _clean(items, question: str, asked: set) -> list[str]:
         if (not text or len(text) > MAX_CHARS or key in asked
                 or key == (question or "").strip().lower().rstrip("?؟ ")
                 or _states_a_value(text)
-                or _OTHER_COUNTRY.search(text)):
+                or _OTHER_COUNTRY.search(text)
+                or _UNANSWERABLE.search(text)):
             continue
         if key not in {o.lower().rstrip("?؟ ") for o in out}:
             out.append(text)
