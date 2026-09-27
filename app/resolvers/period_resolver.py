@@ -350,6 +350,54 @@ def year_earlier_label(period_label: Optional[str]) -> Optional[str]:
     return f"{int(match.group(1)) - 1}{match.group(2)}"
 
 
+def period_before_label(period_label: Optional[str]) -> Optional[str]:
+    """The period immediately before, at the label's own frequency.
+
+    '2026-04' -> '2026-03', '2026-Q1' -> '2025-Q4', '2025' -> '2024'. Stepped
+    on the label for the same reason as year_earlier_label: a gap in the series
+    must not silently turn "the month before" into two months before.
+    """
+    if not period_label:
+        return None
+    label = str(period_label).strip()
+    kind = period_kind(label)
+    try:
+        if kind == "y":
+            return str(int(label) - 1)
+        year, rest = label.split("-", 1)
+        year = int(year)
+        if kind == "q":
+            q = int(rest.lstrip("Qq"))
+            return f"{year - 1}-Q4" if q == 1 else f"{year}-Q{q - 1}"
+        month = int(rest)
+        return f"{year - 1}-12" if month == 1 else f"{year}-{month - 1:02d}"
+    except ValueError:
+        return None
+
+
+# "In the previous period", "the month before", "before that" — a period named
+# only by its position relative to the one the conversation is on. It has no
+# date for the token scanner, so parse_period_expression called it unspecified,
+# and unspecified means the latest reading: "in previous period" was answered
+# "in the previous period, which is April 2026" — the period just shown.
+#
+# A closed vocabulary, like the frequency words: position words only. "last
+# month" / "last quarter" are deliberately absent — alone they usually mean the
+# most recent one, not the one before the answer on screen.
+_STEP_BACK = re.compile(
+    r"\b(previous|prior|preceding|earlier)\s+(period|quarter|month|year|reading|one)\b"
+    r"|\bthe\s+(period|quarter|month|year|reading|one)\s+before\b"
+    r"|\bbefore\s+(that|this|then|it)\b"
+    r"|(الفترة|الربع|الشهر|العام|السنة|القراءة)\s+(السابقة|السابق|التي\s+قبلها|الذي\s+قبله)"
+    r"|قبل\s+(ذلك|هذا|ذلك\s+الوقت)|قبلها|قبله",
+    re.IGNORECASE)
+
+
+def asks_for_period_before(text: Optional[str]) -> bool:
+    """Whether the message names a period only as "the one before"."""
+    return bool(text and _STEP_BACK.search(text))
+
+
 # Relative comparisons, which carry no year to match on. "this year and the
 # year before it" named no period the token scanner could see, so it was
 # answered "I need two specific periods to compare" — asking the user to

@@ -152,6 +152,14 @@ CASES = [
     ("what is the latest analysis of inflation", "analysis_lookup", "", {}, ""),
     ("how is Qatar's economy doing right now?", "macro_overview", "", {}, ""),
     ("what can you do", "capabilities", "", {}, ""),
+    # Identity questions. "are you AI?" used to reach general_chat and be
+    # answered "You're welcome".
+    ("are you AI?", "capabilities", "", {}, ""),
+    ("who are you", "capabilities", "", {}, ""),
+    ("what can I explore here?", "capabilities", "", {}, ""),
+    ("how does ASK AI help me", "capabilities", "", {}, ""),
+    ("هل أنت ذكاء اصطناعي؟", "capabilities", "", {}, ""),
+    ("من أنت؟", "capabilities", "", {}, ""),
     ("hello", "general_chat", "", {}, ""),
     # The guard against the rule above going too far: broadening article_lookup
     # to thematic questions must not turn every unanswerable question into an

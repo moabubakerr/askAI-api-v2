@@ -38,6 +38,7 @@ from app.resolvers.period_resolver import (parse_period_expression, parse_explic
                                             single_period_label, period_kind,
                                             parse_same_period_pair, validate_period_labels,
                                             granularity_from_labels, frequency_in_text,
+                                            asks_for_period_before, period_before_label,
                                             PeriodResolution)
 from app.db import retriever
 from app.compute import engine as compute
@@ -156,50 +157,38 @@ def _capabilities_answer(language: str) -> tuple[dict, list[Citation]]:
     citations = [Citation(indicator="Published indicator catalogue", data_source=None,
                            table="indicators", record_id=None)]
     citations += [Citation(indicator=r[0], data_source=None, table="sectors", record_id=r[1]) for r in sector_rows]
+    # Who is answering, stated as fact so the Composer introduces the assistant
+    # rather than only listing what it does. "Are you AI?" is a question about
+    # identity, and a capability list alone does not answer it.
+    introduction = {
+        "en": ("I'm ASK AI, the AI assistant of the Supreme Council for Economic "
+               "Affairs and Investment (SCAI) in Qatar. I answer questions about "
+               "Qatar's published economic indicators — latest values, trends, "
+               "comparisons across periods or with benchmark countries, rankings "
+               "and definitions — and about SCAI's published analysis and articles. "
+               "Every figure I give comes from SCAI's approved data; I do not "
+               "estimate or forecast."),
+        "ar": ("أنا ASK AI، مساعد الذكاء الاصطناعي التابع للمجلس الأعلى للشؤون "
+               "الاقتصادية والاستثمار في قطر. أجيب عن الأسئلة المتعلقة بالمؤشرات "
+               "الاقتصادية المنشورة لقطر — أحدث القيم والاتجاهات والمقارنات بين "
+               "الفترات أو مع الدول المرجعية والترتيب والتعريفات — وعن تحليلات "
+               "المجلس ومقالاته المنشورة. كل رقم أقدمه مصدره بيانات المجلس "
+               "المعتمدة، ولا أقدم تقديرات أو توقعات."),
+    }
     payload = {
         "ok": True,
         "facts": {
+            "assistant_name": "ASK AI",
+            "assistant_owner": ("المجلس الأعلى للشؤون الاقتصادية والاستثمار"
+                                if language == "ar" else
+                                "Supreme Council for Economic Affairs and Investment (SCAI)"),
+            "is_ai_assistant": True,
+            "introduction": introduction["ar" if language == "ar" else "en"],
             "published_indicator_count": n_ind,
             "sectors_covered": sectors,
-            "capability_note": (
-                "I answer questions about Qatar's published economic indicators "
-                "(latest values, trends, comparisons across periods or benchmark "
-                "countries, rankings) using only SCAI's approved data. I retrieve "
-                "and compute from that data — I do not estimate or forecast."
-            ),
         },
     }
     return payload, citations
-
-
-# Questions about the assistant rather than about the data. "ASK AI" is this
-# product's own name, and a user who types it is asking what it does — there is
-# nothing in the indicator catalogue or the article corpus that answers it, and
-# both were tried.
-_ABOUT_THE_ASSISTANT = re.compile(
-    r"\bask[\s-]*ai\b"
-    r"|\b(this|the)\s+(chat|chatbot|bot|assistant|tool|dashboard)\b"
-    r"|\bwhat\s+(can|could|do)\s+(you|i|we)\b.{0,40}?"
-    r"\b(do|ask|explore|cover|help|support|find|see|use)\b"
-    r"|\bwhat\s+(kind|sort|type)s?\s+of\s+(question|thing|topic)"
-    r"|\bwhat\s+(questions|topics|subjects)\b.{0,20}?\b(can|do|are)\b"
-    r"|\bhow\s+(can|do|does)\s+(you|it|this)\b.{0,30}?\bhelp\b"
-    r"|\bwhat\s+are\s+you\s+(for|able)\b"
-    r"|ماذا يمكنك|ما الذي يمكنك|كيف تساعدني|كيف يمكنك مساعدتي|ما نوع الأسئلة",
-    re.IGNORECASE)
-
-
-def _asks_about_this_assistant(text: str) -> bool:
-    """Whether the question is about what this assistant can do.
-
-    Gated on the message naming nothing the catalogue holds, so the answer to
-    "how can you help me with inflation" is still inflation. The capability
-    answer is for the question that names no subject at all — which is exactly
-    the question a new user asks first.
-    """
-    if not text or not _ABOUT_THE_ASSISTANT.search(text):
-        return False
-    return names_nothing_in_catalogue(text)
 
 
 def decide_route(user_message: str, intent: dict, session_state: dict) -> tuple[str, bool]:
@@ -224,20 +213,11 @@ def decide_route(user_message: str, intent: dict, session_state: dict) -> tuple[
     ctype = intent.get("computation_type", "out_of_scope")
     scope_pinned = False
 
-    # A question about THIS assistant, which is the one subject the catalogue
-    # cannot be searched for and the router keeps sending somewhere else.
-    # "What can I explore here?" was answered "No indicators found matching
-    # 'here'"; "What kind of questions do you support?" got the thanks-for-
-    # asking pleasantry; "How does ASK AI help me" was answered from an article
-    # about Qatar's AI investments, because the product's own name is not in any
-    # data it serves. All three have one answer, and it is already written.
-    #
-    # An override rather than a rescue, because the routes it corrects are
-    # confident wrong ones, not refusals. The narrow gate is
-    # names_nothing_in_catalogue: "how can you help me with inflation" names an
-    # indicator and stays a data question.
-    if ctype != "capabilities" and _asks_about_this_assistant(user_message):
-        ctype = "capabilities"
+    # Questions about THIS assistant — "are you AI?", "what can I explore
+    # here?", "how does ASK AI help me" — are routed by the intent agent, whose
+    # prompt now says what ASK AI is. A regex used to override it here, and it
+    # was always one phrasing short: "are you AI?" matched nothing, reached
+    # general_chat, and was answered "You're welcome".
 
     # The model decides. Every pattern that used to override it here is gone,
     # and the eval is why: across 90 questions the eight of them rescued five
@@ -655,6 +635,38 @@ def handle_message(user_message: str, conversation_context: str = "",
         if from_message.kind != "unspecified":
             period = from_message
             session_state["last_period_expression"] = user_message
+
+    # "In previous period" / "the month before" / "قبل ذلك": a period named by
+    # its position against the one the conversation is on. The message itself
+    # names no date, so it either fell through to the latest reading or
+    # inherited the last turn's period — both answer about the period just
+    # shown, and one answer said so outright: "in the previous period, which is
+    # April 2026".
+    #
+    # Resolved to a concrete label here, before any route reads the period.
+    # Which label: the reading the last answer was COMPARED against, if it
+    # compared and the conversation is still on that period — "inflation is
+    # up 1.98 points from April 2025" makes April 2025 the previous period the
+    # reader has in mind. Otherwise one step back from the last period
+    # reported. Comparison routes are left alone: "compared with the previous
+    # quarter" is a pair, and parse_relative_pair already answers it.
+    last_used = session_state.get("last_period_used")
+    if (last_used and asks_for_period_before(user_message)
+            and parse_period_expression(user_message).kind == "unspecified"
+            and ctype not in ("period_comparison", "growth_rate")):
+        compared = session_state.get("last_compared_period")
+        target = (compared if compared and session_state.get("last_compared_from") == last_used
+                  else period_before_label(last_used))
+        if target:
+            intent["period_expression"] = target
+            intent["period_labels"] = [target]
+            period = parse_period_expression(target)
+            remember(session_state, "last_period_expression", target)
+            # A value at one period is what was asked for. A direction check
+            # or a trend carried over from the last turn would answer a
+            # different question about a period the reader did not name.
+            if ctype in ("direction_check", "trend"):
+                ctype = "latest_value"
 
     # "So is Qatar improving overall on these rankings?" — a question about the
     # indicators already answered, not about a group in the catalogue. The
@@ -1367,6 +1379,17 @@ def handle_message(user_message: str, conversation_context: str = "",
     # and the change from one end of it to the other.
     if ctype == "direction_check" and period.kind in ("last_n_years", "range"):
         ctype = "trend"
+    # ...and a trend over ONE period, at that period's own frequency, is one
+    # reading. "What is GDP for the last 3 years" then "what about in 2024" kept
+    # the trend it followed — correctly, a new period is not a new question —
+    # and ran it over the yearly series for 2024: a "series" of one point,
+    # answered as "the only reading published for the period, so no change can
+    # be stated". The user asked for a value, and that phrasing reads as a
+    # refusal of it. Quarterly 2024 is still a trend: four readings are a shape.
+    _OWN_FREQUENCY = {"single_year": "yearly", "single_quarter": "quarterly",
+                      "single_month": "monthly"}
+    if ctype == "trend" and _OWN_FREQUENCY.get(period.kind) == granularity:
+        ctype = "latest_value"
     # Checked after the indicator resolves, because whether this is answerable
     # depends on WHICH indicator it is, not on the wording. The wording only
     # gets it as far as being considered.
@@ -3446,6 +3469,12 @@ def _finish(payload: dict, language: str, session_state: dict, citations: list[C
     endpoints = [p for p in endpoints if p]
     if endpoints:
         session_state["last_periods_used"] = endpoints
+    # The reading this answer measured its change against, and the period it
+    # measured from, so "in previous period" can mean the one the reader was
+    # just shown rather than a step back they have to work out.
+    if facts_out.get("compared_with_period") and facts_out.get("period_label"):
+        session_state["last_compared_period"] = facts_out["compared_with_period"]
+        session_state["last_compared_from"] = facts_out["period_label"]
 
     if skip_compose:
         answer = canned or ""

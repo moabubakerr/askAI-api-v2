@@ -346,9 +346,9 @@ class AskResponse(BaseModel):
     oxford: Optional[SourceAnswer] = None
 
 
-def _scai_answer(req: AskRequest, endpoint: str) -> SourceAnswer:
+def _scai_answer(req: AskRequest, endpoint: str, progress=None) -> SourceAnswer:
     try:
-        result, message_id, latency_ms = _run_chat(req, endpoint=endpoint)
+        result, message_id, latency_ms = _run_chat(req, progress=progress, endpoint=endpoint)
     except Exception as exc:  # noqa: BLE001 — one half failing is reportable, not fatal
         return SourceAnswer(source="scai", ok=False, error=str(exc))
     body = _chat_body(result, message_id)
@@ -393,12 +393,124 @@ def _combined_text(scai: SourceAnswer, ox: SourceAnswer) -> str:
     return "\n\n---\n\n".join(blocks)
 
 
-@app.post("/ask", response_model=AskResponse)
-def ask_endpoint(req: AskRequest):
+def _ask_response(req: AskRequest, scai: Optional[SourceAnswer],
+                  ox: Optional[SourceAnswer]) -> AskResponse:
+    """The final /ask body from whichever halves were asked for.
+
+    Shared by the JSON and streamed forms, so a streamed answer is the same
+    answer, recorded the same way. Raises HTTPException for the cases the JSON
+    form reports as 502; the streamed form turns that into an `error` event.
+    """
+    if req.source == "scai":
+        return AskResponse(source="scai", message_id=scai.message_id,
+                           answer=scai.answer, scai=scai)
+
+    if req.source == "oxford":
+        if not ox.ok:
+            raise HTTPException(status_code=502, detail={"ok": False, "message": ox.error})
+        # Recorded with the session's state UNCHANGED. The transcript grows so
+        # a later turn can see what was asked, but Oxford's answer resolves
+        # none of our slots — writing it in as though it had would leave the
+        # next SCAI question inheriting an indicator nothing on our side ever
+        # looked up.
+        conversations.record(req.session_id, req.message, ox.answer,
+                              conversations.get_state(req.session_id),
+                              message_id=ox.message_id, language=_language_of(req.message))
+        return AskResponse(source="oxford", message_id=ox.message_id,
+                           answer=ox.answer, oxford=ox)
+
+    if not scai.ok and not ox.ok:
+        raise HTTPException(status_code=502, detail={
+            "ok": False,
+            "message": f"Neither source answered. SCAI: {scai.error} Oxford: {ox.error}",
+        })
+    # The SCAI turn is already recorded by _run_chat, including the slot state
+    # this turn resolved. Oxford's text is deliberately not appended to that
+    # transcript: the next follow-up is resolved against our own pipeline's
+    # history, and two answers to one question in it makes "compare it to last
+    # year" ambiguous about which answer "it" came from.
+    return AskResponse(source="combined",
+                       message_id=scai.message_id or ox.message_id,
+                       answer=_combined_text(scai, ox), scai=scai, oxford=ox)
+
+
+def _ask_stream(req: AskRequest) -> StreamingResponse:
+    """/ask as Server-Sent Events: each half the moment it is ready.
+
+    The point is `combined`. SCAI usually answers in a few seconds and Oxford
+    in ~20, and the JSON form holds SCAI's answer back until Oxford's arrives.
+    Here each half is its own event — `scai` or `oxford`, carrying that half's
+    SourceAnswer — in whichever order they finish, then one `answer` event
+    with the same body the JSON form returns.
+
+    SCAI's pipeline events (`stage`, `delta`, `replace`) are forwarded exactly
+    as /chat streams them, so a frontend that already renders a /chat stream
+    renders SCAI's panel here with the same code. Oxford has no progress to
+    report: its call is one request that either returns or times out.
+    """
+    events: "queue.Queue[Optional[dict]]" = queue.Queue()
+    _OWN_EVENT = {"delta", "replace"}
+
+    def emit(name: str, detail: dict) -> None:
+        if name in _OWN_EVENT:
+            events.put({"event": name, "data": dict(detail or {})})
+        else:
+            events.put({"event": "stage", "data": {"stage": name, **(detail or {})}})
+
+    jobs = {}
+    if req.source in ("scai", "combined"):
+        jobs["scai"] = lambda: _scai_answer(req, f"ask:{req.source}-scai-stream", progress=emit)
+    if req.source in ("oxford", "combined"):
+        jobs["oxford"] = lambda: _oxford_answer(req, f"ask:{req.source}-oxford-stream")
+
+    parts: dict = {}
+
+    def run(name: str) -> None:
+        try:
+            parts[name] = jobs[name]()
+        except Exception as exc:  # noqa: BLE001 — both helpers catch, but a half must never hang the stream
+            parts[name] = SourceAnswer(source=name, ok=False, error=str(exc))
+        events.put({"event": name, "data": parts[name].model_dump()})
+
+    def finish() -> None:
+        workers = [threading.Thread(target=run, args=(n,), daemon=True) for n in jobs]
+        for w in workers:
+            w.start()
+        for w in workers:
+            w.join()
+        try:
+            body = _ask_response(req, parts.get("scai"), parts.get("oxford"))
+            events.put({"event": "answer", "data": body.model_dump()})
+        except HTTPException as exc:
+            events.put({"event": "error", "data": {"message": exc.detail.get("message")}})
+        except Exception as exc:  # noqa: BLE001 — the stream has already returned 200
+            events.put({"event": "error", "data": {"message": str(exc)}})
+        finally:
+            events.put(None)
+
+    threading.Thread(target=finish, daemon=True).start()
+
+    def stream():
+        while True:
+            item = events.get()
+            if item is None:
+                break
+            yield f"event: {item['event']}\ndata: {json.dumps(item['data'], default=str)}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    })
+
+
+@app.post("/ask", response_model=None)
+def ask_endpoint(req: AskRequest, request: Request):
     """One question, answered by SCAI, by Oxford Economics, or by both.
 
     Same body as /chat with a `source` field added, so a frontend already
-    talking to /chat changes a URL and adds one key.
+    talking to /chat changes a URL and adds one key. Like /chat, it streams
+    when sent `Accept: text/event-stream` — see _ask_stream — and returns one
+    JSON body otherwise.
 
     WHAT LEAVES THE BUILDING: source=oxford and source=combined send the user's
     question verbatim to Oxford's cloud. Everything else in this product stays
@@ -418,44 +530,18 @@ def ask_endpoint(req: AskRequest):
             "message": "Oxford Economics is not configured on this deployment.",
         })
 
-    if req.source == "scai":
-        scai = _scai_answer(req, "ask:scai")
-        return AskResponse(source="scai", message_id=scai.message_id,
-                           answer=scai.answer, scai=scai)
+    if _wants_stream(request):
+        return _ask_stream(req)
 
+    if req.source == "scai":
+        return _ask_response(req, _scai_answer(req, "ask:scai"), None)
     if req.source == "oxford":
-        ox = _oxford_answer(req, "ask:oxford")
-        if not ox.ok:
-            raise HTTPException(status_code=502, detail={"ok": False, "message": ox.error})
-        # Recorded with the session's state UNCHANGED. The transcript grows so
-        # a later turn can see what was asked, but Oxford's answer resolves
-        # none of our slots — writing it in as though it had would leave the
-        # next SCAI question inheriting an indicator nothing on our side ever
-        # looked up.
-        conversations.record(req.session_id, req.message, ox.answer,
-                              conversations.get_state(req.session_id),
-                              message_id=ox.message_id, language=_language_of(req.message))
-        return AskResponse(source="oxford", message_id=ox.message_id,
-                           answer=ox.answer, oxford=ox)
+        return _ask_response(req, None, _oxford_answer(req, "ask:oxford"))
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         scai_future = pool.submit(_scai_answer, req, "ask:combined-scai")
         oxford_future = pool.submit(_oxford_answer, req, "ask:combined-oxford")
-        scai, ox = scai_future.result(), oxford_future.result()
-
-    if not scai.ok and not ox.ok:
-        raise HTTPException(status_code=502, detail={
-            "ok": False,
-            "message": f"Neither source answered. SCAI: {scai.error} Oxford: {ox.error}",
-        })
-    # The SCAI turn is already recorded by _run_chat, including the slot state
-    # this turn resolved. Oxford's text is deliberately not appended to that
-    # transcript: the next follow-up is resolved against our own pipeline's
-    # history, and two answers to one question in it makes "compare it to last
-    # year" ambiguous about which answer "it" came from.
-    return AskResponse(source="combined",
-                       message_id=scai.message_id or ox.message_id,
-                       answer=_combined_text(scai, ox), scai=scai, oxford=ox)
+        return _ask_response(req, scai_future.result(), oxford_future.result())
 
 
 @app.get("/session/{session_id}")

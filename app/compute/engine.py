@@ -15,6 +15,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from app.resolvers.period_resolver import year_earlier_label
+
 
 @dataclass
 class ComputeResult:
@@ -690,6 +692,18 @@ def direction_assessment(rows: list[dict], granularity: str,
             "Only one reading is published for this indicator, so there is nothing "
             "to compare it against and its direction of travel cannot be stated."))
 
+    # WHICH reading the change is measured against, named. A published change is
+    # year-on-year, and without the period the Composer called it "compared to
+    # the previous period" — which the reader took literally, so the follow-up
+    # "in previous period" had nothing to resolve to but the latest reading
+    # again. April 2026 against April 2025 has to say April 2025.
+    if previous:
+        compared_period, compared_value = previous["period_label"], previous["actual"]
+    else:
+        compared_period = year_earlier_label(latest["period_label"])
+        compared_row = next((r for r in actuals if r.get("period_label") == compared_period), None)
+        compared_value = compared_row["actual"] if compared_row else None
+
     change = round(float(change), 4)
     wants_lower = (polarity or "").strip().lower().startswith("decrease")
     if change == 0:
@@ -704,6 +718,8 @@ def direction_assessment(rows: list[dict], granularity: str,
         "period_label": latest["period_label"],
         "previous_value": previous["actual"] if previous else None,
         "previous_period": previous["period_label"] if previous else None,
+        "compared_with_period": compared_period,
+        "compared_with_value": compared_value,
         "change": change,
         "change_kind": change_kind,
         "direction": "down" if change < 0 else "up" if change > 0 else "flat",

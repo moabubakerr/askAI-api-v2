@@ -304,9 +304,12 @@ _T = {
                 "أي أن الباقي هو {derivation}. ولا تحدد البيانات مكوّنات هذه النسبة المتبقية."),
     },
     "assessment": {
-        "en": "{ind} was {val} in {per}, {dir} {amount} {kind} year on year — {verdict}. {basis}",
-        "ar": "بلغ {ind} {val} في {per}، {dir} {amount} {kind} على أساس سنوي — {verdict}. {basis}",
+        "en": "{ind} was {val} in {per}, {dir} {amount} {kind} year on year{vs} — {verdict}. {basis}",
+        "ar": "بلغ {ind} {val} في {per}، {dir} {amount} {kind} على أساس سنوي{vs} — {verdict}. {basis}",
     },
+    "assistant_covers": {"en": " I cover {n} published indicators, across: {sectors}.",
+                         "ar": " أغطي {n} مؤشرًا منشورًا، في القطاعات التالية: {sectors}."},
+    "vs_period": {"en": " (against {val} in {per})", "ar": " (مقابل {val} في {per})"},
     "improving": {"en": "an improvement", "ar": "تحسّن"},
     # "a worsening", not "a deterioration". Both are accurate; only one is a
     # word a policymaker reads without slowing down, which is rule 9's point
@@ -430,6 +433,13 @@ _T = {
                           "ar": " أي بتغير قدره {pct} نقطة مئوية خلال الفترة."},
     "series_change_places": {"en": " That is a change of {pct} places over the period.",
                               "ar": " أي بتغير قدره {pct} مركزًا خلال الفترة."},
+    # Which way the series went, said in words. The summary above gives the
+    # figures and never the answer: "is it increasing or not" got the span, the
+    # change and the extremes, and no "yes".
+    "series_net_up": {"en": " Overall, it increased", "ar": " وبشكل عام، ارتفع"},
+    "series_net_down": {"en": " Overall, it decreased", "ar": " وبشكل عام، انخفض"},
+    "series_not_steady": {"en": ", though not steadily — it changed direction around {per} ({val})",
+                          "ar": "، ولكن ليس بشكل متواصل — إذ تغيّر اتجاهه حول {per} ({val})"},
     "series_extremes": {
         "en": " The highest reading was {hi} in {hip}, the lowest {lo} in {lop}.",
         "ar": " وكانت أعلى قراءة {hi} في {hip}، وأدناها {lo} في {lop}.",
@@ -574,6 +584,14 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
         """
         return f"**{fmt(value)}**" if value is not None else fmt(value)
 
+    if facts.get("assistant_name"):
+        # The introduction is already written in the reader's language; the
+        # coverage line is the only part built here.
+        line = facts.get("introduction") or ""
+        if facts.get("published_indicator_count"):
+            line += _t("assistant_covers", language, n=facts["published_indicator_count"],
+                        sectors=", ".join(facts.get("sectors_covered") or []))
+        return line.strip()
     if "complement_share" in facts:
         key = "complement" if facts.get("complement_of") else "remainder_unnamed"
         line = _t(key, language, other=facts.get("complement_of") or "",
@@ -603,8 +621,11 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
                        basis=_t(f"desired_{facts.get('desired_direction', 'increase')}",
                                  language) if facts.get("desired_direction")
                        else facts.get("assessment_basis", "")).strip()
+        vs = (_t("vs_period", language, val=fmt(facts["compared_with_value"]),
+                 per=facts.get("compared_with_period"))
+              if facts.get("compared_with_value") is not None else "")
         return _t("assessment", language, ind=indicator, val=headline(facts.get("actual")),
-                   per=facts.get("period_label"), dir=direction,
+                   per=facts.get("period_label"), dir=direction, vs=vs,
                    amount=abs(facts.get("change", 0)), kind=kind, verdict=verdict,
                    basis=_t(f"desired_{facts.get('desired_direction', 'increase')}",
                              language) if facts.get("desired_direction")
@@ -777,6 +798,13 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
             line += _t("series_change_pp", language, pct=facts["change_pp"])
         elif facts.get("change_places") is not None:
             line += _t("series_change_places", language, pct=facts["change_places"])
+        net = facts.get("absolute_change")
+        if net:
+            line += _t("series_net_up" if net > 0 else "series_net_down", language)
+            if facts.get("direction_changed"):
+                line += _t("series_not_steady", language, per=facts.get("turning_period"),
+                            val=fmt(facts.get("turning_value")))
+            line += "."
         if facts.get("highest_period"):
             line += _t("series_extremes", language, hi=fmt(facts.get("highest_value")),
                         hip=facts["highest_period"], lo=fmt(facts.get("lowest_value")),

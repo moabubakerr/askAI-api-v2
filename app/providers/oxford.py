@@ -273,7 +273,9 @@ _ANSWER_RULES_NOTE = (
     "not a cross-country list. 2) Respond in plain text or Markdown only; do "
     "not include any HTML tags such as <br />. 3) Do not tell the reader to "
     "click a visualization button or any other button — this interface has "
-    "none.)"
+    "none. 4) \"Latest\", \"current\" or \"most recent\" means the most recent "
+    "actual, historical figure — never a forecast or projected year. Whenever "
+    "you do report a forecast, label it as a forecast.)"
 )
 
 

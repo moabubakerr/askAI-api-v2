@@ -206,15 +206,18 @@ _MESSAGES = {
     # Greetings answer in kind and say what the assistant is actually for —
     # a bare "Hello!" leaves the user guessing what they may ask.
     "greeting": {
-        "en": ("Hello. I answer questions about Qatar's published SCAI economic indicators.\n\n"
+        "en": ("Hello, I'm ASK AI, the AI assistant of the Supreme Council for Economic "
+                "Affairs and Investment. I answer questions about Qatar's published SCAI "
+                "economic indicators.\n\n"
                 "You can ask me for:\n"
                 "• a latest value — \"what is the latest Real GDP?\"\n"
                 "• a trend or chart — \"show the monthly trend of inflation\"\n"
                 "• a comparison — \"compare inflation in Qatar and Singapore\"\n"
                 "• a definition — \"what does non-hydrocarbon GDP mean?\"\n"
                 "• what I cover — \"what can you do?\""),
-        "ar": ("أهلاً بك. أجيب عن الأسئلة المتعلقة بالمؤشرات الاقتصادية المنشورة "
-                "للمجلس الأعلى للشؤون الاقتصادية والاستثمار.\n\n"
+        "ar": ("أهلاً بك، أنا ASK AI، مساعد الذكاء الاصطناعي التابع للمجلس الأعلى للشؤون "
+                "الاقتصادية والاستثمار. أجيب عن الأسئلة المتعلقة بالمؤشرات الاقتصادية "
+                "المنشورة للمجلس.\n\n"
                 "يمكنك أن تسألني عن:\n"
                 "• أحدث قيمة — \"ما هو أحدث ناتج محلي إجمالي حقيقي؟\"\n"
                 "• اتجاه أو رسم بياني — \"اعرض الاتجاه الشهري للتضخم\"\n"

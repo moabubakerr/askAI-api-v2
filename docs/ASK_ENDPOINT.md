@@ -92,14 +92,32 @@ handle GFM tables, or their answers will come through as pipe soup.
 | `oxford` | **~20s cold**, ~0.5s for a repeat of the same question (they cache) |
 | `combined` | ~max of the two — both run in parallel server-side |
 
-Twenty seconds of blank screen is not acceptable. `/ask` has **no streaming or
-progress events** (unlike `/chat`, which supports `Accept: text/event-stream`).
-So you need a determinate-feeling wait: per-panel skeletons, an "Asking Oxford
-Economics…" label, and a client timeout of **at least 130s** — the server's own
-ceiling is 120s.
+Twenty seconds of blank screen is not acceptable. Use a client timeout of
+**at least 130s** — the server's own ceiling is 120s.
 
-In `combined`, both halves arrive in one response, so you cannot show SCAI's
-answer early. If that matters, say so and we will add SSE to `/ask`.
+### Streaming — show SCAI first, Oxford when it lands
+
+Send `Accept: text/event-stream` (exactly as with `/chat`) and `/ask` replies
+with Server-Sent Events instead of one JSON body. In `combined`, SCAI's answer
+appears in a few seconds instead of waiting ~20s for Oxford's.
+
+| event | when | data |
+|---|---|---|
+| `stage`, `delta`, `replace` | while SCAI works | same as `/chat`'s stream — reuse that code for the SCAI panel |
+| `scai` | SCAI finished | that half's `SourceAnswer` — fill the SCAI panel |
+| `oxford` | Oxford finished | that half's `SourceAnswer` — fill the Oxford panel |
+| `answer` | both finished | the full JSON body described above |
+| `error` | both failed (or `source=oxford` failed) | `{ "message": "…" }` |
+
+`scai` and `oxford` arrive in whichever order they finish — usually SCAI
+first, but not always (Oxford answers a repeated question from cache in
+~0.5s). Render each panel on its own event; do not wait for `answer`.
+
+While waiting for `oxford`, keep a skeleton and an "Asking Oxford
+Economics…" label on that panel.
+
+Without the Accept header, `/ask` behaves as before: one JSON body once both
+halves are done.
 
 ## Errors
 
@@ -142,6 +160,14 @@ Combined sends their question outside.
 
 ```bash
 curl -s -X POST localhost:18000/ask -H 'Content-Type: application/json' \
+  -d '{"message":"What was Qatar'\''s GDP growth in 2024?","session_id":"demo","source":"combined"}'
+```
+
+Streamed:
+
+```bash
+curl -N -X POST localhost:18000/ask -H 'Content-Type: application/json' \
+  -H 'Accept: text/event-stream' \
   -d '{"message":"What was Qatar'\''s GDP growth in 2024?","session_id":"demo","source":"combined"}'
 ```
 
