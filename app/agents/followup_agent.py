@@ -43,12 +43,13 @@ ASK AI can answer, from SCAI's published data only:
 - how an indicator changed over a span (trend), or between two named periods
 - whether an indicator is improving or getting worse
 - the highest or lowest reading, and when it happened
-- a comparison with benchmark countries (e.g. Saudi Arabia, UAE, Singapore)
-- rankings of countries, of periods, or of a sector's indicators against target
+- rankings of periods, or of a sector's indicators against target
 - what an indicator means (definition)
 - SCAI's own analysis and published articles on a topic
 
 It CANNOT forecast or project, and must never be asked what something WILL be.
+Never suggest comparing with another country, and never name one: most
+indicators are reported for Qatar alone.
 
 Rules:
 1. At most 3 suggestions, each a short question (under 12 words) the USER would
@@ -85,6 +86,18 @@ def _states_a_value(text: str) -> bool:
     return bool(_VALUE.search(_PERIOD.sub(" ", text)))
 
 
+# Other countries and regions. Suggestions never offer a country comparison:
+# most indicators are reported for Qatar alone, and "how does Real GDP compare
+# to Saudi Arabia" was suggested three times in one conversation and refused
+# every time. The prompt says so; this is the backstop when the model does
+# it anyway.
+_OTHER_COUNTRY = re.compile(
+    r"\b(saudi|ksa|uae|emirat\w*|kuwait\w*|bahrain\w*|oman\w*|singapore\w*|norway|"
+    r"switzerland|gcc|gulf|other countries|countries|international|global|world)\b"
+    r"|السعودي|الإمارات|الامارات|الكويت|البحرين|عمان|سنغافورة|النرويج|سويسرا|الخليج|الدول",
+    re.IGNORECASE)
+
+
 def _clean(items, question: str, asked: set) -> list[str]:
     out = []
     for item in items if isinstance(items, list) else []:
@@ -92,7 +105,8 @@ def _clean(items, question: str, asked: set) -> list[str]:
         key = text.lower().rstrip("?؟ ")
         if (not text or len(text) > MAX_CHARS or key in asked
                 or key == (question or "").strip().lower().rstrip("?؟ ")
-                or _states_a_value(text)):
+                or _states_a_value(text)
+                or _OTHER_COUNTRY.search(text)):
             continue
         if key not in {o.lower().rstrip("?؟ ") for o in out}:
             out.append(text)

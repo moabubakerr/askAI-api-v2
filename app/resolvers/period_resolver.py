@@ -296,6 +296,20 @@ def parse_period_expression(expr: Optional[str]) -> PeriodResolution:
     if m:
         return PeriodResolution(kind="last_n_years", n_years=int(m.group(1)), raw=expr)
 
+    # "after 2020-Q2", "since 2022", "منذ 2022" — an open-ended range. Without
+    # this the single-period branches below matched the one label and scoped
+    # retrieval to it, so "the highest Real GDP after 2020-Q2" scanned exactly
+    # one quarter — 2020-Q2 itself — and reported it as the highest after it.
+    # "After" excludes the named period; "since" and "from" include it.
+    m = re.search(r"\b(after|post|beyond|since|from|starting)\b|(بعد|منذ|ابتداء\s*من|اعتبارا\s*من)", expr,
+                  re.IGNORECASE)
+    after_labels = scan_period_labels(expr[m.end():]) if m else []
+    if m and len(after_labels) == 1 and len(scan_period_labels(expr)) == 1:
+        start, end = label_bounds(after_labels[0])
+        exclusive = (m.group(1) or "").lower() in ("after", "post", "beyond") or m.group(2) == "بعد"
+        return PeriodResolution(kind="range", start_date=end + timedelta(days=1) if exclusive else start,
+                                end_date=None, raw=expr)
+
     # ONE named period — month or quarter — from the same scanner the pair
     # parser uses. This was three separate English-only regexes duplicating
     # that scanner, so an Arabic quarter fell past all of them to the bare-year
@@ -348,6 +362,28 @@ def year_earlier_label(period_label: Optional[str]) -> Optional[str]:
     if not match:
         return None
     return f"{int(match.group(1)) - 1}{match.group(2)}"
+
+
+def periods_between(label_a: Optional[str], label_b: Optional[str]) -> Optional[int]:
+    """How many periods from label_a to label_b, in the labels' own frequency.
+
+    '2020-Q1' -> '2025-Q4' is 23 quarters. Worked out from the labels, never
+    from positions in a list of rows: a list filtered down to the two
+    endpoints puts them one apart, and a CAGR over "one quarter" of 11.8%
+    growth came out as 56.27% a year.
+    """
+    if not label_a or not label_b or period_kind(label_a) != period_kind(label_b):
+        return None
+    kind = period_kind(label_a)
+    try:
+        if kind == "y":
+            return int(label_b) - int(label_a)
+        (ya, ra), (yb, rb) = (str(l).split("-", 1) for l in (label_a, label_b))
+        per_year = 4 if kind == "q" else 12
+        return ((int(yb) * per_year + int(rb.lstrip("Qq")))
+                - (int(ya) * per_year + int(ra.lstrip("Qq"))))
+    except ValueError:
+        return None
 
 
 def period_before_label(period_label: Optional[str]) -> Optional[str]:

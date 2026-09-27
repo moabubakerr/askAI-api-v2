@@ -635,6 +635,16 @@ def handle_message(user_message: str, conversation_context: str = "",
         if from_message.kind != "unspecified":
             period = from_message
             session_state["last_period_expression"] = user_message
+    elif period.kind in ("single_year", "single_quarter", "single_month"):
+        # The model extracted the label and dropped the word before it:
+        # "after 2020-Q2" came through as "2020-Q2", and the highest reading
+        # "after" it was looked for in that one quarter. The message still has
+        # the word, and an open-ended range read from it wins.
+        from_message = parse_period_expression(user_message)
+        if from_message.kind == "range" and from_message.end_date is None:
+            period = from_message
+            intent["period_expression"] = user_message
+            remember(session_state, "last_period_expression", user_message)
 
     # "In previous period" / "the month before" / "قبل ذلك": a period named by
     # its position against the one the conversation is on. The message itself
@@ -1418,6 +1428,10 @@ def handle_message(user_message: str, conversation_context: str = "",
                                                 performance_followup=performance_followup,
                                                 user_message=user_message,
                                                 session_state=session_state)
+    # Said in the payload, so the Composer reports a growth rate as one and
+    # not as the indicator's level. See _as_growth_rows.
+    if intent.pop("_measure", None) and payload.get("facts") is not None:
+        payload["facts"]["measure"] = "year-on-year growth rate, in %"
 
     # Flag a shaky resolution so _finish can disclose it. The threshold sits
     # above MIN_CONFIDENCE (0.55) deliberately: clearing the bar to answer at
@@ -1644,6 +1658,39 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
             if (latest_dated and asked_start and asked_start > latest_dated) or                _asks_for_forecast(user_message):
                 message += msg("future_period_suffix", language)
             return {"ok": False, "message": message}, []
+
+    # The GROWTH RATE of a level, when that is what was asked about. "What was
+    # the highest Real GDP growth rate" was answered from the levels — "185.99
+    # Bn QAR", a size reported as a rate — and "the growth rate in 2020-Q1" was
+    # refused, because the growth-rate route needs two endpoints and one
+    # quarter was named. Both want the published year-on-year change, read
+    # period by period, so the rows are swapped for it and the ordinary
+    # computation runs on them: the highest growth, the growth in a quarter,
+    # the trend of growth.
+    #
+    # A growth_rate BETWEEN two periods is left alone: that is a CAGR or a
+    # simple change over the span, and it is what "how did GDP grow from 2020
+    # to 2025" asks for. Not for rates and ranks either — "inflation growth" is
+    # not a growth rate of a percentage.
+    measure = None
+    single_period = period.kind in ("single_year", "single_quarter", "single_month")
+    if (_asks_for_growth_rate(user_message) and not compute._is_rate(unit)
+            and not compute._is_rank(unit)
+            and (ctype in ("latest_value", "min_max", "trend", "period_ranking")
+                 or (ctype == "growth_rate" and (single_period or len(rows) < 2)))):
+        growth_rows = _as_growth_rows(
+            rows, retriever.get_series(match.indicator_detail_id, published_detail_id,
+                                        granularity, country_en=single_country), granularity)
+        if growth_rows:
+            rows, measure = growth_rows, "year_on_year_growth"
+            unit, decimals = "% YoY", 2
+            indicator_name = (f"نمو {indicator_name.strip()} على أساس سنوي" if language == "ar"
+                              else f"{indicator_name.strip()} growth (YoY)")
+            if ctype == "growth_rate":
+                ctype = "latest_value"
+            # Read by the caller, which tags the payload: the branches below
+            # return directly and each would otherwise need to be told.
+            intent["_measure"] = measure
 
     if ctype == "complement_share":
         rows = retriever.get_series(match.indicator_detail_id, published_detail_id,
@@ -2707,6 +2754,40 @@ def _disambiguate_by_quoted_value(candidates, user_message: str):
 def _asks_for_growth(phrase: str) -> bool:
     return bool(re.search(r"\b(growth|change|rate of change)\b|نمو|تغير", phrase or "",
                           re.IGNORECASE))
+
+
+def _asks_for_growth_rate(text: str) -> bool:
+    """Whether the question is about the GROWTH of an indicator, not its level.
+
+    Narrower than _asks_for_growth: "how did GDP change over three years" asks
+    about the levels, and must stay a trend of levels. Only the word growth
+    itself — "growth rate", "GDP growth", "معدل النمو" — says the rate.
+    """
+    return bool(re.search(r"\bgrowth\b|نمو", text or "", re.IGNORECASE))
+
+
+def _as_growth_rows(rows: list[dict], full_rows: list[dict], granularity: str) -> list[dict]:
+    """The same periods, with each row's actual replaced by its year-on-year change.
+
+    SCAI's published change figure where there is one — preferred_change_field,
+    the same column every other route reads. Where there is not, the change
+    from the reading a year earlier, looked up in the FULL series: the window
+    asked about may start after the reading its first period is measured from.
+    A period with neither is dropped, not zero-filled.
+    """
+    by_label = {r["period_label"]: r for r in full_rows or []}
+    out = []
+    for r in rows:
+        change = compute.preferred_change_field(r, granularity)
+        if change is None:
+            prior = by_label.get(year_earlier_label(r["period_label"]))
+            if (prior and prior.get("actual") not in (None, 0)
+                    and r.get("actual") is not None):
+                change = round((float(r["actual"]) - float(prior["actual"]))
+                               / float(prior["actual"]) * 100, 4)
+        if change is not None:
+            out.append({**r, "actual": change, "target": None})
+    return out
 
 
 def _movement_verdict(change, polarity) -> Optional[str]:

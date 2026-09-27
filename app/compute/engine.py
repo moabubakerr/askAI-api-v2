@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from app.resolvers.period_resolver import year_earlier_label
+from app.resolvers.period_resolver import periods_between, year_earlier_label
 
 
 @dataclass
@@ -185,8 +185,13 @@ def growth_rate(rows: list[dict], period_label_start: str, period_label_end: str
     if method == "simple":
         rate = round((f1 - f0) / f0 * 100, 4)
     else:
-        # CAGR needs the number of periods between start and end
-        n_periods = rows.index(end) - rows.index(start)
+        # CAGR needs the number of periods between start and end — from the
+        # labels, not from row positions. Callers filter rows down to the two
+        # named periods, which put 2020-Q1 and 2025-Q4 one row apart: a CAGR
+        # "over one quarter" of 56.27% for what was 11.8% over 23 quarters.
+        n_periods = periods_between(period_label_start, period_label_end)
+        if n_periods is None:
+            n_periods = rows.index(end) - rows.index(start)
         if n_periods <= 0:
             return ComputeResult(False, message="End period must come after the start period.")
         years = n_periods / periods_per_year

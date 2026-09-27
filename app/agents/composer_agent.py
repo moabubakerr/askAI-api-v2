@@ -154,6 +154,11 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    "the three lowest of eight countries that report it". Presenting three rows
    as though they were the whole ranking describes a different set from the real
    one, and the reader has no way to tell.
+12c. "measure" means every figure in the payload is that measure, NOT the
+   indicator's level. With "year-on-year growth rate, in %", "actual" is the
+   growth rate for its period: "Real GDP grew 3.1% year on year in 2020-Q1",
+   and for an extreme "the highest growth was 8.2% YoY, in 2021-Q3". Never
+   give it a currency or a level unit, and never call a level a growth rate.
 13. For a country RANKING the payload carries "extremum" ("lowest" or
    "highest") and "leader" — the row that answers the question. Lead with the
    leader and say which end it is: "Oman had the lowest inflation in December
