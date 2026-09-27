@@ -46,7 +46,11 @@ from app.compute.verifier import (verify_numbers, render_template_fallback,
                                    looks_degenerate, writes_own_sources)
 from app.compute.citations import Citation, citations_for_rows, render_sources_footer, citations_to_dicts
 from app.compute.chart_builder import build_chart_spec
-from app.compute.chart_request import wants_chart
+from app.compute.chart_request import asks_for_chart, wants_chart
+
+# Routes that answer with one figure, and so have nothing to draw.
+_SINGLE_VALUE_ROUTES = ("latest_value", "min_max", "direction_check", "growth_rate",
+                        "difference")
 from app.compute.formatting import (display_unit, decimals_from_format, trim_decimal,
                                      round_for_display)
 from app.agents.composer_agent import compose_answer, compose_answer_streamed
@@ -432,6 +436,19 @@ def handle_message(user_message: str, conversation_context: str = "",
         # looked like a greeting have to be filled now. "Answer the last question
         # in Arabic" is six words and matches none of the short-follow-up shapes,
         # so without this it would inherit the computation and no subject.
+        intent = carry_forward(intent, session_state, user_message)
+    # "give me a chart", "ارسم لي رسماً بيانياً" — a chart of what is on screen.
+    # Same shape as the block above: an instruction naming no subject of its
+    # own. The router sometimes reads "chart" as the indicator's name, so a
+    # phrase that names nothing in the catalogue counts as naming nothing.
+    # The route is inherited here and turned into a trend once the indicator
+    # resolves — see _SINGLE_VALUE_ROUTES.
+    stated_subject = (stated.get("indicator_phrase") or "").strip()
+    if (asks_for_chart(user_message) and session_state.get("last_ctype")
+            and (not stated_subject or names_nothing_in_catalogue(stated_subject))):
+        intent["indicator_phrase"] = None
+        ctype = session_state["last_ctype"]
+        intent["is_followup"] = True
         intent = carry_forward(intent, session_state, user_message)
     # A follow-up that only swaps the subject keeps the question being asked —
     # "What does inflation mean?" then "what about GDP" is asking what GDP
@@ -1400,6 +1417,20 @@ def handle_message(user_message: str, conversation_context: str = "",
                       "single_month": "monthly"}
     if ctype == "trend" and _OWN_FREQUENCY.get(period.kind) == granularity:
         ctype = "latest_value"
+    # A chart ASKED FOR is a series, whatever the route would otherwise have
+    # been. "give me a chart" after "the highest share since 2020" inherited
+    # a single-value route, and a single value has no chart: the reader asked
+    # for a picture and got the latest reading again, in words. Every
+    # single-value route has the same gap, so they all become the trend over
+    # the window the conversation is on.
+    #
+    # A window of one reading at its own frequency is widened to the whole
+    # series — one bar is not a chart. Checked AFTER the rule above, which
+    # would otherwise turn the trend straight back into a single value.
+    if asks_for_chart(user_message) and ctype in _SINGLE_VALUE_ROUTES:
+        if _OWN_FREQUENCY.get(period.kind) == granularity:
+            period = PeriodResolution(kind="unspecified", raw="")
+        ctype = "trend"
     # Checked after the indicator resolves, because whether this is answerable
     # depends on WHICH indicator it is, not on the wording. The wording only
     # gets it as far as being considered.
