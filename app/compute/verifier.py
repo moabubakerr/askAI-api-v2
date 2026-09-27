@@ -309,6 +309,10 @@ _T = {
     },
     "assistant_covers": {"en": " I cover {n} published indicators, across: {sectors}.",
                          "ar": " أغطي {n} مؤشرًا منشورًا، في القطاعات التالية: {sectors}."},
+    # Which side of zero a balance is on — the answer to "is it still a surplus?"
+    "balance_surplus": {"en": " That is a surplus.", "ar": " وهذا فائض."},
+    "balance_deficit": {"en": " That is a deficit.", "ar": " وهذا عجز."},
+    "balance_balanced": {"en": " The balance is exactly zero.", "ar": " والميزان متوازن تماماً."},
     "vs_period": {"en": " (against {val} in {per})", "ar": " (مقابل {val} في {per})"},
     "improving": {"en": "an improvement", "ar": "تحسّن"},
     # "a worsening", not "a deterioration". Both are accurate; only one is a
@@ -562,6 +566,15 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
     language = "ar" if str(language).lower().startswith("ar") else "en"
     if facts_payload.get("ok") is False:
         return facts_payload.get("message") or _t("no_data", language)
+    position = (facts_payload.get("facts") or {}).get("balance_position")
+    if position in ("surplus", "deficit", "balanced"):
+        return (_render_template(facts_payload, language).rstrip()
+                + _t(f"balance_{position}", language))
+    return _render_template(facts_payload, language)
+
+
+def _render_template(facts_payload: dict, language: str) -> str:
+    """render_template_fallback's body, for one payload in one language."""
 
     facts = facts_payload.get("facts", {})
     unit = facts.get("unit") or ""

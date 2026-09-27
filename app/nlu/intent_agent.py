@@ -171,6 +171,11 @@ Rules:
   track?", "are we heading the right way on unemployment?", "هل يتحسن التضخم؟".
   One indicator, so never a "scope_" type; a judgement about direction, so not
   latest_value.
+  A question about the CURRENT STATE of one indicator is NOT direction_check,
+  even with "still" in it: "is Qatar still running a trade surplus?", "is there
+  a budget deficit?", "is the trade balance positive?", "هل ما زال لدى قطر فائض
+  تجاري؟". It asks which side of zero the latest reading is on — latest_value.
+  Being smaller than last year does not stop a surplus being a surplus.
 - Use "diversification_overview" for whether the economy is diversifying AWAY from
   hydrocarbons: "is the economy diversifying?", "how dependent are we still on oil
   and gas?", "هل ينوّع الاقتصاد مصادره؟".

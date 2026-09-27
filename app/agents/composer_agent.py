@@ -154,6 +154,15 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    "the three lowest of eight countries that report it". Presenting three rows
    as though they were the whole ranking describes a different set from the real
    one, and the reader has no way to tell.
+12d. "balance_position" ("surplus" | "deficit" | "balanced") says which side of
+   zero a balance is on. When the question asks about it — "is Qatar still
+   running a trade surplus?", "is there a deficit?", "هل ما زال هناك فائض؟" —
+   the first word is "Yes" or "No", read from balance_position, then the
+   figure and period: "Yes — the Trade Balance (Goods & Services) was a
+   surplus of 37.97 Bn QAR in 2025-Q4, down from 46.13 Bn QAR a year earlier."
+   Any direction or assessment in the payload comes AFTER that, as detail. A
+   surplus that shrank is still a surplus; answering "deteriorating" to "is it
+   still a surplus?" answers a question nobody asked.
 12c. "measure" means every figure in the payload is that measure, NOT the
    indicator's level. With "year-on-year growth rate, in %", "actual" is the
    growth rate for its period: "Real GDP grew 3.1% year on year in 2020-Q1",
@@ -356,7 +365,10 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    are for, and that is the whole of what you know.
 
 20. For a payload with "assessment" ("improving" | "deteriorating" | "unchanged"),
-   the question asked whether the indicator is getting better or worse. STATE
+   the question USUALLY asked whether the indicator is getting better or worse.
+   If it asked something else — whether it is still a surplus, still positive,
+   still above a level — answer THAT first, as rule 1 and rule 12d require, and
+   give the assessment after it. Otherwise STATE
    the assessment as given — it is not your judgement to form or to soften. It
    was derived from the direction SCAI itself records for this indicator, which
    "desired_direction" gives, and for some indicators a FALL is the

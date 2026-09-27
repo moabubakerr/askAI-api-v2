@@ -1430,8 +1430,20 @@ def handle_message(user_message: str, conversation_context: str = "",
                                                 session_state=session_state)
     # Said in the payload, so the Composer reports a growth rate as one and
     # not as the indicator's level. See _as_growth_rows.
-    if intent.pop("_measure", None) and payload.get("facts") is not None:
+    measured_growth = intent.pop("_measure", None)
+    if measured_growth and payload.get("facts") is not None:
         payload["facts"]["measure"] = "year-on-year growth rate, in %"
+    # Which side of zero a BALANCE is on, stated rather than left to be
+    # inferred. "Is Qatar still running a trade surplus?" was answered
+    # "deteriorating" — true of the direction, and no answer to the question:
+    # 37.97 Bn QAR is a surplus, a smaller one. Only for balances, where the
+    # sign has a name; a positive GDP is not a "surplus" of anything.
+    facts_now = payload.get("facts") or {}
+    if (not measured_growth and _is_balance(match) and facts_now.get("actual") is not None
+            and not facts_now.get("series")):
+        value = float(facts_now["actual"])
+        facts_now["balance_position"] = ("surplus" if value > 0
+                                         else "deficit" if value < 0 else "balanced")
 
     # Flag a shaky resolution so _finish can disclose it. The threshold sits
     # above MIN_CONFIDENCE (0.55) deliberately: clearing the bar to answer at
@@ -2754,6 +2766,12 @@ def _disambiguate_by_quoted_value(candidates, user_message: str):
 def _asks_for_growth(phrase: str) -> bool:
     return bool(re.search(r"\b(growth|change|rate of change)\b|نمو|تغير", phrase or "",
                           re.IGNORECASE))
+
+
+def _is_balance(match) -> bool:
+    """A balance — trade, current account, budget — whose sign is a surplus or a deficit."""
+    names = f"{getattr(match, 'name_en', '') or ''} {getattr(match, 'name_ar', '') or ''}"
+    return bool(re.search(r"\bbalance\b|surplus|deficit|الميزان|فائض|عجز", names, re.IGNORECASE))
 
 
 def _asks_for_growth_rate(text: str) -> bool:
