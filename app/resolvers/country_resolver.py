@@ -12,7 +12,7 @@ Directly targets:
   list, and a missing country must produce an honest "No approved data for X"
   line rather than a silently dropped row or an invented figure.
 
-Country names here are matched against the exact strings used in the SCAI
+Country names here are matched against the exact strings used in the SCEAI
 data (P03/P05 etc: 'KSA', 'UAE', 'Bahrain', 'Oman', 'Singapore', 'Kuwait',
 'Norway', 'Egypt', 'Malaysia', 'Jordan', 'South Korea', 'Netherlands',
 'Spain', 'Germany', ...) — user phrasing is normalized to those via the
@@ -27,7 +27,7 @@ from sqlalchemy import text
 from app.db.executor import engine
 from app.core.messages import _ARABIC_CHARS, _normalize
 
-# GCC membership as used in SCAI's own country strings. Qatar itself is
+# GCC membership as used in SCEAI's own country strings. Qatar itself is
 # "domestic" (blank country_en in the data) and is handled separately by
 # the retriever — it is not itself in this list.
 GCC_COUNTRIES = ["KSA", "UAE", "Kuwait", "Bahrain", "Oman"]
@@ -103,7 +103,7 @@ def _arabic_names() -> dict:
     "سجّلت Bahrain أدنى Inflation" — because the countries table was consulted
     when reading a question and never when writing an answer.
 
-    The data's own country_en strings are not always the table's name_en: SCAI
+    The data's own country_en strings are not always the table's name_en: SCEAI
     writes "KSA" where the table says "Saudi Arabia". Both are keyed, so a
     lookup by either works.
     """
@@ -120,7 +120,7 @@ def _arabic_names() -> dict:
     names = {}
     for name_en, name_ar in rows:
         names[(name_en or "").strip().lower()] = name_ar.strip()
-    # SCAI's own shorthands, which the countries table does not carry.
+    # SCEAI's own shorthands, which the countries table does not carry.
     for alias, target in ALIASES.items():
         if target and target.strip().lower() not in names:
             arabic = names.get(alias.strip().lower())
@@ -135,7 +135,7 @@ def _arabic_names() -> dict:
 def display_country(name: Optional[str], language: str = "en") -> str:
     """A country's name in the language being written.
 
-    Falls back to the English name where SCAI records no Arabic one, so a
+    Falls back to the English name where SCEAI records no Arabic one, so a
     missing translation costs a language rather than the country.
     """
     text_name = (name or "").strip()

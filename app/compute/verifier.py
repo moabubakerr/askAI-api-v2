@@ -18,7 +18,7 @@ from app.compute.formatting import trim_zeros
 
 # The lookbehind stops a hyphen being read as a minus sign when it follows a
 # word character, which made period labels parse asymmetrically: the payload's
-# "2025-Q4" yielded ["2025", "4"], but the same quarter written the way SCAI and
+# "2025-Q4" yielded ["2025", "4"], but the same quarter written the way SCEAI and
 # the Composer write it, "Q4-2025", yielded ["4", "-2025"]. "-2025" was in
 # neither the allowed set nor the 1900-2100 year exemption, so any answer naming
 # a quarter that way was rejected as containing an invented number.
@@ -453,11 +453,11 @@ _T = {
     "reason_no_yoy_published": {"en": "no year-on-year figure published",
                                  "ar": "لم تُنشر مقارنة سنوية"},
     "desired_decrease": {
-        "en": "SCAI records the desired direction for this indicator as a decrease.",
+        "en": "SCEAI records the desired direction for this indicator as a decrease.",
         "ar": "يسجّل المجلس الاتجاه المرغوب لهذا المؤشر على أنه انخفاض.",
     },
     "desired_increase": {
-        "en": "SCAI records the desired direction for this indicator as an increase.",
+        "en": "SCEAI records the desired direction for this indicator as an increase.",
         "ar": "يسجّل المجلس الاتجاه المرغوب لهذا المؤشر على أنه ارتفاع.",
     },
     "places": {"en": "places", "ar": "مراكز"},

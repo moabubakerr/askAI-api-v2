@@ -1,7 +1,7 @@
 # Source data is committed verbatim. Without this, a Windows clone with
 # core.autocrlf=true rewrites line endings on checkout, so the bytes the ETL
 # reads differ between a Windows workstation and the Linux VM. These files are
-# SCAI exports, not source code — they should round-trip unchanged.
+# SCEAI exports, not source code — they should round-trip unchanged.
 data/** -text
 
 # Belt and braces: the QC workbook is a zip container. A text conversion would

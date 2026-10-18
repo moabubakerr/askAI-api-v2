@@ -8,7 +8,7 @@ an instruction that matters this much — enforce it in code.
 
 A citation identifies: which indicator, which underlying data source
 (e.g. 'World Bank', 'Qatar Tourism' — from indicator_details.data_source_en),
-which table it was read from (published_data_points = SCAI-vetted, curated;
+which table it was read from (published_data_points = SCEAI-vetted, curated;
 indicator_values = raw/working data), the exact record id, the period, and
 the country (Qatar if domestic).
 """
@@ -17,14 +17,14 @@ from typing import Optional
 
 
 TABLE_LABELS = {
-    "published_data_points": "SCAI Approved/Published Data",
-    "indicator_values": "SCAI Working Data (not yet published)",
-    "indicators": "SCAI Indicator Catalog",
-    "sectors": "SCAI Sector Monitoring",
-    "general_entities": "SCAI Entity Monitoring",
-    "champions": "SCAI Champion Registry",
-    "articles": "SCAI Published Articles",
-    "indicator_analysis": "SCAI Analyst Commentary",
+    "published_data_points": "SCEAI Approved/Published Data",
+    "indicator_values": "SCEAI Working Data (not yet published)",
+    "indicators": "SCEAI Indicator Catalog",
+    "sectors": "SCEAI Sector Monitoring",
+    "general_entities": "SCEAI Entity Monitoring",
+    "champions": "SCEAI Champion Registry",
+    "articles": "SCEAI Published Articles",
+    "indicator_analysis": "SCEAI Analyst Commentary",
 }
 
 # The same labels in Arabic. The footer is appended to EVERY answer, so while it

@@ -205,7 +205,7 @@ def growth_rate(rows: list[dict], period_label_start: str, period_label_end: str
 
 
 def preferred_change_field(row: dict, granularity: str, as_points: bool = False) -> Optional[float]:
-    """Pulls SCAI's own pre-vetted change figure instead of deriving one —
+    """Pulls SCEAI's own pre-vetted change figure instead of deriving one —
     fixes F-022/F-023/F-024/F-025 (QoQ vs YoY confusion): if the user asked
     for a yearly change, use yearly_yoy_percent verbatim; never compute a
     fresh one from raw values when a vetted figure already exists."""
@@ -417,7 +417,7 @@ def country_ranking(series_by_country: dict[str, list[dict]], period_label: Opti
         "period_used": rows[0]["period_label"] if rows else None,
     }
     # A superlative needs something to be superlative OVER. With one country in
-    # the result — routinely, because most SCAI indicators are published for
+    # the result — routinely, because most SCEAI indicators are published for
     # Qatar alone and the benchmark countries have no data — this still set
     # extremum and leader, and composer rule 13 duly wrote "Qatar had the lowest
     # inflation in December 2022". Nothing in that sentence is false and all of
@@ -480,7 +480,7 @@ def scope_performance(entries: list[dict], best_first: bool = True,
     in thousands of riyals, a students-per-teacher ratio, a PISA world rank and
     ten percentages; sorting those against one another produces an ordering
     that looks authoritative and means nothing. The only comparison the data
-    supports is each indicator against the target SCAI set for it, which is a
+    supports is each indicator against the target SCEAI set for it, which is a
     common scale by construction.
 
     Indicators with no target are not ranked and not dropped — they are
@@ -647,7 +647,7 @@ def direction_assessment(rows: list[dict], granularity: str,
     """Is this indicator getting better or worse? Decided from polarity, not opinion.
 
     "Improving" is a judgement everywhere else in this system and forbidden to
-    the Composer for good reason. Here it is not: SCAI states the desired
+    the Composer for good reason. Here it is not: SCEAI states the desired
     direction in polarity_en, so a fall in Public Debt as a Percentage of GDP
     (polarity Decrease) IS an improvement by the Council's own definition, and
     saying so asserts nothing the data does not.
@@ -655,7 +655,7 @@ def direction_assessment(rows: list[dict], granularity: str,
     Both change forms are tried. A percentage-point move is the right one for a
     ratio — debt/GDP going 40.5 -> 40.6 is +0.1pp, and expressing that as a
     percentage change of itself would be both odd and, for this indicator,
-    absent: SCAI publishes yearly_yoy_pp and leaves yearly_yoy_percent empty.
+    absent: SCEAI publishes yearly_yoy_pp and leaves yearly_yoy_percent empty.
     """
     actuals = [r for r in rows if r.get("actual") is not None]
     if not actuals:
@@ -731,7 +731,7 @@ def direction_assessment(rows: list[dict], granularity: str,
         "polarity": polarity,
         # Spelled out so the Composer states it rather than deciding it.
         "assessment": verdict,
-        # The DIRECTION SCAI wants, as a code. The sentence around it is
+        # The DIRECTION SCEAI wants, as a code. The sentence around it is
         # written by whatever renders the answer, in the reader's language.
         "desired_direction": "decrease" if wants_lower else "increase",
         "granularity": granularity,

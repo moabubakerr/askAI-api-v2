@@ -8,7 +8,7 @@
 # and one filename does not match what the loader asks for: the file on disk is
 # "General Entities.csv" (space) while load_data.py:360 reads "General_Entities.csv"
 # (underscore). Renaming the source file would be the other fix; staging a copy
-# keeps the delivered data exactly as SCAI sent it.
+# keeps the delivered data exactly as SCEAI sent it.
 #
 # Staging happens in a tmpdir inside the container, so the mounted data/ is only
 # ever read. The ETL itself TRUNCATEs every table first (load_data.py:423) — it

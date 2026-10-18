@@ -32,7 +32,7 @@ from app.resolvers.embeddings import get_embedding
 
 # (question, should the articles be able to answer it?)
 CASES = [
-    ("What has SCAI written about the trade war?", True),
+    ("What has SCEAI written about the trade war?", True),
     ("tariffs and financial stability", True),
     ("In-Country Value programme", True),
     ("Tawteen", True),
@@ -41,7 +41,7 @@ CASES = [
     ("What is the Council's view on economic diversification?", True),
     ("ماذا كتب المجلس عن الرسوم الجمركية؟", True),
     # The corpus should NOT be able to answer these.
-    ("What has SCAI written about penguins?", False),
+    ("What has SCEAI written about penguins?", False),
     ("how do I bake sourdough bread", False),
     ("the offside rule in football", False),
     ("quantum chromodynamics", False),

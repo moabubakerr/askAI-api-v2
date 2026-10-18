@@ -1,7 +1,7 @@
 """
 DEPRECATED (v1 architecture) — superseded by app/core/graph_v2.py.
 
-The SCAI QC report showed this free-form Text-to-SQL + LLM-does-arithmetic
+The SCEAI QC report showed this free-form Text-to-SQL + LLM-does-arithmetic
 pattern produces wrong numbers (see README "QC findings -> fix" table).
 Kept here for reference only. The only place a v1-style free-form LLM SQL
 call might still be reasonable is pure qualitative text lookups (sectors/
@@ -83,9 +83,9 @@ def general_chat_node(state: GraphState) -> GraphState:
     state["final_answer"] = chat(
         client=llm_client,
         model=settings.LLM_MODEL_NAME,
-        system="You are SCAI's economic data assistant for Qatar. Be brief and helpful. "
+        system="You are SCEAI's economic data assistant for Qatar. Be brief and helpful. "
                "If asked what you can do, mention you answer questions about Qatari economic "
-               "indicators (GDP, inflation, trade, labor market, sectors) using SCAI data.",
+               "indicators (GDP, inflation, trade, labor market, sectors) using SCEAI data.",
         user=state["user_message"],
     )
     return state
@@ -93,7 +93,7 @@ def general_chat_node(state: GraphState) -> GraphState:
 
 def out_of_scope_node(state: GraphState) -> GraphState:
     state["final_answer"] = (
-        "I'm scoped to Qatari economic data from SCAI (GDP, inflation, trade, sectors, "
+        "I'm scoped to Qatari economic data from SCEAI (GDP, inflation, trade, sectors, "
         "labor market, etc.). That question is outside what I can help with here."
     )
     return state

@@ -1,6 +1,6 @@
 """
 Deterministic orchestration graph — v2 architecture, built in response to the
-SCAI QC report. The old graph.py (Text-to-SQL agent + LLM analyst doing
+SCEAI QC report. The old graph.py (Text-to-SQL agent + LLM analyst doing
 arithmetic) is superseded by this pipeline for anything numeric.
 
 Flow: Intent (LLM, extraction only) -> Resolve (indicator/country/period,
@@ -78,7 +78,7 @@ ARTICLE_PASSAGES = 6
 
 # Cosine DISTANCE (0 = identical), so lower is closer. A vector search always
 # returns a nearest neighbour however unrelated the corpus is, so without a
-# ceiling "what has SCAI written about penguins" would confidently answer from
+# ceiling "what has SCEAI written about penguins" would confidently answer from
 # whichever article happened to be least distant. Provisional — calibrate it
 # against real questions before trusting it; scripts/calibrate_resolver.py is
 # the same idea for indicator matching.
@@ -157,7 +157,7 @@ def _capabilities_answer(language: str) -> tuple[dict, list[Citation]]:
         )).fetchall()
     sectors = [r[0] for r in sector_rows]
     # Named, because a citation with indicator=None rendered as a literal
-    # "• None — SCAI Indicator Catalog" in the sources footer.
+    # "• None — SCEAI Indicator Catalog" in the sources footer.
     citations = [Citation(indicator="Published indicator catalogue", data_source=None,
                            table="indicators", record_id=None)]
     citations += [Citation(indicator=r[0], data_source=None, table="sectors", record_id=r[1]) for r in sector_rows]
@@ -166,11 +166,11 @@ def _capabilities_answer(language: str) -> tuple[dict, list[Citation]]:
     # identity, and a capability list alone does not answer it.
     introduction = {
         "en": ("I'm ASK AI, the AI assistant of the Supreme Council for Economic "
-               "Affairs and Investment (SCAI) in Qatar. I answer questions about "
+               "Affairs and Investment (SCEAI) in Qatar. I answer questions about "
                "Qatar's published economic indicators — latest values, trends, "
                "comparisons across periods or with benchmark countries, rankings "
-               "and definitions — and about SCAI's published analysis and articles. "
-               "Every figure I give comes from SCAI's approved data; I do not "
+               "and definitions — and about SCEAI's published analysis and articles. "
+               "Every figure I give comes from SCEAI's approved data; I do not "
                "estimate or forecast."),
         "ar": ("أنا ASK AI، مساعد الذكاء الاصطناعي التابع للمجلس الأعلى للشؤون "
                "الاقتصادية والاستثمار في قطر. أجيب عن الأسئلة المتعلقة بالمؤشرات "
@@ -185,7 +185,7 @@ def _capabilities_answer(language: str) -> tuple[dict, list[Citation]]:
             "assistant_name": "ASK AI",
             "assistant_owner": ("المجلس الأعلى للشؤون الاقتصادية والاستثمار"
                                 if language == "ar" else
-                                "Supreme Council for Economic Affairs and Investment (SCAI)"),
+                                "Supreme Council for Economic Affairs and Investment (SCEAI)"),
             "is_ai_assistant": True,
             "introduction": introduction["ar" if language == "ar" else "en"],
             "published_indicator_count": n_ind,
@@ -403,7 +403,7 @@ def handle_message(user_message: str, conversation_context: str = "",
     # subject: the macro test asked whether the last computation was the
     # overview, and by the time it asked, the last computation was whatever the
     # router had just proposed for "Why do you say that". The answer was "No
-    # indicator in SCAI's approved data matches 'Why do you say that'" — the
+    # indicator in SCEAI's approved data matches 'Why do you say that'" — the
     # system disowning the four figures it had printed one message earlier.
     previous_ctype = session_state.get("last_ctype")
 
@@ -828,9 +828,9 @@ def handle_message(user_message: str, conversation_context: str = "",
         # licensed FinTech & InsurTech players" sat in the catalogue with the
         # figures that answer it outright.
         #
-        # Unless the user explicitly asked what SCAI WROTE, a topic that
+        # Unless the user explicitly asked what SCEAI WROTE, a topic that
         # resolves confidently to an indicator with data is answered from the
-        # data. "What has SCAI written about inflation?" still goes to the
+        # data. "What has SCEAI written about inflation?" still goes to the
         # articles, even though Inflation resolves perfectly, because that
         # question is about the writing.
         topic = intent.get("indicator_phrase") or user_message
@@ -973,7 +973,7 @@ def handle_message(user_message: str, conversation_context: str = "",
     # The refusals name indicators and then invite the user to ask for them —
     # "I can give you either figure on its own". Saying yes to that is a normal
     # thing to do, and it failed: "give me on its own" was resolved as though it
-    # were the name of an indicator and came back "No indicator in SCAI's
+    # were the name of an indicator and came back "No indicator in SCEAI's
     # approved data matches 'give me on its own'". The system offered something,
     # the user accepted, and it denied having anything to give.
     #
@@ -1145,7 +1145,7 @@ def handle_message(user_message: str, conversation_context: str = "",
         # "What is the GDP forecast 2026" was refused with "I couldn't find an
         # indicator matching 'GDP forecast'", which blames the wording. The
         # wording is fine; the gap is that this system does not forecast and
-        # SCAI publishes none. Say that instead — and point at what the data
+        # SCEAI publishes none. Say that instead — and point at what the data
         # does hold, since a future TARGET is often what the asker wants.
         if _asks_for_forecast(user_message) and resolution.status == "not_found":
             payload = {"ok": False, "message": msg("no_forecast", language,
@@ -1191,11 +1191,11 @@ def handle_message(user_message: str, conversation_context: str = "",
 
     # Definitional questions ("what is inflation?", F-030's "what does
     # non-hydrocarbon GDP mean?") are answered from indicator_details.definition_en,
-    # which is SCAI's own wording — never from the model's general knowledge, and
+    # which is SCEAI's own wording — never from the model's general knowledge, and
     # never by falling through to a latest-value lookup. Only 261 of 644 details
     # carry a real definition, so a missing one is reported honestly rather than
     # filled in.
-    # F19 ("ما هو أخر تحليل للتضخم") and F-028: SCAI's own analyst commentary on
+    # F19 ("ما هو أخر تحليل للتضخم") and F-028: SCEAI's own analyst commentary on
     # an indicator, returned VERBATIM. Previously this fell through to a value
     # lookup and answered with a number, which is not what "the latest analysis"
     # asks for. It also catches "why did X fall" — the user wants the written
@@ -1305,7 +1305,7 @@ def handle_message(user_message: str, conversation_context: str = "",
         citations = [Citation(indicator=match.name_en.strip(), data_source=match.data_source_en,
                               table="indicator_details", record_id=match.indicator_detail_id)]
         # Returned verbatim, skipping the Composer, for the same reason as the
-        # analyst commentary: this is SCAI's own authored wording, and a model
+        # analyst commentary: this is SCEAI's own authored wording, and a model
         # asked to "phrase" it can only paraphrase it. Sending it through the
         # Composer also produced the definition twice — once reworded in the
         # prose and once as the raw fact — and made the model apologise for the
@@ -1356,7 +1356,7 @@ def handle_message(user_message: str, conversation_context: str = "",
         # snapshot already does with a window: read each series at its latest
         # reading WITHIN it, so a 2023 question gives 2023-Q4 for a quarterly
         # series and 2023-12 for a monthly one. Refusing instead tells the
-        # reader SCAI published nothing that year, which is a claim about the
+        # reader SCEAI published nothing that year, which is a claim about the
         # data rather than about the shape of the query.
         if (period.start_date or period.end_date) and not retriever.get_series(
                 match.indicator_detail_id, published_detail_id, granularity,
@@ -1500,7 +1500,7 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
     # prose that said "QAR 185.2 billion".
     unit = display_unit(match.unit_en, match.format, language, match.unit_ar)
     decimals = decimals_from_format(match.format)
-    # SCAI's own Arabic name when the answer is Arabic, its English one
+    # SCEAI's own Arabic name when the answer is Arabic, its English one
     # otherwise. Every figure in an Arabic answer carried an English indicator
     # name — "سجّلت Bahrain أدنى Inflation" — because this took name_en
     # unconditionally, while unit_ar and definition_ar were already being used a
@@ -1533,7 +1533,7 @@ def _dispatch_computation(ctype, intent, match, published_detail_id, granularity
 
         # "Which country has the lowest inflation" names no countries, so the
         # resolved set is empty and the ranking was Qatar against itself — a
-        # one-row league table (F-027). Fall back to SCAI's own benchmark set
+        # one-row league table (F-027). Fall back to SCEAI's own benchmark set
         # for this indicator.
         #
         # Only for RANKING. A comparison must return exactly the countries the
@@ -2181,10 +2181,10 @@ def _asks_for_forecast(text: str) -> bool:
 
 
 def _explicitly_asks_for_writing(text: str) -> bool:
-    """True when the question is about SCAI's published WRITING, not a number.
+    """True when the question is about SCEAI's published WRITING, not a number.
 
     The distinction decides whether the catalogue gets first refusal. Without
-    it, preferring data would hijack "what has SCAI written about inflation?",
+    it, preferring data would hijack "what has SCEAI written about inflation?",
     which resolves to a real indicator but is plainly a question about an
     article.
     """
@@ -2232,7 +2232,7 @@ def _best_article_passages(passages: list[dict]) -> list[dict]:
 
 
 def _article_answer(user_message: str, intent: dict, language: str, session_state: dict) -> dict:
-    """Answers from SCAI's published articles instead of the indicator tables.
+    """Answers from SCEAI's published articles instead of the indicator tables.
 
     The retrieval is semantic, so the user's wording need not match the
     article's — asking about "trade wars" finds a piece titled "Financial
@@ -2287,7 +2287,7 @@ def _article_answer(user_message: str, intent: dict, language: str, session_stat
 
     citations = [
         Citation(indicator=(p.get("title_en") or p.get("title_ar") or "").strip() or None,
-                 data_source="SCAI", table="articles", record_id=p["article_id"],
+                 data_source="SCEAI", table="articles", record_id=p["article_id"],
                  period_label=str(p.get("published_date") or p.get("article_date") or "") or None,
                  country=None)
         for p in relevant
@@ -2561,7 +2561,7 @@ def _wrap(result: compute.ComputeResult, unit: str, extra_note: Optional[str] = 
     # answer text never said which indicator it used.
     if payload.get("ok") and indicator_name:
         payload["facts"]["indicator"] = indicator_name.strip()
-    # How many decimals SCAI specifies for this indicator, so the frontend and
+    # How many decimals SCEAI specifies for this indicator, so the frontend and
     # the Composer round the same way instead of each choosing.
     if payload.get("ok") and decimals is not None:
         payload["facts"]["decimal_places"] = decimals
@@ -2818,7 +2818,7 @@ def _asks_for_growth_rate(text: str) -> bool:
 def _as_growth_rows(rows: list[dict], full_rows: list[dict], granularity: str) -> list[dict]:
     """The same periods, with each row's actual replaced by its year-on-year change.
 
-    SCAI's published change figure where there is one — preferred_change_field,
+    SCEAI's published change figure where there is one — preferred_change_field,
     the same column every other route reads. Where there is not, the change
     from the reading a year earlier, looked up in the FULL series: the window
     asked about may start after the reading its first period is measured from.
@@ -2840,7 +2840,7 @@ def _as_growth_rows(rows: list[dict], full_rows: list[dict], granularity: str) -
 
 
 def _movement_verdict(change, polarity) -> Optional[str]:
-    """Whether a move is the welcome one, decided from SCAI's own polarity.
+    """Whether a move is the welcome one, decided from SCEAI's own polarity.
 
     "improved" / "worsened" rather than "good" / "bad": the Council records a
     desired direction per indicator, and this reports that record against the
@@ -2985,7 +2985,7 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
         # compare against: a 2023 question retrieved only 2023, so the reading a
         # year earlier was not there to be found and the answer said "down from
         # a year earlier (-3.57% YoY)" beside an empty column. The change came
-        # from SCAI's own figure on the 2023 row and was right; the value it
+        # from SCEAI's own figure on the 2023 row and was right; the value it
         # moved FROM had been filtered away, so the claim had nothing behind it.
         all_rows = retriever.get_series(match.indicator_detail_id, published_id, gran)
         rows = [r for r in all_rows
@@ -3017,7 +3017,7 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
         entry = {"indicator": match.display_name(language),
                  "unit": display_unit(match.unit_en, match.format, language, match.unit_ar),
                  "decimal_places": decimals_from_format(match.format),
-                 # Which way is WELCOME for this indicator, as SCAI records it.
+                 # Which way is WELCOME for this indicator, as SCEAI records it.
                  # Every other group shape carries this — scope_direction and
                  # the target ranking both put polarity on each row, and the
                  # Composer's rules 16 and 18 are written around it — but the
@@ -3029,7 +3029,7 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
                  # balances.
                  "polarity": (match.polarity_en or "").strip() or None,
                  "granularity": gran, "asked_as": phrase, **latest.facts}
-        # SCAI's own vetted period-on-period change, never a fresh derivation
+        # SCEAI's own vetted period-on-period change, never a fresh derivation
         # (F-022..F-026). Carried on every line so "GDP growth" can be answered
         # as a growth rate rather than a level.
         if row:
@@ -3061,7 +3061,7 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
                 entry["previous_value"] = prior["actual"]
                 citations += citations_for_rows([prior], match.name_en, match.data_source_en)
             if span and prior and prior.get("actual") is not None:
-                # Across a span there is no published figure to quote: SCAI's
+                # Across a span there is no published figure to quote: SCEAI's
                 # stored change is year-on-year, and pairing it with endpoints
                 # three years apart would put a number beside two values it does
                 # not describe. Worked out from the two readings shown, and said
@@ -3078,7 +3078,7 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
                 continue
             change = compute.preferred_change_field(row, gran)
             if change is not None:
-                # SCAI's stored figure carries full float noise
+                # SCEAI's stored figure carries full float noise
                 # (2.0276599261667307). Rounded to the same 4 places every other
                 # computed value uses, so the number shown is the number checked.
                 entry["change_yoy_percent"] = round(float(change), 4)
@@ -3192,7 +3192,7 @@ def _indicator_snapshot(phrases: list[str], language: str = "en", period=None):
     return payload, citations
 
 
-# The standard macro snapshot. An editorial list — refine it once SCAI says
+# The standard macro snapshot. An editorial list — refine it once SCEAI says
 # which indicators they want surfaced as the headline set.
 HEADLINE_NAMES = ["Real GDP", "Inflation", "Trade Balance", "Government Revenues"]
 

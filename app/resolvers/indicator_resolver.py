@@ -79,7 +79,7 @@ MIN_CONFIDENCE = 0.63
 MIN_GAP_TO_RUNNER_UP = 0.05
 
 # How much better than the threshold an UNPUBLISHED indicator must score before
-# it may answer a data question. Published rows are SCAI's reviewed layer;
+# it may answer a data question. Published rows are SCEAI's reviewed layer;
 # unpublished ones are working data that happens to be in the same table.
 UNPUBLISHED_MARGIN = 0.10
 
@@ -115,7 +115,7 @@ def _discriminating_terms() -> frozenset:
     This began as a hand-written list — "per capita", "hydrocarbon",
     "seasonally adjusted" — which is wrong for the same reason a list of
     follow-up phrasings is wrong: it only covers what someone thought of, and
-    SCAI publishes 400-odd indicators whose names carry distinctions nobody
+    SCEAI publishes 400-odd indicators whose names carry distinctions nobody
     writing this file would predict. A question using one of the others would
     sail past.
 
@@ -188,7 +188,7 @@ def names_nothing_in_catalogue(phrase: str) -> bool:
     This is deliberately NOT a list of filler words. "Solar energy share" is
     also not in the catalogue as a name, but "energy" and "share" are
     catalogue words, so it reads as a genuine attempt and still earns the
-    refusal that says SCAI publishes no such indicator — which is the answer
+    refusal that says SCEAI publishes no such indicator — which is the answer
     that failure needs, and the opposite of silently answering about the
     previous one.
     """
@@ -281,7 +281,7 @@ def _has_contradiction(phrase: str, matched_name: str) -> bool:
     # indicator — and was refused, because "oil" does not appear in a name that
     # says "Hydrocarbon". Non-oil and non-hydrocarbon are one restriction in two
     # vocabularies, and demanding the word survive verbatim rejected the answer
-    # for using SCAI's own term for it.
+    # for using SCEAI's own term for it.
     #
     # Reading it as "does the match drop the restriction" needs no synonyms and
     # is the thing the rule was for: "Real GDP" negates nothing, so it dropped
@@ -322,7 +322,7 @@ class IndicatorMatch:
     definition_en: Optional[str]
     definition_ar: Optional[str]
     confidence: float
-    # SCAI's own Arabic name for this indicator. It was already being fetched
+    # SCEAI's own Arabic name for this indicator. It was already being fetched
     # and already used to MATCH an Arabic question — and then dropped, so an
     # Arabic answer named the indicator in English. Carried now for the same
     # reason unit_ar and definition_ar are: the catalogue holds the translation,
@@ -332,7 +332,7 @@ class IndicatorMatch:
     def display_name(self, language: str = "en") -> str:
         """The name to SHOW, in the language being written.
 
-        Falls back to English when SCAI has recorded no Arabic name, rather than
+        Falls back to English when SCEAI has recorded no Arabic name, rather than
         showing nothing: a missing translation should cost the reader a
         language, not the name of the thing they asked about.
         """
@@ -362,7 +362,7 @@ _PHRASE_NOISE = re.compile(
     # "growth" and "change" describe the COMPUTATION, not the indicator. "GDP
     # growth" failed to resolve at all — pulled toward "Annual Growth in Labor
     # Productivity" and "Debt to GDP Ratio" — while plain "GDP" resolves to
-    # Real GDP immediately. The growth itself comes from SCAI's vetted YoY
+    # Real GDP immediately. The growth itself comes from SCEAI's vetted YoY
     # field, which the same word already triggers downstream.
     # Safe because the original phrase is scored alongside the stripped one, so
     # an indicator genuinely named "...Growth..." still matches itself.
@@ -429,7 +429,7 @@ _PHRASE_QUESTION = re.compile(
 # alias cannot force a wrong answer, it can only offer a candidate.
 #
 # Every target below was checked to exist, be published, and have data. This
-# table is editorial and belongs with SCAI: it encodes which everyday term maps
+# table is editorial and belongs with SCEAI: it encodes which everyday term maps
 # to which published metric, which is their judgement to make, not the model's.
 INDICATOR_ALIASES = {
     "prices": "Inflation",
@@ -913,7 +913,7 @@ def _score_catalog(catalog, phrases, phrase_embeddings):
 
 
 def _prefer_published(scored, min_confidence):
-    """SCAI's published indicators get first refusal on a data question.
+    """SCEAI's published indicators get first refusal on a data question.
 
     "tourists arrived" scores 0.715 for "Tourists Number of arrival Tests" —
     unpublished, 12 data points — against 0.519 for "Number of International
@@ -923,7 +923,7 @@ def _prefer_published(scored, min_confidence):
     them, because the bad match outscores the good one.
 
     Curation is the signal that does separate them. This product answers from
-    SCAI's approved data, so a published indicator that clears the bar wins
+    SCEAI's approved data, so a published indicator that clears the bar wins
     outright; unpublished working rows are considered only when nothing
     published does. That is the same preference the retriever already applies
     when it reads published_data_points before indicator_values.
@@ -967,7 +967,7 @@ def _resolve_scored(scored, phrase, language="en"):
         # get past that is the system's problem, not the user's.
         #
         # This is not the silent substitution F-003/F-012 forbid: it does not
-        # reach past a better match, it breaks a TIE toward SCAI's own curated
+        # reach past a better match, it breaks a TIE toward SCEAI's own curated
         # layer, exactly as the retriever already prefers published_data_points
         # over raw indicator_values. The low-confidence disclosure still fires
         # if the winner is below CONFIDENT_MATCH.
@@ -1006,7 +1006,7 @@ def _resolve_scored(scored, phrase, language="en"):
         # actually asked for, one place down. Scoring is lexical, so a long
         # correct name can lose to a short wrong one — "Non-Hydrocarbon Exports
         # as Share of Total Exports" against "Total Exports" — and refusing then
-        # tells the reader SCAI publishes nothing on a subject it does publish.
+        # tells the reader SCEAI publishes nothing on a subject it does publish.
         #
         # Only a candidate that already cleared MIN_CONFIDENCE on its own and
         # contradicts nothing. This reaches past the top match, which F-003 and

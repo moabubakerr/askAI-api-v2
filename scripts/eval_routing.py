@@ -139,8 +139,8 @@ CASES = [
     ("list the indicators in Sectors", "count_list", "", {}, ""),
 
     # --- commentary and meta ---------------------------------------------------
-    ("what has SCAI written about the trade war", "article_lookup", "", {}, ""),
-    # Thematic questions that name no indicator and never mention SCAI. These
+    ("what has SCEAI written about the trade war", "article_lookup", "", {}, ""),
+    # Thematic questions that name no indicator and never mention SCEAI. These
     # were answered with the greeting — "Hello, I answer questions about
     # indicators" — to someone who had asked a real question. They only worked
     # as a SECOND turn, when a previous article answer sat in the context and
@@ -249,8 +249,8 @@ HISTORICAL = [
     ("What is the Real GDP forecast for 2026", "out_of_scope", "", {}, "hist"),
 
     # --- the rest --------------------------------------------------------------
-    ("what has SCAI written about penguins", "article_lookup", "", {}, "hist"),
-    ("What has SCAI written about inflation?", "article_lookup", "", {}, "hist"),
+    ("what has SCEAI written about penguins", "article_lookup", "", {}, "hist"),
+    ("What has SCEAI written about inflation?", "article_lookup", "", {}, "hist"),
     ("ما هو أخر تحليل للتضخم", "analysis_lookup", "", {}, "hist"),
     ("Show GDP growth, inflation, and government revenues for the year 2023",
      "multi_indicator", "", {}, "hist"),

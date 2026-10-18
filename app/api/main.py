@@ -32,7 +32,7 @@ from app.db import message_log
 from app.api.admin import router as admin_router
 from app.api.admin_auth import warn_if_default_password
 
-app = FastAPI(title="SCAI Economic Data Assistant", version="2.0.0")
+app = FastAPI(title="SCEAI Economic Data Assistant", version="2.0.0")
 app.include_router(admin_router)
 # Says so on every startup if the placeholder password is still in place.
 warn_if_default_password()
@@ -75,7 +75,7 @@ def health():
 class ReadResponse(BaseModel):
     """Same readings as /chat, split by who wrote each piece of text.
 
-    council_analysis is SCAI's, verbatim. narration is generated. They are
+    council_analysis is SCEAI's, verbatim. narration is generated. They are
     separate fields rather than one rendered string precisely so the frontend
     cannot blur them and a reader can always tell which is which.
     """
@@ -352,8 +352,8 @@ class SourceAnswer(BaseModel):
     chart: Optional[dict] = None
     # Oxford only: which of their two tools produced the text above.
     tools_used: list = []
-    # SCAI only: suggested next questions, as on /chat. Oxford gets none —
-    # a suggestion is a promise SCAI's pipeline can answer it.
+    # SCEAI only: suggested next questions, as on /chat. Oxford gets none —
+    # a suggestion is a promise SCEAI's pipeline can answer it.
     follow_ups: list[str] = []
 
 
@@ -365,7 +365,7 @@ class AskResponse(BaseModel):
     comparison UI should render those rather than split `answer` back apart.
 
     Combined answers are deliberately NOT merged into one voice. Blending an
-    Oxford figure into SCAI's prose would launder an unverifiable number into
+    Oxford figure into SCEAI's prose would launder an unverifiable number into
     the one place in this product that promises every number is sourced, and a
     reader would have no way to tell which house said what.
     """
@@ -377,7 +377,7 @@ class AskResponse(BaseModel):
 
 
 def _scai_run(req: AskRequest, endpoint: str, progress=None) -> tuple[SourceAnswer, Optional[dict]]:
-    """SCAI's half, plus the raw result the follow-up suggestions are built from."""
+    """SCEAI's half, plus the raw result the follow-up suggestions are built from."""
     try:
         result, message_id, latency_ms = _run_chat(req, progress=progress, endpoint=endpoint)
     except Exception as exc:  # noqa: BLE001 — one half failing is reportable, not fatal
@@ -425,7 +425,7 @@ def _combined_text(scai: SourceAnswer, ox: SourceAnswer) -> str:
     which renders `answer` as-is still tells the reader who said what.
     """
     blocks = []
-    for part, title in ((scai, "SCAI"), (ox, "Oxford Economics")):
+    for part, title in ((scai, "SCEAI"), (ox, "Oxford Economics")):
         body = part.answer if part.ok else f"_No answer: {part.error}_"
         blocks.append(f"## {title}\n\n{body}")
     return "\n\n---\n\n".join(blocks)
@@ -449,7 +449,7 @@ def _ask_response(req: AskRequest, scai: Optional[SourceAnswer],
         # Recorded with the session's state UNCHANGED. The transcript grows so
         # a later turn can see what was asked, but Oxford's answer resolves
         # none of our slots — writing it in as though it had would leave the
-        # next SCAI question inheriting an indicator nothing on our side ever
+        # next SCEAI question inheriting an indicator nothing on our side ever
         # looked up.
         conversations.record(req.session_id, req.message, ox.answer,
                               conversations.get_state(req.session_id),
@@ -460,9 +460,9 @@ def _ask_response(req: AskRequest, scai: Optional[SourceAnswer],
     if not scai.ok and not ox.ok:
         raise HTTPException(status_code=502, detail={
             "ok": False,
-            "message": f"Neither source answered. SCAI: {scai.error} Oxford: {ox.error}",
+            "message": f"Neither source answered. SCEAI: {scai.error} Oxford: {ox.error}",
         })
-    # The SCAI turn is already recorded by _run_chat, including the slot state
+    # The SCEAI turn is already recorded by _run_chat, including the slot state
     # this turn resolved. Oxford's text is deliberately not appended to that
     # transcript: the next follow-up is resolved against our own pipeline's
     # history, and two answers to one question in it makes "compare it to last
@@ -475,16 +475,16 @@ def _ask_response(req: AskRequest, scai: Optional[SourceAnswer],
 def _ask_stream(req: AskRequest) -> StreamingResponse:
     """/ask as Server-Sent Events: each half the moment it is ready.
 
-    The point is `combined`. SCAI usually answers in a few seconds and Oxford
-    in ~20, and the JSON form holds SCAI's answer back until Oxford's arrives.
+    The point is `combined`. SCEAI usually answers in a few seconds and Oxford
+    in ~20, and the JSON form holds SCEAI's answer back until Oxford's arrives.
     Here each half is its own event — `scai` or `oxford`, carrying that half's
     SourceAnswer — in whichever order they finish, then one `answer` event
-    with the same body the JSON form returns. SCAI's suggested next questions
+    with the same body the JSON form returns. SCEAI's suggested next questions
     follow its `scai` event as a `follow_ups` event, when there are any.
 
-    SCAI's pipeline events (`stage`, `delta`, `replace`) are forwarded exactly
+    SCEAI's pipeline events (`stage`, `delta`, `replace`) are forwarded exactly
     as /chat streams them, so a frontend that already renders a /chat stream
-    renders SCAI's panel here with the same code. Oxford has no progress to
+    renders SCEAI's panel here with the same code. Oxford has no progress to
     report: its call is one request that either returns or times out.
     """
     events: "queue.Queue[Optional[dict]]" = queue.Queue()
@@ -496,7 +496,7 @@ def _ask_stream(req: AskRequest) -> StreamingResponse:
         else:
             events.put({"event": "stage", "data": {"stage": name, **(detail or {})}})
 
-    # Each job returns (SourceAnswer, result-or-None). SCAI's result is kept so
+    # Each job returns (SourceAnswer, result-or-None). SCEAI's result is kept so
     # its follow-up suggestions can be worked out AFTER its answer is on screen.
     jobs = {}
     if req.source in ("scai", "combined"):
@@ -553,7 +553,7 @@ def _ask_stream(req: AskRequest) -> StreamingResponse:
 
 @app.post("/ask", response_model=None)
 def ask_endpoint(req: AskRequest, request: Request):
-    """One question, answered by SCAI, by Oxford Economics, or by both.
+    """One question, answered by SCEAI, by Oxford Economics, or by both.
 
     Same body as /chat with a `source` field added, so a frontend already
     talking to /chat changes a URL and adds one key. Like /chat, it streams
@@ -563,7 +563,7 @@ def ask_endpoint(req: AskRequest, request: Request):
     WHAT LEAVES THE BUILDING: source=oxford and source=combined send the user's
     question verbatim to Oxford's cloud. Everything else in this product stays
     on-premises, so that is a per-request choice a person makes, never a
-    fallback the server takes on their behalf — a SCAI answer that fails is
+    fallback the server takes on their behalf — a SCEAI answer that fails is
     reported as failed rather than quietly re-asked off-site.
 
     Both halves of a combined request run at once. Oxford takes ~20s on its

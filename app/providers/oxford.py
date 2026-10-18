@@ -24,7 +24,7 @@ TWO TOOLS, and the split is the useful part:
 
 PASS-THROUGH, DELIBERATELY. Whatever Oxford returns is shown to the user as
 Oxford said it — no verification, no filtering, no correcting a figure that
-looks wrong. This is the opposite of the rule for SCAI's own answers, and the
+looks wrong. This is the opposite of the rule for SCEAI's own answers, and the
 difference is the point: our pipeline states a number only after checking it
 against the rows it retrieved, because the number is ours to stand behind.
 Oxford's number is Oxford's, presented under their name, and a reader
@@ -55,7 +55,7 @@ from app.core.llm_client import chat, router_client
 DATA_TOOL = "EconomicData"
 ANALYSIS_TOOL = "EconomicAnalysis"
 
-# One stable conversation id per SCAI session, so Oxford's own follow-up
+# One stable conversation id per SCEAI session, so Oxford's own follow-up
 # handling sees a conversation rather than a stream of unrelated first
 # questions. uuid5 rather than a stored mapping: the id has to survive a
 # restart, and deriving it costs nothing.
@@ -256,7 +256,7 @@ def _without_button_hints(text: str) -> str:
 
 # Appended to every question. Oxford covers every economy it models, so "what's
 # the real GDP value" is a question it can answer about two hundred countries —
-# and it did, returning a table led by Paraguay and Uzbekistan. This is a SCAI
+# and it did, returning a table led by Paraguay and Uzbekistan. This is a SCEAI
 # product: a question that names no country is a question about Qatar, and the
 # asker should not have to say so every time.
 #
@@ -312,7 +312,7 @@ def ask(question: str, language: str = "en", session_id: str = "default",
 
     Raises OxfordError with a message fit for a reader. The caller decides
     whether that becomes an error response or one half of a combined answer
-    that still has SCAI's side to show.
+    that still has SCEAI's side to show.
     """
     if not available():
         raise OxfordError("Oxford Economics is not configured on this deployment.")

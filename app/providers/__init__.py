@@ -1,4 +1,4 @@
-"""Answer sources that are not SCAI's own pipeline.
+"""Answer sources that are not SCEAI's own pipeline.
 
 Everything in here talks to a third party over the public internet, which the
 rest of this codebase deliberately does not do (see app/core/config.py). Each

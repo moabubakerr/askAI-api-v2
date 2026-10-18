@@ -13,7 +13,7 @@ it also means each combination is a differently-shaped query nobody has run.
 
 Nothing here writes. The app connects as scai_ro, which holds INSERT on two
 application tables and nothing else, so an admin route physically cannot alter
-SCAI's data even if one of these were wrong.
+SCEAI's data even if one of these were wrong.
 """
 from typing import Optional
 
@@ -142,7 +142,7 @@ def stats() -> dict:
     """Headline numbers, and the same numbers split.
 
     Split by language deliberately: an Arabic failure rate averaged into one
-    overall figure is how "SCAI's commentary comes back in English" went
+    overall figure is how "SCEAI's commentary comes back in English" went
     unnoticed. Split by answer shape because "which kinds of answer do people
     rate badly" is actionable in a way that one average is not.
     """

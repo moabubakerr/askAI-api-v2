@@ -64,7 +64,7 @@ def get_series(indicator_detail_id: str, published_indicator_detail_id: Optional
                        -- GDP publishes quarterly_yoy_pp and leaves
                        -- quarterly_yoy_percent empty, so "is public debt
                        -- improving?" was answered "no published change is
-                       -- available" about an indicator whose change SCAI
+                       -- available" about an indicator whose change SCEAI
                        -- publishes.
                        monthly_mom_pp, monthly_yoy_pp,
                        quarterly_qoq_pp, quarterly_yoy_pp,
@@ -121,10 +121,10 @@ ANALYSIS_FIELDS = (("summary", "summary"), ("detailed_analysis", "detailed"),
 
 
 def analysis_text(analysis: dict, language: str = "en") -> dict:
-    """SCAI's commentary in the reader's language, falling back to English.
+    """SCEAI's commentary in the reader's language, falling back to English.
 
     P04 carries all four fields in Arabic and the ETL never loaded them, so an
-    Arabic question about inflation was answered with SCAI's English analysis —
+    Arabic question about inflation was answered with SCEAI's English analysis —
     the one part of the reply that is quoted verbatim and cannot be rephrased
     by the Composer.
 
@@ -162,7 +162,7 @@ def get_analysis(ref_data_point_id: str) -> Optional[dict]:
 _LEXICAL_STOPWORDS = {
     "the", "and", "for", "what", "has", "have", "about", "written", "wrote",
     "said", "say", "says", "tell", "all", "any", "with", "from", "that", "this",
-    "does", "did", "council", "scai",
+    "does", "did", "council", "sceai", "scai",
     "عن", "في", "من", "ما", "هل", "ماذا", "على", "الى", "إلى", "هو", "هي", "المجلس",
 }
 
@@ -212,10 +212,10 @@ _READABLE_CHUNKS = """(
 
 def search_article_chunks(query_embedding: list[float], language: str = "en",
                            limit: int = 6, query_text: Optional[str] = None) -> list[dict]:
-    """Passages from SCAI articles most relevant to a question.
+    """Passages from SCEAI articles most relevant to a question.
 
     Hybrid, not purely semantic. Embeddings handle the paraphrase case that is
-    the whole point here ("what does SCAI think about trade wars" finding an
+    the whole point here ("what does SCEAI think about trade wars" finding an
     article titled "Financial Stability Implications of Tariffs"), but they are
     weak on rare exact tokens — a programme name like "Tawteen" or an acronym
     like "ICV" carries little semantic signal, and cosine similarity will
@@ -285,7 +285,7 @@ def count_article_chunks() -> int:
 
 
 def get_analysis_for_data_points(record_ids: list[str]) -> dict[str, dict]:
-    """SCAI's own written commentary for specific data points, keyed by the
+    """SCEAI's own written commentary for specific data points, keyed by the
     record id of the point it belongs to.
 
     indicator_analysis.ref_data_point_id holds a published_data_point_id (for
@@ -294,7 +294,7 @@ def get_analysis_for_data_points(record_ids: list[str]) -> dict[str, dict]:
     layer can attach the Council's text to the precise reading it describes,
     rather than to the indicator in general.
 
-    This text is written by SCAI analysts. It is returned verbatim and must
+    This text is written by SCEAI analysts. It is returned verbatim and must
     never be paraphrased or merged into generated prose: the whole point of the
     /read endpoint is that the reader can tell Council analysis from narration."""
     if not record_ids:
@@ -358,11 +358,11 @@ def has_country_breakdown(published_indicator_detail_id: Optional[str],
 
 
 def get_benchmark_countries(published_indicator_detail_id: Optional[str]) -> list[str]:
-    """SCAI's own chosen comparison set for one indicator, from P05.
+    """SCEAI's own chosen comparison set for one indicator, from P05.
 
     Used when a ranking question names no countries at all ("which country has
     the lowest inflation") — previously that produced a one-row "ranking" of
-    Qatar against itself. The set is SCAI's editorial choice per indicator, not
+    Qatar against itself. The set is SCEAI's editorial choice per indicator, not
     a list this code invents, and not a fixed global default: for Inflation it
     is the GCC plus Norway, Singapore and Switzerland.
 
@@ -370,7 +370,7 @@ def get_benchmark_countries(published_indicator_detail_id: Optional[str]) -> lis
     national series and is added separately by the caller.
 
     Only 21 of the published indicators define benchmarks, so an empty result
-    is normal and means "SCAI has not designated comparators for this one"."""
+    is normal and means "SCEAI has not designated comparators for this one"."""
     if not published_indicator_detail_id:
         return []
     with engine.connect() as conn:
@@ -448,7 +448,7 @@ latest AS (
            p.period_label, p.period_date, p.granularity,
            p.actual, p.target AS period_target,
            p.published_data_point_id AS record_id,
-           -- SCAI's own vetted year-on-year figures, never a fresh derivation
+           -- SCEAI's own vetted year-on-year figures, never a fresh derivation
            -- (F-022..F-026). Which one applies depends on the granularity, so
            -- all three come back and preferred_change_field picks.
            p.monthly_yoy_percent, p.quarterly_yoy_percent, p.yearly_yoy_percent,

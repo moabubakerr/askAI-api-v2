@@ -207,7 +207,7 @@ _MESSAGES = {
     # a bare "Hello!" leaves the user guessing what they may ask.
     "greeting": {
         "en": ("Hello, I'm ASK AI, the AI assistant of the Supreme Council for Economic "
-                "Affairs and Investment. I answer questions about Qatar's published SCAI "
+                "Affairs and Investment. I answer questions about Qatar's published SCEAI "
                 "economic indicators.\n\n"
                 "You can ask me for:\n"
                 "• a latest value — \"what is the latest Real GDP?\"\n"
@@ -233,7 +233,7 @@ _MESSAGES = {
         "ar": "على الرحب والسعة — اسألني عن أي شيء آخر بخصوص المؤشرات المنشورة.",
     },
     "out_of_scope": {
-        "en": ("That's outside what I can help with — I only cover Qatar's published SCAI "
+        "en": ("That's outside what I can help with — I only cover Qatar's published SCEAI "
                 "economic indicators, and I report figures from that data rather than "
                 "forecasting or commenting beyond it. Ask me for an indicator's value, "
                 "trend, comparison or definition."),
@@ -246,7 +246,7 @@ _MESSAGES = {
     # the user unable to tell whether they misnamed the indicator, asked for a
     # period that isn't covered, or hit a genuine gap.
     "indicator_not_found": {
-        "en": ("No indicator in SCAI's approved data matches \"{phrase}\".\n\n"
+        "en": ("No indicator in SCEAI's approved data matches \"{phrase}\".\n\n"
                 "Two things that usually help:\n"
                 "• name the metric more plainly — \"inflation\", \"Real GDP\", "
                 "\"trade balance\", \"government revenues\"\n"
@@ -290,7 +290,7 @@ _MESSAGES = {
     # underlying limitation.
     "future_period_suffix": {
         "en": (" That period is in the future: I report published figures and don't "
-                "forecast. Where SCAI has set a TARGET for a future period I can give "
+                "forecast. Where SCEAI has set a TARGET for a future period I can give "
                 "that instead — it's a policy goal, not a prediction."),
         "ar": (" هذه الفترة مستقبلية: أعرض الأرقام المنشورة ولا أقدّم تنبؤات. وإذا كان "
                 "المجلس قد حدد هدفاً لفترة مستقبلية يمكنني عرضه — وهو غاية سياسات لا تنبؤ."),
@@ -306,7 +306,7 @@ _MESSAGES = {
                 "(المتاح: {available})."),
     },
     "no_definition": {
-        "en": ("\"{indicator}\" is in the approved data, but SCAI's catalog carries no "
+        "en": ("\"{indicator}\" is in the approved data, but SCEAI's catalog carries no "
                 "definition for it. I won't supply one of my own. I can still report its "
                 "values if that helps."),
         "ar": ("\"{indicator}\" موجود في البيانات المعتمدة، لكن كتالوج المجلس لا يتضمن "
@@ -332,7 +332,7 @@ _MESSAGES = {
                 "measured over {base_a}, while \"{b}\" counts {base_b}. Those are "
                 "different populations, so the result would assume something the "
                 "data does not say. I can give you either figure on its own, or "
-                "the indicator that measures what you are after if SCAI publishes "
+                "the indicator that measures what you are after if SCEAI publishes "
                 "one."),
         "ar": ("لا — لا يمكن ضرب هذين الرقمين معاً. فـ\"{a}\" يُقاس على {base_a}، "
                 "بينما \"{b}\" يحصي {base_b}. وهما مجموعتان مختلفتان، لذا فإن الناتج "
@@ -340,7 +340,7 @@ _MESSAGES = {
                 "المؤشر الذي يقيس ما تبحث عنه إن كان المجلس ينشره."),
     },
     "derived_not_supported": {
-        "en": ("I report figures as SCAI publishes them and don't combine indicators "
+        "en": ("I report figures as SCEAI publishes them and don't combine indicators "
                 "to derive new ones, because the result depends on assumptions the "
                 "data does not state — most often that two figures cover the same "
                 "population or period. Ask me for either indicator on its own and "
@@ -383,7 +383,7 @@ _MESSAGES = {
                 "هذه مشكلة في الإعداد وليست حدوداً لما سألت عنه."),
     },
     "no_articles_found": {
-        "en": ("SCAI's published articles don't appear to cover \"{topic}\". I searched the "
+        "en": ("SCEAI's published articles don't appear to cover \"{topic}\". I searched the "
                 "article text and found nothing close enough to answer from — rather than "
                 "stretch a loosely-related piece into an answer. Try a broader topic, or ask "
                 "me for an indicator instead."),
@@ -392,7 +392,7 @@ _MESSAGES = {
                 "يحتمل. جرّب موضوعاً أوسع، أو اسألني عن مؤشر."),
     },
     "no_article_topic": {
-        "en": ("I couldn't tell which topic you'd like me to look up in SCAI's articles. "
+        "en": ("I couldn't tell which topic you'd like me to look up in SCEAI's articles. "
                 "Name the subject — for example \"the trade war\", \"In-Country Value\" or "
                 "\"knowledge transfer\"."),
         "ar": ("لم أتبيّن الموضوع الذي تريد البحث عنه في مقالات المجلس. حدّد الموضوع — "
@@ -400,7 +400,7 @@ _MESSAGES = {
     },
     "articles_not_indexed": {
         "en": ("The article text hasn't been indexed yet, so I can't search it. This is a "
-                "setup step (index-articles), not a gap in what SCAI has published."),
+                "setup step (index-articles), not a gap in what SCEAI has published."),
         "ar": ("لم تتم فهرسة نصوص المقالات بعد، لذا لا يمكنني البحث فيها. هذه خطوة إعداد "
                 "(index-articles) وليست نقصاً فيما نشره المجلس."),
     },
@@ -423,7 +423,7 @@ _MESSAGES = {
                 "2025\" أو \"2023 مقابل 2024\". ويجب أن تكونا من النوع نفسه."),
     },
     "no_analysis": {
-        "en": ("SCAI hasn't published written analysis for \"{indicator}\" in the approved "
+        "en": ("SCEAI hasn't published written analysis for \"{indicator}\" in the approved "
                 "data. I can give you its values or trend instead."),
         "ar": ("لم ينشر المجلس تحليلاً مكتوباً لـ \"{indicator}\" ضمن البيانات المعتمدة. "
                 "يمكنني عرض قيمه أو اتجاهه بدلاً من ذلك."),
@@ -457,9 +457,9 @@ _MESSAGES = {
                 "وسأجيبك."),
     },
     "no_forecast": {
-        "en": ("I don't produce forecasts — I report figures SCAI has already published, "
+        "en": ("I don't produce forecasts — I report figures SCEAI has already published, "
                 "and the approved data contains no projection for {topic}. What it does "
-                "carry for some indicators is SCAI's own TARGET for a future period, which "
+                "carry for some indicators is SCEAI's own TARGET for a future period, which "
                 "is a policy goal rather than a prediction. Ask for a target, or for the "
                 "latest actual reading, and I can answer either."),
         "ar": ("لا أقدّم تنبؤات — أعرض الأرقام التي نشرها المجلس، ولا تتضمن البيانات "

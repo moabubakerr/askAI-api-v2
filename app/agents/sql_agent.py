@@ -1,7 +1,7 @@
 """
 DEPRECATED (v1 architecture) — superseded by app/core/graph_v2.py.
 
-The SCAI QC report showed this free-form Text-to-SQL + LLM-does-arithmetic
+The SCEAI QC report showed this free-form Text-to-SQL + LLM-does-arithmetic
 pattern produces wrong numbers (see README "QC findings -> fix" table).
 Kept here for reference only. The only place a v1-style free-form LLM SQL
 call might still be reasonable is pure qualitative text lookups (sectors/
@@ -20,7 +20,7 @@ from app.db.schema import get_schema_prompt
 from app.db.executor import run_query, UnsafeSQLError
 
 SYSTEM_TEMPLATE = """You are a SQL generator for a PostgreSQL database of Qatari economic
-indicators maintained by SCAI. Given a user question, output ONE valid SELECT statement.
+indicators maintained by SCEAI. Given a user question, output ONE valid SELECT statement.
 
 {schema}
 

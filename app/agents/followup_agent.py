@@ -12,7 +12,7 @@ they want. So there are two gates, and both have to pass:
 
 A suggestion is a promise that the question can be answered, so the prompt
 names what ASK AI can answer and forbids everything else — forecasts above
-all, which SCAI does not publish and this product refuses. Nothing here states
+all, which SCEAI does not publish and this product refuses. Nothing here states
 a figure: suggestions are questions, and a number in one would be a claim no
 verifier has checked, so any suggestion stating a value — a decimal, a
 percentage, a number of 100 or more — is dropped. Periods and small counts
@@ -35,7 +35,7 @@ MAX_CHARS = 120
 _NO_FOLLOW_UPS = {"general_chat", "out_of_scope"}
 
 SYSTEM_PROMPT = """You are part of ASK AI, the AI assistant of Qatar's Supreme Council for
-Economic Affairs and Investment (SCAI). The user just asked a question and got an
+Economic Affairs and Investment (SCEAI). The user just asked a question and got an
 answer. Suggest what they are most likely to ask NEXT.
 
 Every suggestion MUST take one of these shapes — they are the only questions
@@ -50,7 +50,7 @@ a placeholder such as "N", "X" or "<period>" in a suggestion.
 - "Is Real GDP improving?"
 - "What was the highest Real GDP since 2020?" / "When was Real GDP highest?"
 - "What does Real GDP mean?"
-- "What is SCAI's analysis of Real GDP?"
+- "What is SCEAI's analysis of Real GDP?"
 The same shapes in Arabic are fine when the answer is in Arabic.
 
 ASK AI CANNOT answer, so never suggest:

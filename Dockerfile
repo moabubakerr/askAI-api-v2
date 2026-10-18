@@ -1,5 +1,5 @@
 
-# SCAI Economic Data Assistant — API image.
+# SCEAI Economic Data Assistant — API image.
 #
 # One image serves two roles:
 #   - default CMD: the FastAPI app (uvicorn)

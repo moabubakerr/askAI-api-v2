@@ -12,13 +12,13 @@ Two ways in, and the difference matters:
 
 The key is a shared secret and says nothing about who is holding it. A login
 session at least names an account, and today there is exactly one. Neither is
-individual accountability: if SCAI needs to know WHICH person read the logs,
+individual accountability: if SCEAI needs to know WHICH person read the logs,
 this needs real identity in front of it.
 
 See app/api/admin_auth.py for the session model and its limits.
 
 Every route is a SELECT. The app connects as scai_ro, which holds INSERT on two
-application tables and nothing else, so nothing here can change SCAI's data.
+application tables and nothing else, so nothing here can change SCEAI's data.
 """
 from typing import Optional
 

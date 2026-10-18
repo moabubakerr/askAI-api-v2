@@ -5,7 +5,7 @@ shape a reader needs rather than as one block of prose.
 The organising principle is that the response keeps three kinds of text
 strictly apart, because they carry different authority:
 
-  council_analysis   written by SCAI analysts. Returned VERBATIM from
+  council_analysis   written by SCEAI analysts. Returned VERBATIM from
                      indicator_analysis. Never paraphrased, never merged into
                      the narration, always labelled with the period it was
                      written about.
@@ -136,10 +136,10 @@ def _period_mismatch(entry: dict) -> bool:
 
     This is a source-data problem, not ours: the analysis row attached to Real
     GDP's 2019-Q1 point reads "Real GDP grew by 6.1% YoY in Q4 2024". Labelling
-    it "According to SCAI, Q1 2019" is accurate about WHERE it is filed and
+    it "According to SCEAI, Q1 2019" is accurate about WHERE it is filed and
     misleading about WHAT it says, so the disagreement is surfaced rather than
     smoothed over. The frontend can then attribute it to the data point instead
-    of to the period, and SCAI can fix the filing.
+    of to the period, and SCEAI can fix the filing.
     """
     label = str(entry.get("period_label") or "")
     year = re.match(r"(\d{4})", label)
@@ -153,7 +153,7 @@ def _period_mismatch(entry: dict) -> bool:
 
 
 def _council_analysis(citations: list[dict], language: str = "en") -> list[dict]:
-    """SCAI's written commentary for the exact readings used, verbatim."""
+    """SCEAI's written commentary for the exact readings used, verbatim."""
     record_ids = [c["record_id"] for c in citations if c.get("record_id")]
     found = retriever.get_analysis_for_data_points(record_ids)
     if not found:

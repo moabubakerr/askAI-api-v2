@@ -1,5 +1,5 @@
 
-# SCAI Economic Data Assistant — app + database.
+# SCEAI Economic Data Assistant — app + database.
 #
 # vLLM and TEI are NOT defined here. They are already running on the VM in their
 # own compose project, on the `runtimes` network; this file joins that network as

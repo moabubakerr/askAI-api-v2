@@ -13,8 +13,8 @@ Kept beside `etl/schema.sql`; if you change one, change the other.
 
 | Layer | Tables | Written by |
 |---|---|---|
-| **Source** — everything SCAI tracks, 531 indicators | `indicators`, `indicator_details`, `indicator_values`, `indicator_analysis` | the ETL |
-| **Published** — the 189 SCAI has reviewed, with units, polarity and vetted YoY | `published_data_points`, plus the `published_*` columns on the two above | the ETL |
+| **Source** — everything SCEAI tracks, 531 indicators | `indicators`, `indicator_details`, `indicator_values`, `indicator_analysis` | the ETL |
+| **Published** — the 189 SCEAI has reviewed, with units, polarity and vetted YoY | `published_data_points`, plus the `published_*` columns on the two above | the ETL |
 | **Application** — what the assistant itself produces | `chat_messages`, `message_citations`, `message_feedback`, `indicator_embeddings`, `article_chunks` | the app and the index scripts |
 | **Provenance** — where the other layers came from | `etl_load_log` | the ETL |
 

@@ -1,4 +1,4 @@
-# SCAI Economic Data Assistant — On-Prem Architecture
+# SCEAI Economic Data Assistant — On-Prem Architecture
 
 ## 1. Components
 
@@ -6,8 +6,8 @@
 |-------------------|----------------------------------------|-------|
 | LLM serving       | vLLM + Qwen2.5-72B-Instruct (or Llama-3.3-70B) | Runs on GPU host, exposes OpenAI-compatible API |
 | Router model      | Qwen2.5-7B-Instruct (same or separate vLLM instance) | Fast intent classification |
-| Structured data   | PostgreSQL                             | SCAI indicators, read-only role for the app |
-| Unstructured data | Chroma (local, persisted to disk)      | For SCAI PDF reports/publications later |
+| Structured data   | PostgreSQL                             | SCEAI indicators, read-only role for the app |
+| Unstructured data | Chroma (local, persisted to disk)      | For SCEAI PDF reports/publications later |
 | Orchestration     | LangGraph                              | Deterministic state machine, not free-form agent loop |
 | API               | FastAPI                                | Single network-facing entrypoint |
 
@@ -42,7 +42,7 @@ have GPU headroom, or just reuse the 72B for both (simpler, slower).
 > - The data load is `docker compose run --rm etl`, against the running
 >   container, **after** the stack is up. It is a runtime step, not a build
 >   step: the CSVs are bind-mounted read-only and `data/` is in `.dockerignore`,
->   so the image carries no SCAI data and reloading never needs a rebuild.
+>   so the image carries no SCEAI data and reloading never needs a rebuild.
 > - Nothing runs on your workstation. No local Postgres, no local `pip install`.
 >
 > Both init scripts run **once**, on an empty volume. Editing `schema.sql` later
@@ -52,7 +52,7 @@ have GPU headroom, or just reuse the 72B for both (simpler, slower).
 > The section below is the equivalent by-hand procedure, for a Postgres you
 > manage yourself.
 
-Create the schema (built from actual inspection of the SCAI CSV exports —
+Create the schema (built from actual inspection of the SCEAI CSV exports —
 see `etl/schema.sql` for full column-level detail and comments):
 
 ```bash
@@ -134,7 +134,7 @@ of what SQL the LLM generates. Point `POSTGRES_DSN` in `app/core/config.py`
   of the dropped rows are published (0 appear in `P01`/`P02`). Everything lost is
   unpublished working data. The loader prints each skip count on every run.
 
-  Worth raising with SCAI: the 52 missing parent indicators are the one item
+  Worth raising with SCEAI: the 52 missing parent indicators are the one item
   here that could represent real data the chatbot should have. If they send
   those rows, ~1,806 additional raw data points come back with them.
 
@@ -148,7 +148,7 @@ of what SQL the LLM generates. Point `POSTGRES_DSN` in `app/core/config.py`
 
 - **`countries` now sourced from `P14_Ref_Countries`** instead of the earlier
   `Item_6_Countries` — same row count but adds ISO country code + lat/long,
-  which the chart layer needs for the "Geo Map" chart type SCAI itself uses.
+  which the chart layer needs for the "Geo Map" chart type SCEAI itself uses.
 - **`indicator_dashboards` (from `P09_Published_Dashboards`) is the highest-value
   addition here** — it's the bridge between the numeric indicator world and the
   CMS/sector world. Verified: 210 rows link to `sectors`, 128 link to
@@ -161,7 +161,7 @@ of what SQL the LLM generates. Point `POSTGRES_DSN` in `app/core/config.py`
 - **Chart metadata tables** (`chart_sub_indicators`, `chart_alternate_views`,
   `additional_charts`, `additional_chart_countries` — from P07a/P07b/P08/P08a)
   are loaded but low-priority for Q&A; they exist so the Chart Agent can
-  eventually match SCAI's own chosen chart types/views rather than guessing.
+  eventually match SCEAI's own chosen chart types/views rather than guessing.
 - **`P10_Published_Mappings` and `P11_Published_ValidationChecks` were empty**
   (zero bytes) — not loaded. If these get populated later, let me know and
   I'll add loaders.
@@ -425,7 +425,7 @@ import at all.
 
 ## 4c. Answering from article text
 
-Indicators answer "what is the number". The 84 published SCAI articles answer
+Indicators answer "what is the number". The 84 published SCEAI articles answer
 "what has the Council written about X" — a different retrieval problem, since
 the answer is a paragraph inside a ~14,000-character document rather than a row.
 
@@ -452,7 +452,7 @@ How it works:
    is told that an honest "the articles don't cover this" is a correct answer.
 
 **The threshold matters more than the search.** A vector search always returns a
-nearest neighbour, so without a distance ceiling "what has SCAI written about
+nearest neighbour, so without a distance ceiling "what has SCEAI written about
 penguins" would be answered confidently from whichever passage happened to be
 least distant. `ARTICLE_MAX_DISTANCE` in `graph_v2.py` is that ceiling, and it
 is currently a guess — `scripts/calibrate_articles.py` prints the real
@@ -498,12 +498,12 @@ User question
    Final answer + optional chart spec → returned to user
 ```
 
-## 6. Next steps once you share the real SCAI data
+## 6. Next steps once you share the real SCEAI data
 
 1. Replace `app/db/schema.py` with the actual table/column descriptions.
 2. Load the Excel/CSV data into Postgres (a one-off ETL script — happy to write
    this once I see the real file structure).
-3. If SCAI also publishes PDF reports, add a RAG agent (Chroma + embeddings
+3. If SCEAI also publishes PDF reports, add a RAG agent (Chroma + embeddings
    model, e.g. `bge-m3` served locally) to handle narrative/qualitative
    questions the structured DB can't answer.
 4. Add conversation memory (Postgres-backed session store) so follow-up
@@ -513,7 +513,7 @@ User question
 
 ---
 
-# v2 Architecture — Response to SCAI QC Report
+# v2 Architecture — Response to SCEAI QC Report
 
 The tester feedback workbook (35 findings, 29 Major) showed a consistent
 pattern in the previously-implemented "Ask AI" system: **the LLM was doing
@@ -562,7 +562,7 @@ Final answer
 | F-005, F-017 | LLM computed growth rate itself, wrong formula/data | `compute.growth_rate()` — fixed CAGR/simple formula, tested |
 | F-008 | "Highest value" assumed = latest, not actually scanned | `compute.min_max()` — scans all retrieved rows |
 | F-009, F-010, F-011 | LLM couldn't/wouldn't do arithmetic reliably | `compute.difference()`, `compute.period_to_period_change()` |
-| F-022–026, F-031 | QoQ/YoY/MoM confused, or recomputed instead of using SCAI's own vetted figures | `compute.preferred_change_field()` — always prefers `published_data_points`' precomputed columns over re-deriving |
+| F-022–026, F-031 | QoQ/YoY/MoM confused, or recomputed instead of using SCEAI's own vetted figures | `compute.preferred_change_field()` — always prefers `published_data_points`' precomputed columns over re-deriving |
 | F-003, F-012 | Wrong indicator silently substituted (inactive VC-deals indicator; Nominal vs Real GDP) | `indicator_resolver.py` — confidence threshold, ambiguity-gap check, explicit contrastive-term contradiction check (nominal/real, gross/net, etc.) |
 | F-014 | Paraphrase ("tourists arrived") didn't match catalog string | Embedding-based semantic match (`embeddings.py`) — tested: string similarity alone scores this pair 0.167, unusable; embeddings solve the actual synonym problem |
 | F-001 | Comparison returned 6 countries instead of the 2 asked | `country_resolver.py` + `compute.country_comparison()` — returns exactly the resolved set, never a default benchmark list |
@@ -572,7 +572,7 @@ Final answer
 | F-007, F-018, F-032–034 | No "overview/count/list" capability, fell back to single-indicator lookup | `_macro_overview()`, `count_indicators_by_type()`, `get_sector_indicators()` — deterministic, real counts/lists |
 | F-016 | No capabilities answer | `_capabilities_answer()` — real counts pulled from the DB, not a canned lie |
 | (implicit, your instruction) | LLM could invent any number in its final phrasing | `compute/verifier.py` — regex-checks every number in the Composer's output against the facts payload; falls back to a template if anything doesn't match |
-| F-002, F-017 (Oxford Economics) | External forecast implausible | **Out of scope** — this build is SCAI-data-only; if a Combined mode with an external provider is still wanted, it needs its own separate honesty/plausibility layer, not covered here |
+| F-002, F-017 (Oxford Economics) | External forecast implausible | **Out of scope** — this build is SCEAI-data-only; if a Combined mode with an external provider is still wanted, it needs its own separate honesty/plausibility layer, not covered here |
 
 ## What's still open / needs your input
 
@@ -587,7 +587,7 @@ Final answer
    up, before considering this closed.
 2. **Macro overview indicator list** (`HEADLINE_NAMES` in `graph_v2.py`) is
    a placeholder editorial list (Real GDP, Inflation, Trade Balance,
-   Government Revenues) — confirm the actual set SCAI wants surfaced for
+   Government Revenues) — confirm the actual set SCEAI wants surfaced for
    F-007/F-018-style "how's the economy doing" questions.
 3. **Rounding convention** (headline 1 decimal, evidence full precision) is
    implemented in the verifier's tolerance check but not yet in a display
@@ -615,7 +615,7 @@ guarantee, so it's enforced structurally instead.
 A citation identifies:
 - **Indicator name** and **original data source** (e.g. `World Bank`,
   `Qatar Tourism` — from `indicator_details.data_source_en`)
-- **Which table** the number came from — `published_data_points` (SCAI-vetted,
+- **Which table** the number came from — `published_data_points` (SCEAI-vetted,
   curated) vs `indicator_values` (raw/working data not yet published) —
   labeled honestly as such in the footer, not hidden
 - **The exact record id** (`published_data_point_id` / `value_id`) — included
@@ -627,14 +627,14 @@ A citation identifies:
 Example footer for a min/max query:
 ```
 Sources:
-• Real GDP — SCAI Approved/Published Data — original source: World Bank — Q3-2025
+• Real GDP — SCEAI Approved/Published Data — original source: World Bank — Q3-2025
 ```
 
 Multiple periods (e.g. a trend query) collapse into one readable line rather
 than one bullet per data point:
 ```
 Sources:
-• Real GDP — SCAI Approved/Published Data — original source: World Bank — Q1-2025 to Q4-2025 (4 data points)
+• Real GDP — SCEAI Approved/Published Data — original source: World Bank — Q1-2025 to Q4-2025 (4 data points)
 ```
 
 Tested: a min/max citation correctly points at the row that actually won the

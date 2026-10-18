@@ -1,7 +1,7 @@
 """
 DEPRECATED (v1 architecture) — superseded by app/core/graph_v2.py.
 
-The SCAI QC report showed this free-form Text-to-SQL + LLM-does-arithmetic
+The SCEAI QC report showed this free-form Text-to-SQL + LLM-does-arithmetic
 pattern produces wrong numbers (see README "QC findings -> fix" table).
 Kept here for reference only. The only place a v1-style free-form LLM SQL
 call might still be reasonable is pure qualitative text lookups (sectors/
@@ -21,7 +21,7 @@ from app.core.config import settings
 
 INTENTS = ["data_lookup", "trend_analysis", "comparison", "chart_request", "general_chat", "out_of_scope"]
 
-SYSTEM_PROMPT = f"""You are an intent classifier for a Qatari economic-data assistant (SCAI).
+SYSTEM_PROMPT = f"""You are an intent classifier for a Qatari economic-data assistant (SCEAI).
 Classify the user's message into exactly one of: {INTENTS}.
 
 - data_lookup: asking for a single figure/value (e.g. "what was GDP growth in 2023?")

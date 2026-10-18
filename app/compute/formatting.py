@@ -1,5 +1,5 @@
 """
-How a figure should be displayed, read from SCAI's own `Format` field.
+How a figure should be displayed, read from SCEAI's own `Format` field.
 
 The catalogue splits presentation across two columns and the app was only ever
 reading one of them. `unit_en` says "QAR"; `Format` says "bn0.0", meaning
@@ -25,7 +25,7 @@ from typing import Optional
 # "bn0.00", "0.000m", "0.0k" — the scale may lead or trail the digits.
 _SCALE = re.compile(r"^(?P<lead>bn|m|k)?[\d.]*(?P<trail>bn|m|k)?$", re.IGNORECASE)
 
-# Abbreviated and capitalised, scale first: "Bn QAR". SCAI writes "bn QAR" in
+# Abbreviated and capitalised, scale first: "Bn QAR". SCEAI writes "bn QAR" in
 # the units it spells out; this keeps their order and their abbreviation and
 # just capitalises it, so a figure reads the same whether its scale came from
 # unit_en or from the Format column.
@@ -48,7 +48,7 @@ def scale_from_format(format_str: Optional[str]) -> Optional[str]:
 
 
 def decimals_from_format(format_str: Optional[str], default: int = 1) -> int:
-    """Decimal places SCAI specifies. 'bn0.00' -> 2, '.1' -> 1, '0' -> 0."""
+    """Decimal places SCEAI specifies. 'bn0.00' -> 2, '.1' -> 1, '0' -> 0."""
     if not format_str:
         return default
     digits = re.sub(r"[^\d.]", "", format_str)
@@ -57,7 +57,7 @@ def decimals_from_format(format_str: Optional[str], default: int = 1) -> int:
     return len(digits.split(".")[-1])
 
 
-# Placeholders SCAI uses for "this figure has no unit". Printed literally they
+# Placeholders SCEAI uses for "this figure has no unit". Printed literally they
 # read as a unit called NA, which 48 published indicators were doing.
 # "Count" and "Number" are here for the same reason: they name no dimension, so
 # "1,234 Count" reads as a unit when the figure is just 1,234. Where a scale
@@ -109,7 +109,7 @@ def display_unit(unit_en: Optional[str], format_str: Optional[str],
     """The unit as it should appear beside the number, scale included.
 
     Abbreviated and scale-first — "Bn QAR", not "QAR bn". Both choices
-    follow SCAI's own catalogue, where 64 units are written "bn QAR", "m QAR",
+    follow SCEAI's own catalogue, where 64 units are written "bn QAR", "m QAR",
     "m USD", "m MT" with the scale leading. Reordering what they order, or
     writing the scale one way here and another there, would make the same
     quantity read two different ways depending on which column it came from.
@@ -183,7 +183,7 @@ def trim_decimal(value):
     return normalized
 
 
-# The floor on displayed precision. SCAI's Format specifies one decimal for
+# The floor on displayed precision. SCEAI's Format specifies one decimal for
 # Real GDP, which is fine for a headline and too coarse beside a change of
 # 19.062818 — and the raw value carries six decimals of stored noise. Two is
 # the requested minimum; an indicator whose Format asks for MORE keeps it, so

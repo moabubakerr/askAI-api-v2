@@ -3,8 +3,8 @@ Recording what a reader thought of an answer.
 
 The only place the application writes to Postgres. It connects as scai_ro,
 which holds SELECT on everything and INSERT on this one table by name — the
-read-only rule exists so the app cannot modify SCAI's data, and a rating is not
-SCAI's data. INSERT and nothing else, so the app can record a rating and can
+read-only rule exists so the app cannot modify SCEAI's data, and a rating is not
+SCEAI's data. INSERT and nothing else, so the app can record a rating and can
 never edit or delete one.
 
 The question and answer are stored alongside the rating rather than referenced.

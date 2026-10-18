@@ -1,7 +1,7 @@
 """
 DEPRECATED (v1 architecture) — superseded by app/core/graph_v2.py.
 
-The SCAI QC report showed this free-form Text-to-SQL + LLM-does-arithmetic
+The SCEAI QC report showed this free-form Text-to-SQL + LLM-does-arithmetic
 pattern produces wrong numbers (see README "QC findings -> fix" table).
 Kept here for reference only. The only place a v1-style free-form LLM SQL
 call might still be reasonable is pure qualitative text lookups (sectors/
@@ -19,7 +19,7 @@ from app.core.llm_client import chat, llm_client
 from app.core.config import settings
 
 SYSTEM_PROMPT = """You are an economic analyst for Qatar's Supreme Council for Economic
-Affairs and Investment (SCAI). You answer questions using ONLY the data provided below.
+Affairs and Investment (SCEAI). You answer questions using ONLY the data provided below.
 
 Rules:
 - Never state a number that is not present in the provided data.

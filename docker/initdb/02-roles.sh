@@ -19,7 +19,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO scai_ro;
 
     -- The single exception, granted on one table by name. The read-only rule
-    -- exists so the app cannot modify SCAI's data; user feedback is not SCAI's
+    -- exists so the app cannot modify SCEAI's data; user feedback is not SCEAI's
     -- data, and it has to be written by the process the user is talking to.
     --
     -- INSERT only: the app can record a rating and can never edit or delete

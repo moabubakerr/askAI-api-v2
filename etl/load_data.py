@@ -1,5 +1,5 @@
 """
-Loads all SCAI CSV exports into Postgres per etl/schema.sql.
+Loads all SCEAI CSV exports into Postgres per etl/schema.sql.
 
 Usage:
     python etl/load_data.py --csv-dir /path/to/csvs --dsn postgresql://scai_rw:pw@localhost:5432/scai_indicators
@@ -164,8 +164,8 @@ def load_indicator_details(csv_dir, engine):
     # exist anywhere in Item_2 — almost certainly indicators deleted upstream
     # without cascading to their details. They cannot be inserted: indicator_id
     # is a FK to indicators. None of them are published (0 appear in P02), so
-    # the SCAI-vetted layer is untouched; what is lost is unpublished working
-    # data. See the ETL summary — this is worth confirming with SCAI.
+    # the SCEAI-vetted layer is untouched; what is lost is unpublished working
+    # data. See the ETL summary — this is worth confirming with SCEAI.
     known_indicators = _existing_ids(engine, "indicators", "indicator_id")
     skipped_orphans = 0
 
@@ -297,7 +297,7 @@ def load_indicator_analysis(csv_dir, engine):
             "npc_analysis_en": html_to_text(fix_mojibake(r["NPCAnalysisEN"])),
             "benchmark_en": html_to_text(fix_mojibake(r["BenchmarkEN"])),
             # Present in the export all along and never loaded, which is why
-            # SCAI's own commentary reached an Arabic reader in English.
+            # SCEAI's own commentary reached an Arabic reader in English.
             "summary_ar": html_to_text(fix_mojibake(r["SummaryAR"])),
             "detailed_analysis_ar": html_to_text(fix_mojibake(r["DetailedAnalysisAR"])),
             "npc_analysis_ar": html_to_text(fix_mojibake(r["NPCAnalysisAR"])),

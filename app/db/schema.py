@@ -1,8 +1,8 @@
 """
 Schema description fed to the Text-to-SQL agent's prompt.
 
-This reflects the REAL SCAI schema (etl/schema.sql), built from actual
-inspection of the SCAI export files — not a generic placeholder. Keep this
+This reflects the REAL SCEAI schema (etl/schema.sql), built from actual
+inspection of the SCEAI export files — not a generic placeholder. Keep this
 in sync with etl/schema.sql; if you add/rename a column there, update it here
 too, since a stale description degrades SQL accuracy silently.
 """
@@ -13,7 +13,7 @@ SCHEMA_DESCRIPTION = """
 Table: indicators
   - indicator_id (text, PK)
   - name_en, name_ar (text)
-  - is_published (boolean)         TRUE if this indicator has been reviewed/published by SCAI
+  - is_published (boolean)         TRUE if this indicator has been reviewed/published by SCEAI
   - published_indicator_id (text)  only set if is_published
   - indicator_type_en (text)       e.g. 'Sector Indicator', 'National Indicator',
                                     'Economic Diversification Targets', 'Enablers', 'Drivers'
@@ -66,7 +66,7 @@ Table: indicator_analysis   -- analyst-written narrative commentary, keyed to a 
 
 Table: benchmark_countries
   - published_indicator_detail_id, published_indicator_id (text)
-  - country_en, country_code (text)   which countries SCAI benchmarks this indicator against
+  - country_en, country_code (text)   which countries SCEAI benchmarks this indicator against
 
 Table: countries (country_id, name_en, name_ar, country_code, latitude, longitude)
 Table: intervals (interval_id, name_en, unique_code)   reference/lookup only, rarely needed directly

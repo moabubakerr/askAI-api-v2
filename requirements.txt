@@ -19,10 +19,10 @@ httpx==0.27.2
 sqlalchemy==2.0.35
 psycopg2-binary==2.9.9
 
-# --- ETL (loading the SCAI CSVs into Postgres) ---
+# --- ETL (loading the SCEAI CSVs into Postgres) ---
 pandas==2.2.3
 
-# --- Vector store (for unstructured docs later, e.g. SCAI reports/PDFs) ---
+# --- Vector store (for unstructured docs later, e.g. SCEAI reports/PDFs) ---
 chromadb==0.5.5
 
 # --- Serving the LLM itself (run as a separate service) ---

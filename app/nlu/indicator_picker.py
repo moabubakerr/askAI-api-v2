@@ -33,7 +33,7 @@ from app.core.config import settings
 SYSTEM_PROMPT = """You match a user's wording to an economic indicator, from a fixed list.
 
 You are given the user's phrase and a numbered list of indicator names that
-exist in Qatar's SCAI database. Reply with ONE of:
+exist in Qatar's SCEAI database. Reply with ONE of:
   - the indicator name copied EXACTLY as it appears in the list, character for
     character, including any bracketed text
   - the single word NONE

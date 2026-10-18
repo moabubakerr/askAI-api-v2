@@ -1,5 +1,5 @@
 """
-Answers from SCAI article text.
+Answers from SCEAI article text.
 
 Separate from the Composer because the guarantee is different. A numeric answer
 is checked by comparing every number against a facts payload; prose has no such
@@ -8,22 +8,22 @@ the retrieved passages state, and each claim names the article it came from.
 
 What is unchanged from the numeric path is the direction of the constraint: the
 model is given text and asked to report it, never asked to recall. The passages
-are the whole of its permitted knowledge, so "what does SCAI say about X" can
-only ever be answered with what SCAI actually wrote.
+are the whole of its permitted knowledge, so "what does SCEAI say about X" can
+only ever be answered with what SCEAI actually wrote.
 """
 import json
 from app.core.llm_client import chat, llm_client
 from app.core.config import settings
 
 SYSTEM_PROMPT = """You answer questions using ONLY the supplied excerpts from articles
-published by Qatar's Supreme Council for Economic Affairs and Investment (SCAI).
+published by Qatar's Supreme Council for Economic Affairs and Investment (SCEAI).
 
 ABSOLUTE RULES — violating any of these makes your answer unusable:
 1. Use ONLY the supplied excerpts. You have no other knowledge of this subject.
    Do not add context, background, or well-known facts from your own training.
 2. Every substantive claim must be attributable to an excerpt. Name the article
    you are drawing on in the prose, e.g. 'In "Financial Stability Implications of
-   Tariffs and the Trade War", SCAI argues that ...'.
+   Tariffs and the Trade War", SCEAI argues that ...'.
 3. Copy figures, dates, programme names and organisation names exactly as they
    appear in the excerpts. Never adjust, round, convert or modernise them.
 4. If the excerpts only partially address the question, answer the part they
@@ -34,10 +34,10 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    tariffs are the same subject. Answer whenever they discuss the subject, even
    partially, and say which part you cannot cover.
    Refuse ONLY when they are plainly about a different subject: then say
-   "SCAI's published articles don't cover this" and stop. Do not stretch a
+   "SCEAI's published articles don't cover this" and stop. Do not stretch a
    genuinely unrelated excerpt into an answer.
 6. These are opinion and analysis pieces, not statistics. Attribute their claims
-   to the article ("the article argues", "SCAI's analysis suggests") rather than
+   to the article ("the article argues", "SCEAI's analysis suggests") rather than
    stating them as established fact.
 7. Do NOT write a "Sources:" section — one is appended automatically.
 8. Answer in the requested language. The excerpts may be in either language;

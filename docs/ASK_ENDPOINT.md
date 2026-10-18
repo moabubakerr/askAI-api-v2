@@ -1,6 +1,6 @@
 # `POST /ask` — frontend integration brief
 
-The user picks who answers their question: SCAI, Oxford Economics, or both.
+The user picks who answers their question: SCEAI, Oxford Economics, or both.
 This is a new endpoint alongside `/chat`; `/chat` is unchanged and still works.
 
 ## Request
@@ -28,8 +28,8 @@ and follow-ups still resolve.
 ```jsonc
 {
   "source": "combined",
-  "message_id": "6f8776e8-…",   // the SCAI answer's id when present, else Oxford's
-  "answer": "## SCAI\n\n…\n\n---\n\n## Oxford Economics\n\n…",
+  "message_id": "6f8776e8-…",   // the SCEAI answer's id when present, else Oxford's
+  "answer": "## SCEAI\n\n…\n\n---\n\n## Oxford Economics\n\n…",
   "scai":   { /* SourceAnswer, null when source=oxford   */ },
   "oxford": { /* SourceAnswer, null when source=scai     */ }
 }
@@ -46,11 +46,11 @@ Each `SourceAnswer`:
   "latency_ms": 18014,
   "message_id": "b340e55e-…",    // rate THIS half via POST /feedback
   "verified": false,             // see below — always false for Oxford
-  "readable": false,             // SCAI only: show the "Read this for me" button
-  "facts_payload": {},           // SCAI only
-  "chart": null,                 // SCAI only
+  "readable": false,             // SCEAI only: show the "Read this for me" button
+  "facts_payload": {},           // SCEAI only
+  "chart": null,                 // SCEAI only
   "tools_used": ["EconomicData"], // Oxford only
-  "follow_ups": []               // SCAI only — see below
+  "follow_ups": []               // SCEAI only — see below
 }
 ```
 
@@ -84,8 +84,8 @@ our pipeline retrieved. Oxford answers are **always** `verified: false` — thei
 prose is composed over data we do not hold, so there is nothing to check it
 against.
 
-Show this difference. A badge on the SCAI panel, or a note on the Oxford panel
-("Oxford Economics' own figures, not verified against SCAI data"). Do not style
+Show this difference. A badge on the SCEAI panel, or a note on the Oxford panel
+("Oxford Economics' own figures, not verified against SCEAI data"). Do not style
 the two panels identically with no indication of which carries our guarantee.
 
 Oxford's text is passed through byte for byte, including figures that look
@@ -108,22 +108,22 @@ handle GFM tables, or their answers will come through as pipe soup.
 Twenty seconds of blank screen is not acceptable. Use a client timeout of
 **at least 130s** — the server's own ceiling is 120s.
 
-### Streaming — show SCAI first, Oxford when it lands
+### Streaming — show SCEAI first, Oxford when it lands
 
 Send `Accept: text/event-stream` (exactly as with `/chat`) and `/ask` replies
-with Server-Sent Events instead of one JSON body. In `combined`, SCAI's answer
+with Server-Sent Events instead of one JSON body. In `combined`, SCEAI's answer
 appears in a few seconds instead of waiting ~20s for Oxford's.
 
 | event | when | data |
 |---|---|---|
-| `stage`, `delta`, `replace` | while SCAI works | same as `/chat`'s stream — reuse that code for the SCAI panel |
-| `scai` | SCAI finished | that half's `SourceAnswer` — fill the SCAI panel |
+| `stage`, `delta`, `replace` | while SCEAI works | same as `/chat`'s stream — reuse that code for the SCEAI panel |
+| `scai` | SCEAI finished | that half's `SourceAnswer` — fill the SCEAI panel |
 | `follow_ups` | right after `scai`, only when there are suggestions | `{ source, message_id, follow_ups }` |
 | `oxford` | Oxford finished | that half's `SourceAnswer` — fill the Oxford panel |
 | `answer` | both finished | the full JSON body described above |
 | `error` | both failed (or `source=oxford` failed) | `{ "message": "…" }` |
 
-`scai` and `oxford` arrive in whichever order they finish — usually SCAI
+`scai` and `oxford` arrive in whichever order they finish — usually SCEAI
 first, but not always (Oxford answers a repeated question from cache in
 ~0.5s). Render each panel on its own event; do not wait for `answer`.
 

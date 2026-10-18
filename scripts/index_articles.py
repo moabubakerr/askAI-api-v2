@@ -1,5 +1,5 @@
 """
-Chunks the SCAI articles and stores an embedding per chunk in Postgres.
+Chunks the SCEAI articles and stores an embedding per chunk in Postgres.
 
 Run AFTER the ETL (it reads the articles table) and with the embedding server
 reachable:
@@ -136,7 +136,7 @@ def main():
             for i, chunk in enumerate(kept):
                 # The title rides along in the embedded text: a chunk from deep
                 # inside an article otherwise carries no signal about what the
-                # article is about, and "what has SCAI written about tariffs"
+                # article is about, and "what has SCEAI written about tariffs"
                 # matches the title far more strongly than any single paragraph.
                 pending.append({
                     "chunk_id": f"{article['article_id']}:{lang}:{i}",

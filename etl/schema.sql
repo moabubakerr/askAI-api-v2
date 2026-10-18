@@ -1,5 +1,5 @@
--- SCAI Economic Data Assistant — Postgres schema
--- Generated from actual inspection of the SCAI export files.
+-- SCEAI Economic Data Assistant — Postgres schema
+-- Generated from actual inspection of the SCEAI export files.
 -- Run this before etl/load_data.py.
 
 -- ============ Reference / lookup ============
@@ -84,7 +84,7 @@ CREATE TABLE indicator_values (
 
 -- Curated/published data points — only the 189 published indicators, but with
 -- precomputed MoM/QoQ/YoY, so PREFER this table for published indicators —
--- it saves the analyst agent from doing arithmetic and is what SCAI has vetted.
+-- it saves the analyst agent from doing arithmetic and is what SCEAI has vetted.
 CREATE TABLE published_data_points (
     published_data_point_id    TEXT PRIMARY KEY,
     published_indicator_detail_id TEXT REFERENCES indicator_details(published_detail_id),
@@ -122,7 +122,7 @@ CREATE TABLE indicator_analysis (
     npc_analysis_en              TEXT,
     benchmark_en                  TEXT,
     -- P04 carries all four in Arabic as well and they were never loaded, so
-    -- SCAI's own commentary came back in English to an Arabic reader. Coverage
+    -- SCEAI's own commentary came back in English to an Arabic reader. Coverage
     -- is partial (667 of 1031 rows have SummaryAR), which is why every reader
     -- falls back to the English text rather than being shown nothing.
     summary_ar                  TEXT,
@@ -182,7 +182,7 @@ CREATE TABLE indicator_dashboards (
 );
 
 -- ============ Chart/display metadata (lower priority for Q&A, useful for
--- the Chart Agent to match SCAI's own chosen chart types) ============
+-- the Chart Agent to match SCEAI's own chosen chart types) ============
 
 CREATE TABLE chart_sub_indicators (
     published_indicator_chart_id  TEXT,
@@ -297,9 +297,9 @@ CREATE INDEX idx_indicator_dashboards_entity ON indicator_dashboards(entity_clas
 CREATE INDEX idx_indicator_dashboards_indicator ON indicator_dashboards(published_indicator_id);
 CREATE INDEX idx_lookups_type ON lookups(lookup_type);
 
--- ============ Article text retrieval (semantic search over SCAI articles) ============
+-- ============ Article text retrieval (semantic search over SCEAI articles) ============
 --
--- Indicators answer "what is the number". Articles answer "what has SCAI
+-- Indicators answer "what is the number". Articles answer "what has SCEAI
 -- written about X", which is a different retrieval problem: the answer is a
 -- paragraph inside one of 84 documents averaging ~14,000 characters, not a
 -- row. So articles are chunked, each chunk is embedded with the same bge-m3
@@ -350,12 +350,12 @@ CREATE TABLE indicator_embeddings (
 );
 CREATE INDEX idx_indicator_embeddings_model ON indicator_embeddings(model);
 
--- ============ Application data (not SCAI's) ============
+-- ============ Application data (not SCEAI's) ============
 
 -- What a reader thought of an answer. The only table the app itself writes to,
 -- and the reason scai_ro is granted INSERT on this one table and nothing else:
--- the read-only guarantee exists to stop the app modifying SCAI's data, and
--- this is not SCAI's data.
+-- the read-only guarantee exists to stop the app modifying SCEAI's data, and
+-- this is not SCEAI's data.
 --
 -- The question and answer are copied in rather than referenced. The transcript
 -- lives in memory and is evicted after two hours, so a rating that only

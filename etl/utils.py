@@ -1,6 +1,6 @@
 """
 Cleaning helpers shared across the ETL. Every one of these was written against
-the ACTUAL SCAI export files (checked by hand), not guessed generically:
+the ACTUAL SCEAI export files (checked by hand), not guessed generically:
 
 - fix_mojibake: several free-text fields (e.g. Item_1_DataPointAnalysis) were
   UTF-8 bytes mis-decoded as cp1252 then re-saved as UTF-8, producing garbage
@@ -9,7 +9,7 @@ the ACTUAL SCAI export files (checked by hand), not guessed generically:
 - maybe_b64_decode: General_Entities/Sectors *DescriptionEN/AR columns store
   some rows as base64-encoded HTML and other rows as plain text, inconsistently.
   Detect and decode per-row rather than assuming one format for the whole column.
-- parse_period: SCAI periods appear in three shapes: 'YYYY', 'YYYY-Q#', 'YYYY-MM'.
+- parse_period: SCEAI periods appear in three shapes: 'YYYY', 'YYYY-Q#', 'YYYY-MM'.
   Normalize all to a first-of-period date plus an explicit granularity label,
   so the SQL agent can do date range filters and ORDER BY reliably.
 - clean_null: the exports use the literal string 'NULL' instead of an empty
@@ -72,7 +72,7 @@ _QUARTER_START_MONTH = {1: 1, 2: 4, 3: 7, 4: 10}
 
 def parse_period(period: str):
     """Returns (period_date: date, granularity: str) or (None, None) if unparseable.
-    Handles the three formats seen in the SCAI exports: 'YYYY', 'YYYY-Q#', 'YYYY-MM'."""
+    Handles the three formats seen in the SCEAI exports: 'YYYY', 'YYYY-Q#', 'YYYY-MM'."""
     if not period or not isinstance(period, str):
         return None, None
     period = period.strip()

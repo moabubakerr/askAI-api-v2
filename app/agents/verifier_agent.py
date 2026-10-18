@@ -1,7 +1,7 @@
 """
 DEPRECATED (v1 architecture) — superseded by app/core/graph_v2.py.
 
-The SCAI QC report showed this free-form Text-to-SQL + LLM-does-arithmetic
+The SCEAI QC report showed this free-form Text-to-SQL + LLM-does-arithmetic
 pattern produces wrong numbers (see README "QC findings -> fix" table).
 Kept here for reference only. The only place a v1-style free-form LLM SQL
 call might still be reasonable is pure qualitative text lookups (sectors/
