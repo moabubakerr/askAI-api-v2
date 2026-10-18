@@ -15,65 +15,65 @@
      "turns": ["What was government spending in 2024-Q4?"],
      "must_match": ["47\\.8"]},
 
-    {"id": "NONOIL-REVENUE", "status": "open",
+    {"id": "NONOIL-REVENUE", "status": "fixed",
      "turns": ["What was non-oil revenue in 2024-Q4?"],
      "must_match": ["6\\.6"]},
 
-    {"id": "TRADE-SURPLUS", "status": "open",
+    {"id": "TRADE-SURPLUS", "status": "fixed",
      "turns": ["Is Qatar still running a trade surplus?"],
      "must_match": ["^\\W*yes", "37\\.9|38\\.0"]},
 
-    {"id": "F-005", "status": "open",
+    {"id": "F-005", "status": "fixed",
      "turns": ["what is the growth rate of Qatar's GDP from 2022 to 2025?"],
      "must_match": ["7\\.[34]\\d*\\s*%|2\\.[34]\\d*\\s*%"],
      "must_not_match": ["2022-Q1"]},
 
-    {"id": "F-006", "status": "open",
+    {"id": "F-006", "status": "fixed",
      "turns": ["how are the prices doing lately on a monthly basis?"],
      "must_match": ["2026-04|april 2026", "2\\.6"]},
 
-    {"id": "F-007", "status": "open",
+    {"id": "F-007", "status": "fixed",
      "turns": ["What's the latest in Qatar's economy?"],
      "must_match": ["gdp", "inflation"]},
 
-    {"id": "F-008", "status": "open",
+    {"id": "F-008", "status": "fixed",
      "turns": ["What was the highest quarterly GDP value recorded, and in which quarter?"],
      "must_match": ["186\\.0|185\\.99", "2025-Q3|Q3 2025"]},
 
-    {"id": "F-009", "status": "open",
+    {"id": "F-009", "status": "fixed",
      "turns": ["List Qatar's quarterly GDP values for 2024 and 2025 and rank them from highest to lowest."],
      "must_match": ["186\\.0|185\\.99", "175\\.0|174\\.99"]},
 
-    {"id": "F-010", "status": "open",
+    {"id": "F-010", "status": "fixed",
      "turns": ["What is the difference between the highest and lowest quarterly GDP values in the available data?"],
      "must_match": ["30\\.5"]},
 
-    {"id": "F-011", "status": "open",
+    {"id": "F-011", "status": "fixed",
      "turns": ["How did Qatar's GDP change between Q1 2025 and Q4 2025? Provide the absolute value."],
      "must_match": ["1\\.5[34]"]},
 
-    {"id": "F-012", "status": "open",
+    {"id": "F-012", "status": "fixed",
      "turns": ["What is the value of Nominal GDP in Q4-2025?"],
      "must_not_match": ["185\\.1", "185\\.2"]},
 
-    {"id": "F-014", "status": "open",
+    {"id": "F-014", "status": "fixed",
      "turns": ["How many tourists arrived into Qatar in May 2025?"],
      "must_match": ["may 2025|2025-05"],
      "must_not_match": ["no indicator"]},
 
-    {"id": "F-016", "status": "open",
+    {"id": "F-016", "status": "fixed",
      "turns": ["what can you do?"],
      "must_match": ["gdp|inflation"]},
 
-    {"id": "F-022", "status": "open",
+    {"id": "F-022", "status": "fixed",
      "turns": ["how has inflation changed over the last 5 years"],
      "must_not_match": ["quarter", "qoq"]},
 
-    {"id": "F-026", "status": "open",
+    {"id": "F-026", "status": "fixed",
      "turns": ["Compare Inflation in 2024-05 and 2026-04"],
      "must_match": ["0\\.9", "2\\.6"]},
 
-    {"id": "F-030", "status": "open",
+    {"id": "F-030", "status": "fixed",
      "turns": ["What does non-hydrocarbon GDP mean?", "What is the latest value?"],
      "must_match": ["non-hydrocarbon"],
      "must_not_match": ["public debt"]}
