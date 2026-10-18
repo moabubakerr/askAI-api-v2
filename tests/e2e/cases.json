@@ -11,7 +11,7 @@
      "must_match": ["47\\.8", "(doesn.t|does not|not) (publish|split|break)"],
      "must_not_match": ["no indicator", "couldn.t find"]},
 
-    {"id": "GOV-SPENDING", "status": "open",
+    {"id": "GOV-SPENDING", "status": "fixed",
      "turns": ["What was government spending in 2024-Q4?"],
      "must_match": ["47\\.8"]},
 
