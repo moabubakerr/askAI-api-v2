@@ -6,6 +6,13 @@ scores and contradiction kinds, the broader re-search, and the final result.
 Run inside the api container (it has the DSN and reaches TEI and vLLM):
 
     docker compose exec api python scripts/diagnose_resolver.py "non-oil spending"
+
+With --question, the text is a whole user question: the intent model is asked
+for its indicator phrase first (as the pipeline does), and THAT is resolved.
+A wrong answer can start there, before the resolver sees anything:
+
+    docker compose exec api python scripts/diagnose_resolver.py --question \
+        "How many tourists arrived into Qatar in May 2025?"
 """
 import sys
 from pathlib import Path
@@ -59,5 +66,19 @@ def main(phrase: str) -> int:
     return 0
 
 
+def from_question(question: str) -> int:
+    from app.nlu.intent_agent import extract_intent
+    intent = extract_intent(question, "")
+    print(f"question: {question!r}")
+    for key in ("computation_type", "indicator_phrase", "period_expression",
+                "explicit_frequency", "countries_mentioned"):
+        print(f"  intent.{key}: {intent.get(key)!r}")
+    phrase = intent.get("indicator_phrase") or question
+    print(f"  aliases matched: {r.alias_forms(phrase)}")
+    return main(phrase)
+
+
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--question"]:
+        sys.exit(from_question(" ".join(sys.argv[2:])))
     sys.exit(main(" ".join(sys.argv[1:]) or "non-oil spending"))
