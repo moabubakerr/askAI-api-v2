@@ -191,6 +191,25 @@ def _lexical_tsquery(query_text: Optional[str]) -> Optional[str]:
     return " | ".join(terms[:12]) or None
 
 
+# Articles.csv cuts every cell at 65,535 characters, and in the long articles the
+# cut lands inside an inline <img src="data:image/png;base64,...">. The unclosed
+# tag survives HTML stripping, so the image bytes get indexed as ~900-char chunks
+# of base64 that carry the article's title, rank well, and render as gibberish
+# sources — over half the index. The chunk that holds the paragraph before the
+# image is cut back to that paragraph; chunks with no prose left (no prose has a
+# 100-character run of base64 alphabet) are excluded. This happens in the query
+# itself: filtering afterwards would leave the result short instead of letting
+# real passages take their place.
+_READABLE_CHUNKS = """(
+    SELECT * FROM (
+        SELECT chunk_id, article_id, chunk_index, language, embedding,
+               regexp_replace(content, '\\s*<img.*$', '') AS content
+        FROM article_chunks
+    ) t
+    WHERE content !~ '[A-Za-z0-9+/=]{100,}' AND length(content) >= 120
+)"""
+
+
 def search_article_chunks(query_embedding: list[float], language: str = "en",
                            limit: int = 6, query_text: Optional[str] = None) -> list[dict]:
     """Passages from SCAI articles most relevant to a question.
@@ -212,11 +231,11 @@ def search_article_chunks(query_embedding: list[float], language: str = "en",
     results: dict[str, dict] = {}
 
     with engine.connect() as conn:
-        rows = conn.execute(text("""
+        rows = conn.execute(text(f"""
             SELECT c.chunk_id, c.article_id, c.chunk_index, c.content, c.language,
                    a.title_en, a.title_ar, a.published_date, a.article_date,
                    c.embedding <=> CAST(:qvec AS vector) AS distance
-            FROM article_chunks c
+            FROM {_READABLE_CHUNKS} c
             JOIN articles a ON a.article_id = c.article_id
             WHERE c.language = :lang
             ORDER BY c.embedding <=> CAST(:qvec AS vector)
@@ -232,11 +251,11 @@ def search_article_chunks(query_embedding: list[float], language: str = "en",
             # Searches the TITLE as well as the body. "In-Country Value Program"
             # is the article's title, not a phrase in any one chunk, so a
             # body-only search could not find the article the question named.
-            lexical = conn.execute(text("""
+            lexical = conn.execute(text(f"""
                 SELECT c.chunk_id, c.article_id, c.chunk_index, c.content, c.language,
                        a.title_en, a.title_ar, a.published_date, a.article_date,
                        c.embedding <=> CAST(:qvec AS vector) AS distance
-                FROM article_chunks c
+                FROM {_READABLE_CHUNKS} c
                 JOIN articles a ON a.article_id = c.article_id
                 WHERE c.language = :lang
                   AND to_tsvector('simple',
