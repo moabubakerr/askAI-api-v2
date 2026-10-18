@@ -332,6 +332,18 @@ def _contradiction_kind(phrase: str, matched_name: str) -> Optional[str]:
         if b in phrase_l and b not in matched_l and a in matched_l:
             return "opposite"
 
+    # An alias target is what the alias table says the phrase MEANS, so it is
+    # not judged on the phrase's literal words. "How many tourists arrived into
+    # Qatar" scored Number of International Visitors at 1.000 and refused it
+    # for "dropping" tourists and into — the word the alias exists to translate
+    # — then answered with Number of Medical Tourists, the one series that
+    # contains the word.
+    #
+    # The word tests only. A negation is still enforced: "gdp" aliases to Real
+    # GDP, and "non-hydrocarbon GDP" contains "gdp", so exempting the negation
+    # too would answer it with Real GDP — F-030 again.
+    aliased = matched_name.strip() in alias_forms(phrase)
+
     dropped = _dropped_discriminators(phrase, matched_name)
     # A NEGATED subject the match does not carry. "What does non-hydrocarbon GDP
     # mean?" resolved to "Real GDP" and returned Real GDP's definition — a
@@ -371,10 +383,8 @@ def _contradiction_kind(phrase: str, matched_name: str) -> Optional[str]:
         # Both negate something — but "Non-Hydrocarbon Revenue" is not an
         # answer to "non-oil spending" just because both say "non". The
         # negation used to be the whole test here, so any "Non-…" series could
-        # be promoted in place of a refusal. An alias target is exempt: the
-        # alias table already says that name IS the phrase.
-        if (matched_name.strip() not in alias_forms(phrase)
-                and not _shares_subject(phrase, matched_name)):
+        # be promoted in place of a refusal.
+        if not aliased and not _shares_subject(phrase, matched_name):
             return "different_measure"
         # The negation's own words are accounted for; they are not also a
         # second dropped distinction.
@@ -388,7 +398,7 @@ def _contradiction_kind(phrase: str, matched_name: str) -> Optional[str]:
     # questions are short, and "what is Qatar's GDP" legitimately matches "Real
     # GDP" while dropping "Qatar". Two independent distinctions the catalogue
     # draws, both absent from the match, is the match being a different measure.
-    return "different_measure" if len(dropped) >= 2 else None
+    return "different_measure" if len(dropped) >= 2 and not aliased else None
 
 
 def _has_contradiction(phrase: str, matched_name: str) -> bool:
@@ -642,7 +652,7 @@ INDICATOR_ALIASES = {
 # Words that cannot identify an indicator on their own. What is left after
 # these and the noise patterns is the substance of the question.
 _CONTENTLESS = {
-    "for", "the", "a", "an", "of", "in", "on", "at", "to", "and", "or",
+    "for", "the", "a", "an", "of", "in", "on", "at", "to", "and", "or", "into",
     "year", "years", "period", "time", "data", "value", "values", "figure",
     "figures", "number", "is", "was", "were", "are", "be", "it", "this", "that",
     "please", "me", "my", "we", "you",

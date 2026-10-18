@@ -96,6 +96,16 @@ def test_an_alias_target_wins_a_tie_over_a_literal_word_match(catalog, scores):
     assert result.match.name_en == "Number of International Visitors"
 
 
+def test_an_alias_target_is_not_refused_for_dropping_the_aliased_word(catalog, scores):
+    # The real scores on the VM: the alias target at 1.000 was refused as a
+    # "different measure" for dropping "tourists" and "into", and the question
+    # went to Number of Medical Tourists at 0.737.
+    scores["plain"] = {"Number of International Visitors": 1.0,
+                       "Number of Medical Tourists": 0.737}
+    result = resolve_indicator("How many tourists arrived into Qatar in May 2025?")
+    assert result.match.name_en == "Number of International Visitors"
+
+
 def test_a_qualifier_the_user_named_is_not_counted_as_narrowing(catalog, scores):
     scores["plain"] = {"Current Expenditure": 0.80, "Expenditure": 0.78}
     result = resolve_indicator("current expenditure")

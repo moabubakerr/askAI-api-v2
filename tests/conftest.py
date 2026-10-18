@@ -47,6 +47,8 @@ CATALOG = [
     _row("trade", "Trade Balance (Goods & Services)"),
     _row("teachers", "Share of Qatari Teachers"),
     _row("energy", "Energy Intensity"),
+    # Puts "into" in the catalogue's vocabulary, as a real name does.
+    _row("waste", "Waste Converted into Energy"),
 ]
 
 
