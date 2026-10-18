@@ -40,6 +40,7 @@ CATALOG = [
     _row("nh-exp-bare", "Non-Hydrocarbon", "Total Exports (Goods and Services)"),
     _row("t-exp", "Total Exports (Goods and Services)"),
     _row("visitors", "Number of International Visitors"),
+    _row("medical", "Number of Medical Tourists"),
     _row("q-jobs", "Number of Qatari Jobs"),
     _row("nq-jobs", "Number of Non-Qatari Jobs"),
     _row("debt", "Public Debt as a Percentage of GDP (%)"),

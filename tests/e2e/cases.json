@@ -56,10 +56,11 @@
      "turns": ["What is the value of Nominal GDP in Q4-2025?"],
      "must_not_match": ["185\\.1", "185\\.2"]},
 
-    {"id": "F-014", "status": "fixed",
+    {"id": "F-014", "status": "open",
+     "_note": "Monthly visitors are published cumulative for the year: 2.297m to May, 0.356m in May alone. Either is accepted.",
      "turns": ["How many tourists arrived into Qatar in May 2025?"],
-     "must_match": ["may 2025|2025-05"],
-     "must_not_match": ["no indicator"]},
+     "must_match": ["may 2025|2025-05", "2\\.29[0-9]|2\\.30|0\\.35[0-9]|0\\.36|356[,.]?4|2,297"],
+     "must_not_match": ["no indicator", "medical"]},
 
     {"id": "F-016", "status": "fixed",
      "turns": ["what can you do?"],

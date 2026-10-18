@@ -87,6 +87,15 @@ def test_a_tie_goes_to_the_candidate_that_does_not_narrow_the_question(catalog, 
     assert result.match.name_en == "Expenditure"
 
 
+def test_an_alias_target_wins_a_tie_over_a_literal_word_match(catalog, scores):
+    # "Number of Medical Tourists" keeps the word "tourists"; the alias table
+    # says tourists are International Visitors.
+    scores["plain"] = {"Number of Medical Tourists": 0.80,
+                       "Number of International Visitors": 0.78}
+    result = resolve_indicator("How many tourists arrived into Qatar in May 2025?")
+    assert result.match.name_en == "Number of International Visitors"
+
+
 def test_a_qualifier_the_user_named_is_not_counted_as_narrowing(catalog, scores):
     scores["plain"] = {"Current Expenditure": 0.80, "Expenditure": 0.78}
     result = resolve_indicator("current expenditure")

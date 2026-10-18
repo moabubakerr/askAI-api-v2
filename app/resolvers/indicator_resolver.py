@@ -1320,7 +1320,15 @@ def _resolve_scored(scored, phrase, language="en"):
         # distinction the user drew, and not adding one they didn't. Each filter
         # applies only when something survives it — "government" is in none of
         # the spending series, and that cannot leave the tie with no one in it.
-        for keeps in (lambda r: not _dropped_discriminators(phrase, r["name_en"]),
+        #
+        # An alias target goes first, before either. The alias table is SCEAI's
+        # own statement of what an everyday word means: "tourists" IS Number of
+        # International Visitors. Judged on literal words instead, that name
+        # "drops" tourists while Number of Medical Tourists keeps it, and the
+        # word-level rule would hand the question to the wrong indicator.
+        aliased = set(alias_forms(phrase))
+        for keeps in (lambda r: r["name_en"].strip() in aliased,
+                      lambda r: not _dropped_discriminators(phrase, r["name_en"]),
                       lambda r: not _added_discriminators(phrase, r["name_en"])):
             narrowed = [(r, sc) for r, sc in tied if keeps(r)]
             if narrowed:
