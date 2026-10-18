@@ -6,7 +6,7 @@
     "status 'open' = known to fail; reported as xfail/xpass. Flip to 'fixed' once it passes, so it can never silently regress."
   ],
   "cases": [
-    {"id": "NONOIL-SPENDING", "status": "open",
+    {"id": "NONOIL-SPENDING", "status": "fixed",
      "turns": ["What was non-oil spending in 2024-Q4?"],
      "must_match": ["47\\.8", "(doesn.t|does not|not) (publish|split|break)"],
      "must_not_match": ["no indicator", "couldn.t find"]},
