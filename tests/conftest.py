@@ -36,6 +36,8 @@ CATALOG = [
     _row("t-rev", "Total Revenue", "State Budget Performance"),
     _row("infl", "Inflation"),
     _row("nh-exp", "Non-Hydrocarbon Exports (share of total exports)"),
+    # Named by the split alone, as the catalogue does under some indicators.
+    _row("nh-exp-bare", "Non-Hydrocarbon", "Total Exports (Goods and Services)"),
     _row("t-exp", "Total Exports (Goods and Services)"),
     _row("visitors", "Number of International Visitors"),
     _row("q-jobs", "Number of Qatari Jobs"),

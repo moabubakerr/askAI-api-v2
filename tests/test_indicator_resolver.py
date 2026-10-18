@@ -110,6 +110,17 @@ def test_non_oil_spending_answers_with_total_and_names_the_gap(catalog, scores):
     assert result.match.related == ["Non-Hydrocarbon Revenue"]
 
 
+def test_a_series_named_only_by_its_split_is_listed_with_its_parent(catalog, scores):
+    # The real main-pass scores from the VM.
+    scores["negated"] = {"Non-Hydrocarbon Revenue": 0.796, "Non-Hydrocarbon": 0.745,
+                         "Total Expenditure": 0.642}
+    scores["plain"] = {"Expenditure": 0.968, "Total Expenditure": 0.830}
+    result = resolve_indicator("non-oil spending")
+    assert result.match.name_en == "Expenditure"
+    assert result.match.related == ["Non-Hydrocarbon Revenue",
+                                    "Total Exports (Goods and Services) — Non-Hydrocarbon"]
+
+
 def test_contradicting_candidates_do_not_make_an_ambiguity(catalog, scores):
     scores["negated"] = {"Non-Hydrocarbon Revenue": 0.70, "Total Expenditure": 0.68}
     scores["plain"] = {}

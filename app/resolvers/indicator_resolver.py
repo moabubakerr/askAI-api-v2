@@ -1070,9 +1070,17 @@ def _related_with_qualifier(scored, phrase, broader_row, limit: int = 3) -> list
         if row.get("indicator_id") != parent and score < MIN_CONFIDENCE:
             continue
         name = row["name_en"].strip()
-        if name in names or not _NEGATED.search(name.lower()):
+        if not _NEGATED.search(name.lower()) or not negated & _negated_words(name.lower()):
             continue
-        if negated & _negated_words(name.lower()):
+        # Some series are named by the split alone — "Non-Hydrocarbon" under
+        # Real GDP, and again under Total Exports. Listed bare, the reader is
+        # told the split exists for "Non-Hydrocarbon", which says nothing; the
+        # parent is what it is a split OF.
+        subject = set(re.findall(r"[\w؀-ۿ]+", name.lower())) - _negated_words(name.lower())
+        parent = (row.get("parent_name_en") or "").strip()
+        if not subject and parent:
+            name = f"{parent} — {name}"
+        if name not in names:
             names.append(name)
         if len(names) >= limit:
             break
