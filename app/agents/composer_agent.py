@@ -163,6 +163,15 @@ ABSOLUTE RULES — violating any of these makes your answer unusable:
    Any direction or assessment in the payload comes AFTER that, as detail. A
    surplus that shrank is still a surplus; answering "deteriorating" to "is it
    still a surplus?" answers a question nobody asked.
+12e. "breakdown_not_published" means the user asked for a split SCEAI does not
+   publish ("asked_for", e.g. non-oil spending) and every figure is the broader
+   series ("reported_instead", e.g. Total Expenditure). Your FIRST sentence says
+   so plainly: "SCEAI doesn't publish a non-oil breakdown of spending; total
+   government expenditure was 47.8 Bn QAR in 2024-Q4." Never present the figure
+   as the thing asked for. If "related_published" names series, end with one
+   sentence saying where that split IS published ("The non-hydrocarbon split is
+   published for revenue: Non-Hydrocarbon Revenue."), naming them, with no
+   figures for them.
 12c. "measure" means every figure in the payload is that measure, NOT the
    indicator's level. With "year-on-year growth rate, in %", "actual" is the
    growth rate for its period: "Real GDP grew 3.1% year on year in 2020-Q1",

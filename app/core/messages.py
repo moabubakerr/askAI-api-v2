@@ -257,6 +257,14 @@ _MESSAGES = {
                 "\"الميزان التجاري\"، \"الإيرادات الحكومية\"\n"
                 "• أو اسأل \"ماذا يمكنك أن تفعل؟\" للاطلاع على القائمة الكاملة لما هو منشور"),
     },
+    # Offered instead of indicator_not_found when the catalogue holds something
+    # close. The names are returned verbatim as choices, like indicator_ambiguous.
+    "indicator_not_found_closest": {
+        "en": ("SCEAI doesn't publish an indicator called \"{phrase}\". "
+                "The closest published ones are {names}. Did you mean one of these?"),
+        "ar": ("لا ينشر المجلس مؤشراً باسم \"{phrase}\". "
+                "أقرب المؤشرات المنشورة هي {names}. هل تقصد أحدها؟"),
+    },
     "indicator_ambiguous": {
         "en": ("\"{phrase}\" could match more than one indicator: {names}. "
                 "Which one did you mean?"),

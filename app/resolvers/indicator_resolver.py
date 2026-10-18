@@ -23,7 +23,7 @@ real indicator, which is why the confidence/gap/contradiction checks below
 exist and matter.
 """
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from difflib import SequenceMatcher
 from typing import Optional
@@ -256,14 +256,70 @@ def _dropped_discriminators(phrase: str, matched_name: str) -> list[str]:
             and not any(_same_word(w, m) for m in matched_words)]
 
 
-def _has_contradiction(phrase: str, matched_name: str) -> bool:
+def _negated_words(text_l: str) -> set:
+    """Every word inside a negation in the text, in both vocabularies.
+
+    "non-oil" gives {"non", "oil", "hydrocarbon"}: the words the negation
+    accounts for, so they are not counted a second time as a dropped
+    distinction, and the catalogue's term for the same restriction."""
+    words = set()
+    for form in {text_l, vocabulary_form(text_l).lower()}:
+        for m in _NEGATED.finditer(form):
+            words.update(re.findall(r"[\w؀-ۿ]+", m.group(0).lower()))
+    return words
+
+
+def _subject_words(phrase: str) -> set:
+    """What a negated question is ABOUT, in the catalogue's vocabulary.
+
+    "non-oil spending" is about expenditure; the negation only narrows it. Only
+    words the catalogue uses count — "how much", "Qatar's" and the like name no
+    subject any indicator could share — and the rewritten form is included, so
+    "spending" is read as the catalogue's "expenditure"."""
+    vocabulary = _catalogue_vocabulary()
+    cleaned = normalize_indicator_phrase(phrase or "").lower()
+    negated = _negated_words(cleaned)
+    words = set()
+    for form in (cleaned, vocabulary_form(cleaned).lower()):
+        words.update(w for w in re.findall(r"[\w؀-ۿ]{3,}", form)
+                     if w not in negated and w not in _CONTENTLESS and not w.isdigit())
+    return {w for w in words if w in vocabulary}
+
+
+def _shares_subject(phrase: str, matched_name: str) -> bool:
+    # Only words in the name's own script can be compared: an Arabic question
+    # is checked against the English name, and "الإنفاق" sharing nothing with
+    # "Total Expenditure" says nothing about whether it is the same subject.
+    # With nothing comparable, the test abstains rather than refuses.
+    latin = bool(re.search(r"[a-z]", matched_name.lower()))
+    subject = {w for w in _subject_words(phrase) if bool(re.search(r"[a-z]", w)) == latin}
+    if not subject:
+        return True
+    matched_words = set(re.findall(r"[\w؀-ۿ]{3,}", matched_name.lower()))
+    return any(_same_word(s, m) for s in subject for m in matched_words)
+
+
+def _contradiction_kind(phrase: str, matched_name: str) -> Optional[str]:
+    """How a match fails to be what the question asked for, if it does.
+
+    None                  it is a fair match.
+    "opposite"            it names the other side of a contrastive pair
+                          (asked Nominal GDP, matched Real GDP).
+    "qualifier_dropped"   it is the right subject without the question's
+                          negation (asked non-oil spending, matched Total
+                          Expenditure). Never a silent answer, but the one case
+                          where the broader series is still worth reporting —
+                          with the missing breakdown said first.
+    "different_measure"   anything else: it measures something else.
+    """
     phrase_l, matched_l = phrase.lower(), matched_name.lower()
     for a, b in CONTRASTIVE_PAIRS:
         if a in phrase_l and a not in matched_l and b in matched_l:
-            return True
+            return "opposite"
         if b in phrase_l and b not in matched_l and a in matched_l:
-            return True
+            return "opposite"
 
+    dropped = _dropped_discriminators(phrase, matched_name)
     # A NEGATED subject the match does not carry. "What does non-hydrocarbon GDP
     # mean?" resolved to "Real GDP" and returned Real GDP's definition — a
     # fluent, confident answer to a question about a different quantity, with
@@ -286,10 +342,30 @@ def _has_contradiction(phrase: str, matched_name: str) -> bool:
     # Reading it as "does the match drop the restriction" needs no synonyms and
     # is the thing the rule was for: "Real GDP" negates nothing, so it dropped
     # it; "Non-Hydrocarbon Exports" negates something, so it did not. A match
-    # that negates a genuinely different subject is caught by the discriminating
-    # terms below, which is where that comparison belongs.
-    if _NEGATED.search(phrase_l) and not _NEGATED.search(matched_l):
-        return True
+    # that negates a genuinely different subject is caught by the subject test.
+    #
+    # Dropping the negation is never a fair match, but it is not always the
+    # same failure. "non-oil spending" against "Total Expenditure" is the right
+    # subject without a breakdown SCEAI does not publish — worth reporting, with
+    # the gap said first. Against "Real GDP" it is a different measure.
+    if _NEGATED.search(phrase_l):
+        negated = _negated_words(phrase_l)
+        if not _NEGATED.search(matched_l):
+            rest = [w for w in dropped if w not in negated]
+            if len(rest) >= 2 or not _shares_subject(phrase, matched_name):
+                return "different_measure"
+            return "qualifier_dropped"
+        # Both negate something — but "Non-Hydrocarbon Revenue" is not an
+        # answer to "non-oil spending" just because both say "non". The
+        # negation used to be the whole test here, so any "Non-…" series could
+        # be promoted in place of a refusal. An alias target is exempt: the
+        # alias table already says that name IS the phrase.
+        if (matched_name.strip() not in alias_forms(phrase)
+                and not _shares_subject(phrase, matched_name)):
+            return "different_measure"
+        # The negation's own words are accounted for; they are not also a
+        # second dropped distinction.
+        dropped = [w for w in dropped if w not in negated]
 
     # And a qualifier that is not a negation but narrows the measure just as
     # much: GDP per capita is not GDP. Which words those are is read from the
@@ -299,7 +375,11 @@ def _has_contradiction(phrase: str, matched_name: str) -> bool:
     # questions are short, and "what is Qatar's GDP" legitimately matches "Real
     # GDP" while dropping "Qatar". Two independent distinctions the catalogue
     # draws, both absent from the match, is the match being a different measure.
-    return len(_dropped_discriminators(phrase, matched_name)) >= 2
+    return "different_measure" if len(dropped) >= 2 else None
+
+
+def _has_contradiction(phrase: str, matched_name: str) -> bool:
+    return _contradiction_kind(phrase, matched_name) is not None
 
 
 @dataclass
@@ -328,6 +408,16 @@ class IndicatorMatch:
     # reason unit_ar and definition_ar are: the catalogue holds the translation,
     # so nothing has to invent one.
     name_ar: Optional[str] = None
+    # The indicator this series belongs to — "State Budget Performance" for its
+    # "Total Expenditure". Two series can share a name and differ only here.
+    parent_name_en: Optional[str] = None
+    # Set when the question named a breakdown SCEAI does not publish — "non-oil
+    # spending", when spending is published only as a total. The match is the
+    # broader series, and the answer has to say so before giving its figure.
+    dropped_qualifier: Optional[str] = None
+    # Published series that DO carry the asked-for qualifier, on another
+    # subject — "Non-Hydrocarbon Revenue" for a non-oil spending question.
+    related: list = field(default_factory=list)
 
     def display_name(self, language: str = "en") -> str:
         """The name to SHOW, in the language being written.
@@ -347,6 +437,17 @@ class ResolutionResult:
     status: str          # "resolved" | "ambiguous" | "not_found" | "inactive"
     candidates: list      # for "ambiguous" — the top few near-tied matches
     message: Optional[str] = None   # honest, user-facing explanation when not resolved
+
+
+def _match_from_row(row: dict, score: float, **extra) -> IndicatorMatch:
+    return IndicatorMatch(
+        row["indicator_detail_id"], row["indicator_id"], row["name_en"],
+        row["is_published"], row["published_detail_id"],
+        row["is_active"], row["unit_en"], row.get("unit_ar"), row["polarity_en"],
+        row["data_source_en"], row["format"],
+        row["definition_en"], row["definition_ar"], score, row.get("name_ar"),
+        parent_name_en=row.get("parent_name_en"), **extra,
+    )
 
 
 def _similarity(a: str, b: str) -> float:
@@ -607,6 +708,46 @@ def alias_forms(phrase: str) -> list:
     return hits
 
 
+# Everyday words rewritten into the catalogue's own vocabulary. Unlike
+# INDICATOR_ALIASES, which maps a whole phrase to one indicator, these swap a
+# single word wherever it appears, so they cover every indicator that uses the
+# catalogue's term: "non-oil revenue", "non-oil spending" and "oil exports" all
+# need the same bridge, and listing each phrase would be one short every time.
+# The rewritten phrase is scored as a further form; it competes, it does not
+# decide.
+_VOCABULARY = [
+    (re.compile(r"\bnon[\s-]?oil\b", re.IGNORECASE), "non-hydrocarbon"),
+    (re.compile(r"\boil\b", re.IGNORECASE), "hydrocarbon"),
+    (re.compile(r"\b(spending|spend|outlays?)\b", re.IGNORECASE), "expenditure"),
+]
+
+
+def vocabulary_form(phrase: str) -> str:
+    """The phrase with everyday words replaced by the catalogue's terms."""
+    rewritten = phrase or ""
+    for pattern, term in _VOCABULARY:
+        rewritten = pattern.sub(term, rewritten)
+    return rewritten
+
+
+def phrase_forms(phrase: str) -> list:
+    """Every form of a phrase the resolver scores, best-first by intent.
+
+    Shared with scripts/calibrate_resolver.py so calibration measures the forms
+    production actually scores, not a copy of them that drifts.
+    """
+    original = (phrase or "").strip()
+    forms = [normalize_indicator_phrase(phrase), original]
+    for form in list(forms):
+        forms.append(vocabulary_form(form))
+    forms += alias_forms(phrase)
+    unique = []
+    for form in forms:
+        if form and form not in unique:
+            unique.append(form)
+    return unique
+
+
 def normalize_indicator_phrase(phrase: str) -> str:
     """Strips country and frequency words from the user's phrase before matching.
 
@@ -642,11 +783,22 @@ def normalize_indicator_phrase(phrase: str) -> str:
 DEFINITION_CHARS_FOR_EMBEDDING = 240
 
 
+def _row_key(row: dict) -> str:
+    """Identifies a catalogue row for scoring.
+
+    Was the English name, and names are not unique: "Total Expenditure" is a
+    series of both State Budget Performance (quarterly) and Expenditure
+    Breakdown (yearly), as is "Salaries". Keyed by name, the two shared one
+    score and the second silently overwrote the first's vectors.
+    """
+    return row.get("indicator_detail_id") or row["name_en"]
+
+
 @lru_cache(maxsize=1)
-def _catalog_embeddings_cached(names: tuple, texts: tuple):
-    plain = embed_keyed({n: n for n in names})
-    enriched = embed_keyed(dict(zip(names, texts)))
-    return {name: (plain[name], enriched[name]) for name in names}
+def _catalog_embeddings_cached(keys: tuple, names: tuple, texts: tuple):
+    plain = embed_keyed(dict(zip(keys, names)))
+    enriched = embed_keyed(dict(zip(keys, texts)))
+    return {key: (plain[key], enriched[key]) for key in keys}
 
 
 def _catalog_embeddings(catalog):
@@ -659,15 +811,24 @@ def _catalog_embeddings(catalog):
     "tourist". Keeping both views costs one extra vector per indicator, paid
     once per process, and neither case has to lose.
     """
+    keys = tuple(_row_key(row) for row in catalog)
     names = tuple(row["name_en"] for row in catalog)
     texts = tuple(_embedding_text(row) for row in catalog)
-    return _catalog_embeddings_cached(names, texts)
+    return _catalog_embeddings_cached(keys, names, texts)
 
 
 def _embedding_text(row: dict) -> str:
-    """What an indicator is embedded AS: its name, plus the start of its
-    definition when there is a real one."""
+    """What an indicator is embedded AS: its name, the indicator it belongs to,
+    and the start of its definition when there is a real one.
+
+    The parent name is what tells a series called "Salaries" or "Total
+    Expenditure" that it is about the state budget; most series definitions are
+    a placeholder or just repeat the series name, so without it nothing in the
+    vector says "government spending"."""
     name = (row.get("name_en") or "").strip()
+    parent = (row.get("parent_name_en") or "").strip()
+    if parent and parent.lower() != name.lower():
+        name = f"{name} ({parent})"
     definition = (row.get("definition_en") or "").strip()
     # Strip the markup BEFORE testing for a placeholder: the CMS stores an
     # empty definition as "<p>-</p>", which is not equal to "-" and slipped
@@ -716,6 +877,7 @@ def _fetch_catalog_uncached() -> list[dict]:
     with engine.connect() as conn:
         rows = conn.execute(text("""
             SELECT d.indicator_detail_id, d.indicator_id, d.name_en, d.name_ar,
+                   i.name_en AS parent_name_en, i.name_ar AS parent_name_ar,
                    d.is_published, d.published_detail_id,
                    i.is_active, d.unit_en, d.unit_ar, d.polarity_en,
                    d.data_source_en, d.format,
@@ -772,11 +934,9 @@ def resolve_indicator(phrase: str, require_data: bool = True,
     if not catalog:
         return ResolutionResult(None, "not_found", [], msg("empty_catalog", language))
 
-    # Match on the phrase with country/frequency noise removed; the original is
-    # kept for the messages, so a refusal still quotes what the user typed.
-    match_phrase = normalize_indicator_phrase(phrase)
-    # Score against BOTH the stripped phrase and what the user actually typed,
-    # taking whichever fits better.
+    # Match on the phrase with country/frequency noise removed AND on what the
+    # user actually typed, taking whichever fits better; the original is kept
+    # for the messages, so a refusal still quotes what the user typed.
     #
     # Stripping helps the natural question ("Qatar quarterly GDP" -> "GDP") and
     # hurts the literal one: 32 catalogue names contain "Qatar" or "Qatari" and
@@ -784,12 +944,10 @@ def resolve_indicator(phrase: str, require_data: bool = True,
     # Qatari Jobs" — was being stripped into something that also matched
     # "Number of Non-Qatari Jobs". Measured over all 459 names with data,
     # stripping alone cost 2 self-matches in each language. Keeping both forms
-    # costs nothing and keeps the gain.
-    original_phrase = (phrase or "").strip()
-    phrases = [match_phrase] if match_phrase == original_phrase else [match_phrase, original_phrase]
-    # Everyday wording gets the catalogue's own name added as a further form to
-    # score. It competes; it does not decide.
-    phrases += [a for a in alias_forms(phrase) if a not in phrases]
+    # costs nothing and keeps the gain. Everyday wording adds the catalogue's
+    # own terms and alias names as further forms; they compete, they do not
+    # decide.
+    phrases = phrase_forms(phrase)
 
     # Each entry is embedded as its NAME plus the opening of its definition.
     # The name alone carries no synonym: nothing in "Number of International
@@ -812,7 +970,19 @@ def resolve_indicator(phrase: str, require_data: bool = True,
     if result.status == "not_found":
         rescued = _pick_from_near_misses(scored, phrase, language)
         if rescued:
-            return rescued
+            if rescued.status != "not_found":
+                return rescued
+            result = rescued
+        # Before refusing, what an analyst would do: report the broader series
+        # when only the breakdown is missing, or else name the closest
+        # published indicators instead of a bare "nothing matches". Data
+        # questions only — a definition of Total Expenditure is no answer to
+        # "what does non-oil spending mean".
+        if require_data:
+            broader = _broader_match(catalog, scored, phrase)
+            if broader:
+                return broader
+        return _with_closest(result, scored, phrase, language)
     # Ambiguity is the question the picker exists to answer — "which of these
     # did you mean" — and we were about to put it to the user. Asking the model
     # first, over the same candidates and with the same validation, is strictly
@@ -827,6 +997,139 @@ def resolve_indicator(phrase: str, require_data: bool = True,
             if match:
                 return ResolutionResult(match, "resolved", [])
     return result
+
+
+def _broader_match(catalog, scored, phrase):
+    """The series the question narrows, when SCEAI publishes no such breakdown.
+
+    "What was non-oil spending in 2024-Q4?" was refused: spending is published
+    only as a total, so every candidate either dropped "non-oil" or was a
+    non-hydrocarbon series about something else. Both refusals were honest and
+    neither was an answer. Total Expenditure for that quarter is in the data,
+    and saying "SCEAI doesn't split spending by oil; total spending was …" is
+    what anyone who knew the data would reply.
+
+    Only for a negated qualifier, and only to a series that is the SAME subject
+    without it (_contradiction_kind's "qualifier_dropped") — never across the
+    opposite side of a pair or to a different measure. The match carries the
+    dropped qualifier, so the answer has to say what is missing before it gives
+    a figure; it is never a silent substitution.
+    """
+    negation = _NEGATED.search(phrase or "")
+    if not negation:
+        return None
+    stripped = _NEGATED.sub(" ", phrase)
+    if not has_identifying_content(stripped):
+        return None
+    forms = phrase_forms(stripped)
+    broad = _prefer_published(
+        _score_catalog(catalog, forms, [get_embedding(f) for f in forms]), MIN_CONFIDENCE)
+    for row, score in broad:
+        if score < MIN_CONFIDENCE:
+            break
+        if (not row.get("is_published") or row.get("is_active") is False
+                or _contradiction_kind(phrase, row["name_en"]) != "qualifier_dropped"):
+            continue
+        return ResolutionResult(
+            _match_from_row(row, score, dropped_qualifier=negation.group(0).strip(),
+                            related=_related_with_qualifier(scored, phrase, row)),
+            "resolved", [])
+    return None
+
+
+def _related_with_qualifier(scored, phrase, broader_row, limit: int = 3) -> list:
+    """Published series that carry the qualifier the question asked for.
+
+    For "non-oil spending": Non-Hydrocarbon Revenue. Not an answer, which is why
+    it is not the match — but it is where the non-oil split the reader wanted
+    actually lives, and worth naming.
+
+    Only series under the same indicator as the broader match, or ones that
+    matched strongly on their own. Revenue sits beside expenditure in State
+    Budget Performance; Non-Hydrocarbon Real GDP also says "non-hydrocarbon",
+    and naming it under a spending question is noise."""
+    negated = _negated_words(phrase.lower()) - {"non", "excluding", "غير"}
+    parent = broader_row.get("indicator_id")
+    names = []
+    for row, score in scored:
+        if not row.get("is_published"):
+            continue
+        if row.get("indicator_id") != parent and score < MIN_CONFIDENCE:
+            continue
+        name = row["name_en"].strip()
+        if name in names or not _NEGATED.search(name.lower()):
+            continue
+        if negated & _negated_words(name.lower()):
+            names.append(name)
+        if len(names) >= limit:
+            break
+    return names
+
+
+# The closest names offered when nothing matched. Higher than NEAR_MISS_FLOOR:
+# those are shown to the picker model, which can decline; these are shown to a
+# person, and a list of nonsense reads worse than a plain refusal.
+SUGGESTION_FLOOR = 0.55
+SUGGESTION_COUNT = 3
+
+
+def _with_closest(result, scored, phrase, language):
+    """A not-found result that names the closest published indicators.
+
+    "No indicator matches X — name the metric more plainly" left the reader to
+    guess the catalogue's vocabulary. The resolver has already ranked it, so
+    the nearest real names are offered as choices, exactly as an ambiguous
+    match already is. Only when the refusal is about confidence: a
+    contradiction refusal already names the indicator it would not substitute.
+
+    Each suggestion must share a word the catalogue discriminates on with the
+    question, so "number of penguins" — which scores 0.60 against Number of
+    Qatari Jobs on "number" alone — still gets the plain refusal.
+    """
+    if not scored or scored[0][1] >= MIN_CONFIDENCE:
+        return result
+    # From the NORMALIZED phrase: the raw question still says "Qatar", and
+    # "Qatar" would make every "Qatari …" indicator look related.
+    terms = _discriminating_terms()
+    normalized = normalize_indicator_phrase(phrase)
+    asked = {w for form in (normalized, vocabulary_form(normalized))
+             for w in re.findall(r"[\w؀-ۿ]{3,}", form.lower())
+             if w not in _CONTENTLESS and not w.isdigit()
+             and any(_same_word(w, t) for t in terms)}
+    if not asked:
+        return result
+    picks = []
+    for row, score in scored:
+        if score < SUGGESTION_FLOOR:
+            break
+        name = row["name_en"].strip()
+        if not row.get("is_published") or any(p.name_en.strip() == name for p in picks):
+            continue
+        words = set(re.findall(r"[\w؀-ۿ]{3,}", (name + " " + (row.get("name_ar") or "")).lower()))
+        if any(_same_word(a, w) for a in asked for w in words):
+            picks.append(_match_from_row(row, score))
+        if len(picks) >= SUGGESTION_COUNT:
+            break
+    if not picks:
+        return result
+    names = ", ".join(f'"{p.name_en.strip()}"' for p in picks)
+    return ResolutionResult(None, "not_found", picks,
+                            msg("indicator_not_found_closest", language,
+                                phrase=phrase, names=names))
+
+
+def same_named_siblings(match: IndicatorMatch) -> list:
+    """Other published series with exactly this name, under another indicator.
+
+    "Total Expenditure" is quarterly under State Budget Performance and yearly
+    under Expenditure Breakdown. Which one a question means depends on the
+    period it asks about, which the resolver does not see — so the caller,
+    which does, chooses between them."""
+    name = (match.name_en or "").strip().lower()
+    return [_match_from_row(r, match.confidence) for r in _fetch_catalog()
+            if r["indicator_detail_id"] != match.indicator_detail_id
+            and (r.get("name_en") or "").strip().lower() == name
+            and r.get("is_published") and (r.get("data_point_count") or 0) > 0]
 
 
 # The band where the embeddings ranked something sensibly but not confidently.
@@ -880,7 +1183,7 @@ def _score_catalog(catalog, phrases, phrase_embeddings):
     # rather than a Python loop per pair. Same arithmetic, ~220x faster.
     views = []
     for row in catalog:
-        plain, enriched = name_embeddings[row["name_en"]]
+        plain, enriched = name_embeddings[_row_key(row)]
         views.append(plain)
         views.append(enriched)
     sims = cosine_matrix(phrase_embeddings, views) if views else []
@@ -891,12 +1194,12 @@ def _score_catalog(catalog, phrases, phrase_embeddings):
         # not be: tuples compare on their first element, so a form scoring
         # (0.9, 0.1) would beat one scoring (0.8, 0.95) and the 0.95 would be
         # lost.
-        best_by_row[row["name_en"]] = max(
+        best_by_row[_row_key(row)] = max(
             (max(form[2 * index], form[2 * index + 1]) for form in sims),
             default=0.0)
 
     def score(row):
-        embed_sim = best_by_row[row["name_en"]]
+        embed_sim = best_by_row[_row_key(row)]
         # Compare against the Arabic name too. Only name_en was ever fetched or
         # scored, so for an Arabic question the string half of the score was
         # dead weight — Arabic script against Latin scores ~0 for every
@@ -971,35 +1274,38 @@ def _resolve_scored(scored, phrase, language="en"):
         # layer, exactly as the retriever already prefers published_data_points
         # over raw indicator_values. The low-confidence disclosure still fires
         # if the winner is below CONFIDENT_MATCH.
-        tied = [(r, sc) for r, sc in scored
-                if top_score - sc < MIN_GAP_TO_RUNNER_UP and sc >= MIN_CONFIDENCE]
+        #
+        # Two more things are not ambiguity. A candidate that contradicts the
+        # question is not a reading of it: "non-oil spending" tied Non-Hydrocarbon
+        # Revenue with Total Expenditure and offered both, when neither is what
+        # was asked. And two series with the SAME name ("Total Expenditure" under
+        # two indicators) are one choice for the user, not two identical chips;
+        # which of them can answer is decided later, from the period asked about.
+        tied, seen = [], set()
+        for r, sc in scored:
+            if top_score - sc >= MIN_GAP_TO_RUNNER_UP or sc < MIN_CONFIDENCE:
+                continue
+            name = r["name_en"].strip().lower()
+            if name in seen or _has_contradiction(phrase, r["name_en"]):
+                continue
+            seen.add(name)
+            tied.append((r, sc))
         published_tied = [(r, sc) for r, sc in tied if r.get("is_published")]
-        if len(published_tied) == 1:
-            top_row, top_score = published_tied[0]
+        if len(tied) <= 1 or len(published_tied) == 1:
+            # One fair reading, or none — in which case the top match goes on
+            # to the contradiction check below, which refuses or rescues it.
+            if tied:
+                top_row, top_score = (published_tied or tied)[0]
         else:
             # Genuinely ambiguous — surface the real candidates rather than picking one.
-            candidates = [
-                IndicatorMatch(r["indicator_detail_id"], r["indicator_id"], r["name_en"],
-                                r["is_published"], r["published_detail_id"],
-                                r["is_active"], r["unit_en"], r.get("unit_ar"), r["polarity_en"],
-                                r["data_source_en"], r["format"],
-                                r["definition_en"], r["definition_ar"], s, r.get("name_ar"))
-                for r, s in scored[:3]
-            ]
+            candidates = [_match_from_row(r, s) for r, s in tied[:3]]
             names = ", ".join(f'"{c.name_en.strip()}"' for c in candidates)
             return ResolutionResult(
                 None, "ambiguous", candidates,
                 msg("indicator_ambiguous", language, phrase=phrase, names=names),
             )
 
-    match = IndicatorMatch(
-        top_row["indicator_detail_id"], top_row["indicator_id"], top_row["name_en"],
-        top_row["is_published"], top_row["published_detail_id"],
-        top_row["is_active"], top_row["unit_en"], top_row.get("unit_ar"), top_row["polarity_en"],
-        top_row["data_source_en"], top_row["format"],
-        top_row["definition_en"], top_row["definition_ar"],
-        top_score, top_row.get("name_ar"),
-    )
+    match = _match_from_row(top_row, top_score)
 
     if _has_contradiction(phrase, match.name_en):
         # Before refusing: the catalogue may hold the indicator that was
@@ -1023,14 +1329,7 @@ def _resolve_scored(scored, phrase, language="en"):
                 msg("indicator_contradiction", language, phrase=phrase,
                      matched=match.name_en.strip()),
             )
-        match = IndicatorMatch(
-            rescued["indicator_detail_id"], rescued["indicator_id"], rescued["name_en"],
-            rescued["is_published"], rescued["published_detail_id"],
-            rescued["is_active"], rescued["unit_en"], rescued.get("unit_ar"),
-            rescued["polarity_en"], rescued["data_source_en"], rescued["format"],
-            rescued["definition_en"], rescued["definition_ar"],
-            next(sc for r, sc in scored[1:] if r is rescued), rescued.get("name_ar"),
-        )
+        match = _match_from_row(rescued, next(sc for r, sc in scored[1:] if r is rescued))
 
     if match.is_active is False:
         return ResolutionResult(

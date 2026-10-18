@@ -30,7 +30,7 @@ from app.core.messages import (msg, detect_language, answers_in_language,
 from app.resolvers.indicator_resolver import (resolve_indicator, has_usable_definition,
                                                ResolutionResult,
                                                resembles_catalogue_name, has_identifying_content,
-                                               names_nothing_in_catalogue)
+                                               names_nothing_in_catalogue, same_named_siblings)
 from app.resolvers.country_resolver import resolve_countries, display_country
 from app.resolvers.period_resolver import (parse_period_expression, parse_explicit_frequency,
                                             choose_granularity, parse_period_pair,
@@ -1154,7 +1154,10 @@ def handle_message(user_message: str, conversation_context: str = "",
             return _finish(payload, language, session_state, [],
                             question=user_message)
         payload = {"ok": False, "message": resolution.message}
-        if resolution.status == "ambiguous" and resolution.candidates:
+        # Candidates come with an ambiguous match, and with a not-found one when
+        # the catalogue holds something close (indicator_not_found_closest).
+        # Either way they are choices the user can pick from.
+        if resolution.candidates:
             names = [c.name_en.strip() for c in resolution.candidates]
             payload["facts"] = {"candidates": names}
             session_state["last_ambiguous_candidates"] = names
@@ -1171,7 +1174,7 @@ def handle_message(user_message: str, conversation_context: str = "",
         return _finish(payload, language, session_state, [],
                         question=user_message)
 
-    match = resolution.match
+    match = _prefer_sibling_with_data(resolution.match, intent, period, user_message)
     # The slowest step the reader can be told anything useful about: it names the
     # indicator the rest of the answer will be about, so a wrong match is visible
     # before the retrieval and the composition have been paid for.
@@ -1476,6 +1479,16 @@ def handle_message(user_message: str, conversation_context: str = "",
         facts_now["balance_position"] = ("surplus" if value > 0
                                          else "deficit" if value < 0 else "balanced")
 
+    # The question asked for a breakdown SCEAI does not publish and this is the
+    # series it narrows (see _broader_match). Stated in the facts, so the answer
+    # says what is missing before giving a figure for something broader.
+    if payload.get("ok") and match.dropped_qualifier and payload.get("facts") is not None:
+        payload["facts"]["breakdown_not_published"] = {
+            "asked_for": f"{match.dropped_qualifier} {match.display_name(language)}".strip(),
+            "reported_instead": match.display_name(language),
+            "related_published": list(match.related or []),
+        }
+
     # Flag a shaky resolution so _finish can disclose it. The threshold sits
     # above MIN_CONFIDENCE (0.55) deliberately: clearing the bar to answer at
     # all is not the same as being sure enough to answer silently.
@@ -1490,6 +1503,49 @@ def handle_message(user_message: str, conversation_context: str = "",
 
     return _finish(payload, language, session_state, citations,
                         question=user_message)
+
+
+def _prefer_sibling_with_data(match, intent, period, user_message):
+    """Of several published series with the same name, the one that can answer.
+
+    "Total Expenditure" is quarterly under State Budget Performance and yearly
+    under Expenditure Breakdown. The resolver cannot tell them apart by name,
+    and whichever it returned decided whether "spending in 2024-Q4" was
+    answered or refused for having no quarterly data — while the other series
+    held that exact quarter. The question's frequency and window decide it.
+    """
+    if match is None:
+        return match
+    siblings = same_named_siblings(match)
+    if not siblings:
+        return match
+    wanted = (parse_explicit_frequency(intent.get("explicit_frequency"))
+              or granularity_from_labels(period.raw or user_message))
+
+    def can_answer(candidate):
+        published_id = candidate.published_detail_id if candidate.is_published else None
+        available = retriever.get_available_granularities(published_id,
+                                                           candidate.indicator_detail_id)
+        if wanted and wanted not in available:
+            return False
+        granularity = wanted or choose_granularity(None, available)
+        if not granularity:
+            return False
+        if not (period.start_date or period.end_date):
+            return True
+        return bool(retriever.get_series(candidate.indicator_detail_id, published_id,
+                                         granularity, start_date=period.start_date,
+                                         end_date=period.end_date))
+
+    if can_answer(match):
+        return match
+    for sibling in siblings:
+        if can_answer(sibling):
+            # What the resolver established about the QUESTION travels with it.
+            sibling.dropped_qualifier = match.dropped_qualifier
+            sibling.related = match.related
+            return sibling
+    return match
 
 
 def _dispatch_computation(ctype, intent, match, published_detail_id, granularity, period,

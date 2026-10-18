@@ -33,28 +33,21 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from openai import OpenAI
 from sqlalchemy import create_engine, text
 
+# The resolver's own function, not a copy. A copy lived here and drifted — it
+# never stripped the definition's HTML, then missed the parent indicator name —
+# and when the two disagree the stored vectors are for texts the resolver never
+# asks about, so every lookup misses and it shows up as slowness, not an error.
+from app.resolvers.indicator_resolver import _embedding_text
+
 # TEI reports max_client_batch_size 32 and rejects anything larger outright.
 BATCH = 32
 
-# Mirrors indicator_resolver._embedding_text. Kept in step with it: if the two
-# disagree, the stored vectors are for texts the resolver never asks about and
-# every lookup misses, which shows up as slowness rather than as an error.
-DEFINITION_CHARS = 240
-
 CATALOG_SQL = """
-SELECT d.name_en, d.definition_en
+SELECT d.name_en, d.definition_en, i.name_en AS parent_name_en
 FROM indicator_details d
 JOIN indicators i ON i.indicator_id = d.indicator_id
 WHERE d.name_en IS NOT NULL
 """
-
-
-def embedding_text(name: str, definition: str) -> str:
-    name = (name or "").strip()
-    definition = (definition or "").strip()
-    if not definition or definition.lower() == name.lower():
-        return name
-    return f"{name}. {definition[:DEFINITION_CHARS]}"
 
 
 def main():
@@ -79,10 +72,13 @@ def main():
     # is embedded once, not twice.
     texts = []
     for row in rows:
-        name = (row[0] or "").strip()
+        entry = dict(row._mapping)
+        name = (entry["name_en"] or "").strip()
         if not name:
             continue
-        for value in (name, embedding_text(name, row[1])):
+        # The two views the resolver scores: the bare name (embedded as stored,
+        # unstripped) and the enriched text.
+        for value in (entry["name_en"], _embedding_text(entry)):
             if value not in texts:
                 texts.append(value)
 

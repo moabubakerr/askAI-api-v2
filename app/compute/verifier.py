@@ -310,6 +310,10 @@ _T = {
     "assistant_covers": {"en": " I cover {n} published indicators, across: {sectors}.",
                          "ar": " أغطي {n} مؤشرًا منشورًا، في القطاعات التالية: {sectors}."},
     # Which side of zero a balance is on — the answer to "is it still a surplus?"
+    "breakdown_not_published": {
+        "en": "SCEAI doesn't publish \"{asked}\" as a separate series; this is {instead}.\n\n",
+        "ar": "لا ينشر المجلس \"{asked}\" كسلسلة مستقلة؛ هذه بيانات {instead}.\n\n",
+    },
     "balance_surplus": {"en": " That is a surplus.", "ar": " وهذا فائض."},
     "balance_deficit": {"en": " That is a deficit.", "ar": " وهذا عجز."},
     "balance_balanced": {"en": " The balance is exactly zero.", "ar": " والميزان متوازن تماماً."},
@@ -566,11 +570,18 @@ def render_template_fallback(facts_payload: dict, language: str = "en") -> str:
     language = "ar" if str(language).lower().startswith("ar") else "en"
     if facts_payload.get("ok") is False:
         return facts_payload.get("message") or _t("no_data", language)
-    position = (facts_payload.get("facts") or {}).get("balance_position")
+    facts = facts_payload.get("facts") or {}
+    body = _render_template(facts_payload, language)
+    position = facts.get("balance_position")
     if position in ("surplus", "deficit", "balanced"):
-        return (_render_template(facts_payload, language).rstrip()
-                + _t(f"balance_{position}", language))
-    return _render_template(facts_payload, language)
+        body = body.rstrip() + _t(f"balance_{position}", language)
+    # Said first, as the Composer is told to: a total presented under a question
+    # about a breakdown would read as the breakdown.
+    gap = facts.get("breakdown_not_published")
+    if gap:
+        body = _t("breakdown_not_published", language, asked=gap.get("asked_for", ""),
+                  instead=gap.get("reported_instead", "")) + body
+    return body
 
 
 def _render_template(facts_payload: dict, language: str) -> str:
