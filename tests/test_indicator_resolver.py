@@ -77,6 +77,22 @@ def test_two_series_with_one_name_are_not_offered_as_a_choice(catalog, scores):
     assert result.match.name_en == "Total Expenditure"
 
 
+def test_a_tie_goes_to_the_candidate_that_does_not_narrow_the_question(catalog, scores):
+    # The real scores for "government spending" (scripts/diagnose_resolver.py on
+    # the VM). The picker chose Current Expenditure; nothing asked for "current".
+    scores["plain"] = {"Expenditure": 0.8115, "Current Expenditure": 0.762,
+                       "Total Expenditure": 0.760, "Government Revenues": 0.678}
+    result = resolve_indicator("government spending")
+    assert result.status == "resolved"
+    assert result.match.name_en == "Expenditure"
+
+
+def test_a_qualifier_the_user_named_is_not_counted_as_narrowing(catalog, scores):
+    scores["plain"] = {"Current Expenditure": 0.80, "Expenditure": 0.78}
+    result = resolve_indicator("current expenditure")
+    assert result.match.name_en == "Current Expenditure"
+
+
 # --- the non-oil spending question -------------------------------------------
 
 def test_non_oil_spending_answers_with_total_and_names_the_gap(catalog, scores):

@@ -26,6 +26,8 @@ def _row(detail_id, name, parent=None, published=True, points=10, name_ar=None):
 CATALOG = [
     _row("gdp", "Real GDP"),
     _row("nh-gdp", "Non-Hydrocarbon Real GDP"),
+    _row("exp", "Expenditure", "Revenue vs Expenditure"),
+    _row("cur-exp", "Current Expenditure", "Expenditure Breakdown"),
     _row("te-sbp", "Total Expenditure", "State Budget Performance"),
     _row("te-eb", "Total Expenditure", "Expenditure Breakdown"),
     _row("sal", "Salaries", "State Budget Performance"),

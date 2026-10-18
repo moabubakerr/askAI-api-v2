@@ -256,6 +256,19 @@ def _dropped_discriminators(phrase: str, matched_name: str) -> list[str]:
             and not any(_same_word(w, m) for m in matched_words)]
 
 
+def _added_discriminators(phrase: str, matched_name: str) -> list[str]:
+    """Words the catalogue discriminates on that the match carries and the
+    question does not — "current" in Current Expenditure, asked as "government
+    spending". The question is read in every form the resolver scores, so the
+    catalogue's own term for a word the user used is not counted as added."""
+    terms = _discriminating_terms()
+    asked = {w for form in phrase_forms(phrase)
+             for w in re.findall(r"[\w؀-ۿ]{3,}", form.lower())}
+    return [w for w in re.findall(r"[\w؀-ۿ]{3,}", matched_name.lower())
+            if w in terms and w not in _CONTENTLESS and not w.isdigit()
+            and not any(_same_word(w, a) for a in asked)]
+
+
 def _negated_words(text_l: str) -> set:
     """Every word inside a negation in the text, in both vocabularies.
 
@@ -1290,6 +1303,20 @@ def _resolve_scored(scored, phrase, language="en"):
                 continue
             seen.add(name)
             tied.append((r, sc))
+        # And a candidate that NARROWS the question is not a reading of it while
+        # one that does not is tied with it. "government spending" tied
+        # Expenditure, Current Expenditure and Total Expenditure; the model
+        # picked Current Expenditure — a component, published yearly only — and
+        # a 2024-Q4 question went unanswered. Nothing in the question said
+        # "current". The mirror of the dropped-qualifier rule: not removing a
+        # distinction the user drew, and not adding one they didn't. Each filter
+        # applies only when something survives it — "government" is in none of
+        # the spending series, and that cannot leave the tie with no one in it.
+        for keeps in (lambda r: not _dropped_discriminators(phrase, r["name_en"]),
+                      lambda r: not _added_discriminators(phrase, r["name_en"])):
+            narrowed = [(r, sc) for r, sc in tied if keeps(r)]
+            if narrowed:
+                tied = narrowed
         published_tied = [(r, sc) for r, sc in tied if r.get("is_published")]
         if len(tied) <= 1 or len(published_tied) == 1:
             # One fair reading, or none — in which case the top match goes on
